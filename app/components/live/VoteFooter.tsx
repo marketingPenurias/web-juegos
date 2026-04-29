@@ -24,10 +24,10 @@ export function VoteFooter({
 	const cannotConfirm = disabled || !hasSelection;
 
 	return (
-		<footer className="live-fade px-6 pb-6 pt-4 relative z-30">
+		<footer className="live-fade px-6 pb-3 pt-3 relative z-30 shrink-0 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-900/80">
 			<div className="absolute inset-0 bg-linear-to-t from-black via-zinc-950/90 to-transparent -z-10 pointer-events-none" />
 
-			<p className="text-center text-[11px] uppercase tracking-widest text-zinc-500 font-bold mb-3">
+			<p className="text-center text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2">
 				{disabled
 					? t("live.alreadyVoted")
 					: hasSelection
@@ -41,7 +41,7 @@ export function VoteFooter({
 					onClick={() => onConfirm("free")}
 					disabled={cannotConfirm}
 					className={cn(
-						"h-[68px] rounded-[20px] bg-[#0f0f12] border flex flex-col items-center justify-center gap-0.5 transition-colors relative overflow-hidden focus-visible:ring-2 focus-visible:ring-cyan-400",
+						"h-14 rounded-2xl bg-[#0f0f12] border flex flex-col items-center justify-center gap-0.5 transition-colors relative overflow-hidden focus-visible:ring-2 focus-visible:ring-cyan-400",
 						cannotConfirm
 							? "border-zinc-800 opacity-50 cursor-not-allowed"
 							: "border-cyan-400/60 active:bg-zinc-800",
@@ -61,7 +61,7 @@ export function VoteFooter({
 					onClick={() => onConfirm("boost")}
 					disabled={cannotBoost}
 					className={cn(
-						"h-[68px] rounded-[20px] bg-linear-to-br from-amber-300 via-amber-500 to-amber-700 flex flex-col items-center justify-center gap-0.5 relative overflow-hidden focus-visible:ring-2 focus-visible:ring-amber-300",
+						"h-14 rounded-2xl bg-linear-to-br from-amber-300 via-amber-500 to-amber-700 flex flex-col items-center justify-center gap-0.5 relative overflow-hidden focus-visible:ring-2 focus-visible:ring-amber-300",
 						cannotBoost
 							? "opacity-60 cursor-not-allowed grayscale-[0.5]"
 							: "shadow-[0_0_20px_rgba(245,158,11,0.5)] active:scale-95 transition-transform",
@@ -81,7 +81,7 @@ export function VoteFooter({
 							{t("live.boostCost", { n: boostCost })}
 						</span>
 					</div>
-					<div className="absolute inset-0 rounded-[20px] ring-1 ring-inset ring-white/30 pointer-events-none" />
+					<div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/30 pointer-events-none" />
 				</button>
 			</div>
 		</footer>

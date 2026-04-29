@@ -51,7 +51,7 @@ export function HistoryDrawer({ open, onClose }: Props) {
 	return (
 		<div
 			ref={overlayRef}
-			className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-end justify-center"
+			className="fixed inset-0 z-90 bg-black/60 backdrop-blur-sm flex items-end justify-center"
 			onClick={onClose}
 			role="presentation"
 		>
@@ -60,12 +60,13 @@ export function HistoryDrawer({ open, onClose }: Props) {
 				role="dialog"
 				aria-modal="true"
 				aria-label={t("history.title")}
-				className="w-full max-w-md bg-zinc-950 border-t border-zinc-800 rounded-t-[28px] p-5 max-h-[75dvh] flex flex-col shadow-[0_-20px_60px_rgba(0,0,0,0.7)]"
+				className="w-full max-w-md bg-zinc-950 border-t border-zinc-800 rounded-t-[28px] pt-3 px-5 pb-5 h-[75dvh] flex flex-col min-h-0 shadow-[0_-20px_60px_rgba(0,0,0,0.7)]"
 				onClick={(e) => e.stopPropagation()}
+				onTouchMove={(e) => e.stopPropagation()}
 			>
-				<div className="w-12 h-1.5 bg-zinc-700 rounded-full mx-auto mb-4" />
+				<div className="w-12 h-1.5 bg-zinc-700 rounded-full mx-auto mb-3 shrink-0" />
 
-				<div className="flex items-center justify-between mb-4">
+				<div className="flex items-center justify-between mb-4 shrink-0">
 					<h2 className="text-xl font-black italic tracking-tight text-white">
 						{t("history.title")}
 					</h2>
@@ -84,7 +85,10 @@ export function HistoryDrawer({ open, onClose }: Props) {
 						{t("history.empty")}
 					</p>
 				) : (
-					<ul className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-2 pr-1">
+					<ul
+						className="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col gap-2 pr-1 pb-2"
+						style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}
+					>
 						{transactions.map((tx) => {
 							const positive = tx.delta >= 0;
 							return (

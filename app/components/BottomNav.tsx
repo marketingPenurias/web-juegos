@@ -35,7 +35,8 @@ export function BottomNav() {
 	return (
 		<div
 			ref={containerRef}
-			className="bg-zinc-950/80 backdrop-blur-xl border-t border-zinc-800/50 pb-8 sm:pb-6 pt-3 px-4 relative z-50"
+			className="bg-zinc-950/85 backdrop-blur-xl border-t border-zinc-800/50 pt-1.5 px-2 relative z-50 shrink-0 pb-safe"
+			style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)" }}
 		>
 			<div className="flex justify-around items-center">
 				{ITEMS.map(({ id, labelKey, Icon }) => {
@@ -49,26 +50,25 @@ export function BottomNav() {
 							aria-label={label}
 							aria-current={active ? "page" : undefined}
 							className={cn(
-								"nav-item flex flex-col items-center gap-1 transition-colors px-3 py-1 rounded-xl",
+								"nav-item flex flex-col items-center gap-0.5 transition-colors px-3 py-1 rounded-xl",
 								active
 									? "text-cyan-400"
 									: "text-zinc-500 hover:text-zinc-300 active:text-zinc-200",
 							)}
 						>
-							<div className="relative w-6 h-6">
+							<div className="relative w-5 h-5">
 								{active && (
 									<span className="absolute inset-0 bg-cyan-400/30 rounded-full blur-md" />
 								)}
-								<Icon className="relative z-10 w-6 h-6" aria-hidden="true" />
+								<Icon className="relative z-10 w-5 h-5" aria-hidden="true" />
 							</div>
-							<span className="text-[10px] font-bold tracking-wider">
+							<span className="text-[9px] font-bold tracking-wider">
 								{label}
 							</span>
 						</button>
 					);
 				})}
 			</div>
-			<div className="w-[120px] h-1.5 bg-zinc-800 rounded-full mx-auto mt-5" />
 		</div>
 	);
 }
