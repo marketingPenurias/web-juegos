@@ -1,6 +1,13 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Beer, RotateCcw, Sparkles } from "lucide-react";
+import {
+	ArrowLeft,
+	Beer,
+	Minus,
+	Plus,
+	RotateCcw,
+	Sparkles,
+} from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { TokenBadge } from "../components/TokenBadge";
@@ -13,7 +20,15 @@ const SECTOR_COLORS = [
 	"#FF3CAC",
 	"#9D4EDD",
 	"#FF7A00",
+	"#00E0A4",
+	"#FF6B6B",
 ];
+
+const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 8;
+// Keep landing well inside a sector — never on the border between two.
+// Final angle = sector midpoint + jitter * sectorAngle, jitter in (-MAX, +MAX).
+const SAFE_JITTER = 0.32;
 
 export function RuletaRondas() {
 	const { t } = useTranslation();
@@ -48,10 +63,22 @@ export function RuletaRondas() {
 		setFriends(next);
 	};
 
+	const addPlayer = () => {
+		if (friends.length >= MAX_PLAYERS) return;
+		setFriends([...friends, ""]);
+		setLoserIndex(null);
+	};
+
+	const removePlayer = () => {
+		if (friends.length <= MIN_PLAYERS) return;
+		setFriends(friends.slice(0, -1));
+		setLoserIndex(null);
+	};
+
 	const handleSpin = () => {
 		if (spinning || !wheelRef.current) return;
 		const validFriends = friends.filter((f) => f.trim().length > 0);
-		if (validFriends.length < 2) return;
+		if (validFriends.length < MIN_PLAYERS) return;
 
 		setSpinning(true);
 		setLoserIndex(null);
@@ -61,8 +88,11 @@ export function RuletaRondas() {
 		const targetIndex = Math.floor(Math.random() * sectorCount);
 		const baseTurns = 6 + Math.floor(Math.random() * 3);
 
+		// Land safely INSIDE the sector (never on the seam between two).
+		const jitter = (Math.random() * 2 - 1) * SAFE_JITTER * sectorAngle;
+		const sectorMid = targetIndex * sectorAngle + sectorAngle / 2 + jitter;
+
 		const currentRot = totalRotationRef.current;
-		const sectorMid = targetIndex * sectorAngle + sectorAngle / 2;
 		const targetRot = baseTurns * 360 + (360 - sectorMid);
 		const finalRotation = currentRot + targetRot;
 
@@ -86,13 +116,16 @@ export function RuletaRondas() {
 							ease: "back.out(1.8)",
 						},
 					);
-					gsap.to(loserRef.current.querySelector(".loser-name"), {
-						opacity: 0.3,
-						duration: 0.5,
-						yoyo: true,
-						repeat: -1,
-						ease: "sine.inOut",
-					});
+					const nameNode = loserRef.current.querySelector(".loser-name");
+					if (nameNode) {
+						gsap.to(nameNode, {
+							opacity: 0.3,
+							duration: 0.5,
+							yoyo: true,
+							repeat: -1,
+							ease: "sine.inOut",
+						});
+					}
 				}
 			},
 		});
@@ -100,7 +133,10 @@ export function RuletaRondas() {
 
 	const reset = () => {
 		setLoserIndex(null);
-		if (loserRef.current) gsap.killTweensOf(loserRef.current.querySelector(".loser-name"));
+		if (loserRef.current) {
+			const nameNode = loserRef.current.querySelector(".loser-name");
+			if (nameNode) gsap.killTweensOf(nameNode);
+		}
 	};
 
 	const sectorAngle = 360 / friends.length;
@@ -111,9 +147,9 @@ export function RuletaRondas() {
 	return (
 		<div
 			ref={containerRef}
-			className="flex-1 flex flex-col relative z-20 h-full overflow-y-auto no-scrollbar bg-black"
+			className="flex-1 flex flex-col relative z-20 min-h-0 overflow-y-auto no-scrollbar bg-black"
 		>
-			<header className="px-6 pt-12 sm:pt-8 pb-2 flex items-center justify-between rul-fade">
+			<header className="px-6 pt-12 sm:pt-8 pb-2 flex items-center justify-between rul-fade shrink-0">
 				<button
 					type="button"
 					onClick={() => setScreen("hub")}
@@ -133,41 +169,68 @@ export function RuletaRondas() {
 				<TokenBadge />
 			</header>
 
-			<section className="px-6 pt-3 pb-2 rul-fade">
+			<section className="px-6 pt-3 pb-2 rul-fade shrink-0">
 				<p className="text-zinc-400 text-sm text-center">
 					{t("ruleta.instructions")}
 				</p>
 			</section>
 
-			<section className="px-6 pt-4 pb-2 grid grid-cols-2 gap-2 rul-fade">
-				{friends.map((name, i) => (
-					<input
-						key={i}
-						type="text"
-						value={name}
-						onChange={(e) => updateName(i, e.target.value)}
-						maxLength={16}
-						placeholder={t("ruleta.friend", { n: i + 1 })}
-						aria-label={t("ruleta.friendName", { n: i + 1 })}
-						className={cn(
-							"h-11 rounded-xl bg-zinc-900/80 border px-3 text-sm font-bold text-white placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-lime-400",
-							loserIndex === i
-								? "border-red-500 text-red-400"
-								: "border-zinc-800",
-						)}
-						disabled={spinning}
-					/>
-				))}
+			<section className="px-6 pt-3 pb-2 rul-fade shrink-0">
+				<div className="flex items-center justify-between mb-2">
+					<span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">
+						{t("ruleta.players", { n: friends.length })}
+					</span>
+					<div className="inline-flex items-center gap-1">
+						<button
+							type="button"
+							onClick={removePlayer}
+							disabled={friends.length <= MIN_PLAYERS || spinning}
+							aria-label={t("ruleta.removePlayer")}
+							className="w-7 h-7 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 active:scale-95 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-cyan-400"
+						>
+							<Minus className="w-3.5 h-3.5" aria-hidden="true" />
+						</button>
+						<button
+							type="button"
+							onClick={addPlayer}
+							disabled={friends.length >= MAX_PLAYERS || spinning}
+							aria-label={t("ruleta.addPlayer")}
+							className="w-7 h-7 rounded-full bg-lime-500 text-black flex items-center justify-center active:scale-95 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-lime-300"
+						>
+							<Plus className="w-3.5 h-3.5" aria-hidden="true" />
+						</button>
+					</div>
+				</div>
+				<div className="grid grid-cols-2 gap-2">
+					{friends.map((name, i) => (
+						<input
+							key={i}
+							type="text"
+							value={name}
+							onChange={(e) => updateName(i, e.target.value)}
+							maxLength={16}
+							placeholder={t("ruleta.friend", { n: i + 1 })}
+							aria-label={t("ruleta.friendName", { n: i + 1 })}
+							className={cn(
+								"h-11 rounded-xl bg-zinc-900/80 border px-3 text-sm font-bold text-white placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-lime-400",
+								loserIndex === i
+									? "border-red-500 text-red-400"
+									: "border-zinc-800",
+							)}
+							disabled={spinning}
+						/>
+					))}
+				</div>
 			</section>
 
-			<main className="flex-1 flex flex-col items-center justify-center px-6 py-4 relative">
-				<div className="relative w-[320px] h-[320px] flex items-center justify-center">
+			<main className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 py-4 relative">
+				<div className="relative w-[300px] h-[300px] flex items-center justify-center">
 					<div className="absolute inset-0 rounded-full bg-lime-500/20 blur-3xl pointer-events-none" />
 					<div className="absolute inset-0 rounded-full border border-lime-500/30 shadow-[0_0_45px_rgba(57,255,20,0.45)]" />
 					<svg
 						ref={wheelRef}
 						viewBox="0 0 300 300"
-						className="w-[300px] h-[300px] drop-shadow-[0_0_30px_rgba(125,249,255,0.45)]"
+						className="w-[280px] h-[280px] drop-shadow-[0_0_30px_rgba(125,249,255,0.45)]"
 						style={{ transform: "rotate(0deg)" }}
 						aria-label={t("ruleta.wheelLabel")}
 					>
@@ -204,13 +267,13 @@ export function RuletaRondas() {
 										y={labelPoint.y}
 										textAnchor="middle"
 										dominantBaseline="middle"
-										fontSize="14"
+										fontSize={friends.length > 6 ? 11 : 13}
 										fontWeight="900"
 										fill={color}
 										transform={`rotate(${labelAngle + 90} ${labelPoint.x} ${labelPoint.y})`}
 										filter="url(#neonShadow)"
 									>
-										{(name || `?`).slice(0, 10)}
+										{(name || `?`).slice(0, friends.length > 6 ? 8 : 10)}
 									</text>
 								</g>
 							);
@@ -238,24 +301,18 @@ export function RuletaRondas() {
 				</div>
 
 				{loserIndex !== null && (
-					<div
-						ref={loserRef}
-						className="mt-6 text-center"
-						aria-live="polite"
-					>
+					<div ref={loserRef} className="mt-6 text-center" aria-live="polite">
 						<p className="text-[10px] uppercase tracking-[0.3em] text-red-400 font-bold">
 							{t("ruleta.todayPays")}
 						</p>
-						<p
-							className="loser-name text-3xl font-black italic tracking-tight text-red-500 drop-shadow-[0_0_20px_rgba(239,68,68,0.7)]"
-						>
+						<p className="loser-name text-3xl font-black italic tracking-tight text-red-500 drop-shadow-[0_0_20px_rgba(239,68,68,0.7)]">
 							{friends[loserIndex] || t("ruleta.friend", { n: loserIndex + 1 })}
 						</p>
 					</div>
 				)}
 			</main>
 
-			<footer className="px-6 pb-8 pt-2 flex flex-col gap-3 rul-fade">
+			<footer className="px-6 pb-8 pt-2 flex flex-col gap-3 rul-fade shrink-0">
 				{loserIndex !== null ? (
 					<>
 						<button

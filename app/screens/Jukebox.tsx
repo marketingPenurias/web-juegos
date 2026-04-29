@@ -55,9 +55,19 @@ export function Jukebox() {
 	}, [songRequests, query]);
 
 	const handleRequest = (id: string) => {
-		setRequested((prev) => new Set(prev).add(id));
-		setTone("default");
-		setToast(t("jukebox.toastRequested"));
+		setRequested((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) {
+				next.delete(id);
+				setTone("default");
+				setToast(t("jukebox.toastCancelled"));
+			} else {
+				next.add(id);
+				setTone("default");
+				setToast(t("jukebox.toastRequested"));
+			}
+			return next;
+		});
 	};
 
 	const handleBoost = (id: string) => {
@@ -194,12 +204,12 @@ export function Jukebox() {
 									<button
 										type="button"
 										onClick={() => handleRequest(song.id)}
-										disabled={requested.has(song.id)}
+										aria-pressed={requested.has(song.id)}
 										className={cn(
-											"h-8 px-3 rounded-full text-[11px] font-black uppercase tracking-widest border transition-colors focus-visible:ring-2 focus-visible:ring-cyan-400 inline-flex items-center gap-1",
+											"h-8 px-3 rounded-full text-[11px] font-black uppercase tracking-widest border transition-colors focus-visible:ring-2 focus-visible:ring-cyan-400 inline-flex items-center gap-1 active:scale-95",
 											requested.has(song.id)
-												? "bg-cyan-500/15 border-cyan-500/30 text-cyan-300"
-												: "bg-zinc-900 border-zinc-700 text-zinc-300 active:scale-95",
+												? "bg-cyan-500/15 border-cyan-500/40 text-cyan-300 hover:bg-rose-500/15 hover:border-rose-500/40 hover:text-rose-300"
+												: "bg-zinc-900 border-zinc-700 text-zinc-300",
 										)}
 									>
 										{requested.has(song.id) ? (
@@ -208,7 +218,7 @@ export function Jukebox() {
 													className="w-3 h-3"
 													aria-hidden="true"
 												/>
-												{t("jukebox.requested")}
+												{t("jukebox.cancelRequest")}
 											</>
 										) : (
 											t("jukebox.request")

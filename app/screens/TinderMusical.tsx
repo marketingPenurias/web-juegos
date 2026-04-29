@@ -205,9 +205,9 @@ export function TinderMusical() {
 	return (
 		<div
 			ref={containerRef}
-			className="flex-1 flex flex-col relative z-20 h-full overflow-hidden bg-black"
+			className="flex-1 flex flex-col relative z-20 min-h-0 overflow-hidden bg-black"
 		>
-			<header className="px-6 pt-12 sm:pt-8 pb-2 flex items-center justify-between tm-fade">
+			<header className="px-6 pt-12 sm:pt-8 pb-2 flex items-center justify-between tm-fade shrink-0">
 				<button
 					type="button"
 					onClick={() => setScreen("hub")}
@@ -227,7 +227,7 @@ export function TinderMusical() {
 				<TokenBadge />
 			</header>
 
-			<div className="px-6 pt-2 pb-3 tm-fade">
+			<div className="px-6 pt-2 pb-3 tm-fade shrink-0">
 				<div className="flex justify-between text-[11px] text-zinc-500 font-bold uppercase tracking-widest mb-1">
 					<span>{t("tinder.progress")}</span>
 					<span className="text-pink-400">
@@ -242,8 +242,15 @@ export function TinderMusical() {
 				</div>
 			</div>
 
-			<main className="flex-1 px-6 flex flex-col items-center justify-center relative">
-				<div className="relative w-full max-w-[320px] aspect-3/4">
+			<main className="flex-1 min-h-0 px-6 flex flex-col items-center justify-center relative gap-4">
+				<div
+					className="relative mx-auto"
+					style={{
+						aspectRatio: "3/4",
+						height: "min(58dvh, 420px)",
+						maxWidth: "min(100%, 320px)",
+					}}
+				>
 					{DECK.map((song, i) => (
 						<div
 							key={song.id}
@@ -297,7 +304,7 @@ export function TinderMusical() {
 				)}
 			</main>
 
-			<footer className="px-6 pb-8 pt-2 grid grid-cols-2 gap-4 tm-fade">
+			<footer className="px-6 pb-8 pt-2 grid grid-cols-2 gap-4 tm-fade shrink-0">
 				<button
 					type="button"
 					onClick={() => handleSwipe("dislike")}

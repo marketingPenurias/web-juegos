@@ -155,9 +155,9 @@ export function Ticket() {
 	return (
 		<div
 			ref={containerRef}
-			className="flex-1 flex flex-col relative z-20 h-full overflow-hidden bg-black"
+			className="flex-1 flex flex-col relative z-20 min-h-0 overflow-hidden bg-black"
 		>
-			<header className="px-6 pt-12 sm:pt-8 pb-2 flex items-center justify-between tk-fade">
+			<header className="px-6 pt-12 sm:pt-8 pb-2 flex items-center justify-between tk-fade shrink-0">
 				<button
 					type="button"
 					onClick={() => setScreen("menu")}
@@ -177,7 +177,7 @@ export function Ticket() {
 				<div className="w-9 h-9" />
 			</header>
 
-			<main className="flex-1 px-6 flex flex-col items-center justify-center">
+			<main className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-6 py-4 flex flex-col items-center justify-center">
 				<div
 					ref={cardRef}
 					className={cn(
@@ -252,7 +252,7 @@ export function Ticket() {
 				)}
 			</main>
 
-			<footer className="px-6 pb-8 pt-2 tk-fade">
+			<footer className="px-6 pb-8 pt-2 tk-fade shrink-0">
 				{status === "active" ? (
 					<button
 						type="button"

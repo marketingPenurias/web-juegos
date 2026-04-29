@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { Apple } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { LanguageSwitch } from "../components/LanguageSwitch";
@@ -56,6 +57,10 @@ export function Onboarding() {
 			ref={containerRef}
 			className="flex-1 flex flex-col justify-end p-6 pb-12 relative z-20 h-full overflow-hidden bg-black"
 		>
+			<div className="absolute top-4 right-4 z-30 pt-safe">
+				<LanguageSwitch />
+			</div>
+
 			<div className="absolute inset-0 pointer-events-none z-0">
 				<div
 					className="onb-bg w-full h-[60%] mt-12 bg-center bg-cover bg-no-repeat opacity-80"
@@ -72,10 +77,12 @@ export function Onboarding() {
 
 			<div className="relative z-10 flex flex-col gap-6 w-full mt-auto">
 				<div className="text-center mb-4">
-					<h1 className="onb-title text-4xl font-black italic tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.4)] leading-[1.1]">
-						{t("onboarding.youAreIn")}
-						<br />
-						<span className="text-transparent bg-clip-text bg-linear-to-r from-cyan-400 to-blue-600 drop-shadow-[0_0_20px_rgba(0,240,255,0.6)]">
+					<h1 className="onb-title text-4xl font-black tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.4)] leading-[1.1]">
+						<span className="block italic">{t("onboarding.youAreIn")}</span>
+						<span
+							className="block italic text-transparent bg-clip-text bg-linear-to-r from-cyan-400 to-blue-600 drop-shadow-[0_0_20px_rgba(0,240,255,0.6)]"
+							style={{ fontStyle: "italic" }}
+						>
 							{t("onboarding.jefe")}
 						</span>
 					</h1>
@@ -91,13 +98,11 @@ export function Onboarding() {
 						onClick={() => setScreen("hub")}
 						className="onb-btn w-full h-[60px] rounded-2xl bg-white text-black font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform focus-visible:ring-2 focus-visible:ring-cyan-400"
 					>
-						<svg
-							viewBox="0 0 24 24"
-							className="w-6 h-6 fill-current"
+						<Apple
+							className="w-5 h-5 fill-current"
+							strokeWidth={1.5}
 							aria-hidden="true"
-						>
-							<path d="M16.365 1.579c-.646 0-1.58.423-2.128.983-.497.5-.965 1.48-.965 2.193 0 .079.015.158.015.158.746.039 1.58-.382 2.13-1.002.51-.555.932-1.551.932-2.222 0-.053-.016-.092-.016-.092-.016-.013-.016-.013.032-.017zm.996 7.67c-1.353-.062-2.583.753-3.23.753-.647 0-1.745-.724-2.887-.704-1.503.02-2.895.875-3.666 2.221-1.565 2.716-.399 6.746 1.134 8.96.745 1.082 1.624 2.28 2.802 2.238 1.127-.042 1.566-.723 2.929-.723 1.354 0 1.761.723 2.946.702 1.21-.02 1.961-1.077 2.7-2.164.856-1.252 1.209-2.464 1.226-2.528-.026-.013-2.365-.908-2.387-3.623-.021-2.264 1.849-3.35 1.942-3.414-.105-1.516-1.157-2.613-3.51-2.718z" />
-						</svg>
+						/>
 						<span className="text-[17px] tracking-tight">
 							{t("onboarding.continueApple")}
 						</span>
@@ -108,11 +113,7 @@ export function Onboarding() {
 						onClick={() => setScreen("hub")}
 						className="onb-btn w-full h-[60px] rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-cyan-400"
 					>
-						<svg
-							viewBox="0 0 24 24"
-							className="w-5 h-5"
-							aria-hidden="true"
-						>
+						<svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
 							<path
 								d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
 								fill="#4285F4"
@@ -134,10 +135,6 @@ export function Onboarding() {
 							{t("onboarding.continueGoogle")}
 						</span>
 					</button>
-
-					<div className="flex justify-center pt-2">
-						<LanguageSwitch />
-					</div>
 				</div>
 
 				<div className="w-[120px] h-1.5 bg-zinc-800 rounded-full mx-auto mt-4 mb-2" />

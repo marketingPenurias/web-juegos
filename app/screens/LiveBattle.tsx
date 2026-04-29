@@ -118,11 +118,11 @@ export function LiveBattle() {
 	return (
 		<div
 			ref={containerRef}
-			className="flex-1 flex flex-col relative z-20 h-full overflow-hidden"
+			className="flex-1 flex flex-col relative z-20 min-h-0 overflow-hidden"
 		>
 			<LiveHeader />
 
-			<main className="flex-1 px-6 flex flex-col justify-center relative z-10 -mt-2">
+			<main className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-6 flex flex-col justify-center relative z-10 -mt-2 pb-2">
 				<div className="live-fade flex flex-col items-center mb-6">
 					<div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/40 border border-red-500/30 backdrop-blur-sm mb-4">
 						<span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,1)] animate-pulse" />

@@ -74,9 +74,9 @@ const INITIAL_MISSIONS: Mission[] = [
 ];
 
 const INITIAL_LEADERBOARD: LeaderRow[] = [
-	{ id: "1", name: "DJ Cobra", tokens: 1820, avatar: "🐍" },
-	{ id: "2", name: "Manuela_88", tokens: 1640, avatar: "💃" },
-	{ id: "3", name: "Jefe69 (Tú)", tokens: 1390, avatar: "👑" },
+	{ id: "1", name: "Carla R.", tokens: 1820, avatar: "👑" },
+	{ id: "2", name: "Marcos D.", tokens: 1640, avatar: "🎧" },
+	{ id: "3", name: "Tú", tokens: 1390, avatar: "⚡" },
 ];
 
 const INITIAL_SONG_REQUESTS: SongRequest[] = [
@@ -88,8 +88,8 @@ const INITIAL_SONG_REQUESTS: SongRequest[] = [
 ];
 
 const INITIAL_PROFILE: UserProfile = {
-	handle: "Jefe69",
-	email: "developer@bildy.es",
+	handle: "Alejandro Vega",
+	email: "alejandro.vega@gmail.com",
 	level: 4,
 	levelProgress: 80,
 };

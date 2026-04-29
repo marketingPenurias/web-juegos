@@ -67,6 +67,7 @@
 	html {
 		font-size: var(--font-size);
 		color-scheme: dark;
+		-webkit-text-size-adjust: 100%;
 	}
 
 	html,
@@ -75,6 +76,7 @@
 		color: #fff;
 		-webkit-tap-highlight-color: transparent;
 		-webkit-font-smoothing: antialiased;
+		text-rendering: optimizeLegibility;
 		font-family: var(--font-sans);
 	}
 
@@ -86,6 +88,24 @@
 
 	body {
 		overscroll-behavior: none;
+	}
+
+	/* Buttons reset on iOS + remove 300ms delay */
+	button {
+		-webkit-appearance: none;
+		appearance: none;
+		touch-action: manipulation;
+	}
+
+	/* iOS Safari momentum scroll for our scroll containers */
+	.no-scrollbar {
+		-webkit-overflow-scrolling: touch;
+	}
+
+	/* Force GPU compositing on big backdrop layers — fixes iOS flicker */
+	.electric-bg {
+		-webkit-transform: translateZ(0);
+		transform: translateZ(0);
 	}
 }
 
