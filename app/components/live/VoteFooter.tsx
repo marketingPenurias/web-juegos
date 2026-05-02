@@ -24,7 +24,7 @@ export function VoteFooter({
 	const cannotConfirm = disabled || !hasSelection;
 
 	return (
-		<footer className="live-fade px-6 pb-3 pt-3 relative z-30 shrink-0 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-900/80">
+		<footer className="live-fade px-6 pb-3 pt-3 relative z-30 shrink-0 bg-zinc-950/95 backdrop-blur-md transform-gpu translate-z-0 border-t border-zinc-900/80">
 			<div className="absolute inset-0 bg-linear-to-t from-black via-zinc-950/90 to-transparent -z-10 pointer-events-none" />
 
 			<p className="text-center text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2">
@@ -76,7 +76,7 @@ export function VoteFooter({
 							{t("live.boostTitle")}
 						</span>
 					</div>
-					<div className="flex items-center gap-1 bg-black/20 px-2 py-0.5 rounded-full relative z-10 backdrop-blur-sm mt-0.5 border border-black/10">
+					<div className="flex items-center gap-1 bg-black/20 px-2 py-0.5 rounded-full relative z-10 backdrop-blur-sm transform-gpu translate-z-0 mt-0.5 border border-black/10">
 						<span className="text-[10px] font-extrabold text-black/80 uppercase tracking-widest">
 							{t("live.boostCost", { n: boostCost })}
 						</span>

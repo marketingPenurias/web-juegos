@@ -37,7 +37,7 @@ export function TokenBadge({ className }: Props) {
 	return (
 		<div
 			className={cn(
-				"flex items-center gap-2 bg-[#0a192f]/80 backdrop-blur-md border border-cyan-500/40 rounded-full py-1.5 px-3.5 shadow-[0_0_15px_rgba(0,240,255,0.25)]",
+				"flex items-center gap-2 bg-[#0a192f]/80 backdrop-blur-md transform-gpu translate-z-0 border border-cyan-500/40 rounded-full py-1.5 px-3.5 shadow-[0_0_15px_rgba(0,240,255,0.25)]",
 				className,
 			)}
 			aria-label={t("hub.balance") + " " + tokens + " Tokens"}

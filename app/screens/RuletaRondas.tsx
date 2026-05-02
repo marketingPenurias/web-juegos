@@ -93,6 +93,7 @@ export function RuletaRondas() {
 			duration: 5.5,
 			ease: "power4.out",
 			transformOrigin: "50% 50%",
+			force3D: true,
 			onComplete: () => {
 				totalRotationRef.current = finalRotation;
 				setLoserIndex(targetIndex);
@@ -161,7 +162,7 @@ export function RuletaRondas() {
 					<svg
 						ref={wheelRef}
 						viewBox="0 0 300 300"
-						className="w-[280px] h-[280px] drop-shadow-[0_0_30px_rgba(125,249,255,0.45)]"
+						className="w-[280px] h-[280px] drop-shadow-[0_0_30px_rgba(125,249,255,0.45)] will-change-transform"
 						style={{ transform: "rotate(0deg)" }}
 						aria-label={t("ruleta.wheelLabel")}
 					>

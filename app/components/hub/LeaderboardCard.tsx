@@ -16,7 +16,7 @@ export function LeaderboardCard() {
 	return (
 		<section
 			aria-label={t("hub.leaderboard")}
-			className="hub-card bg-zinc-900/60 backdrop-blur-md rounded-[24px] p-5 border border-zinc-800"
+			className="hub-card bg-zinc-900/60 backdrop-blur-md transform-gpu translate-z-0 rounded-[24px] p-5 border border-zinc-800"
 		>
 			<div className="flex items-center justify-between mb-3">
 				<div className="flex items-center gap-2">

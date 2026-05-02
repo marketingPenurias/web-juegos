@@ -51,7 +51,7 @@ export function Toast({ message, onDone, tone = "default" }: Props) {
 			role="status"
 			ref={ref}
 			className={cn(
-				"fixed left-1/2 -translate-x-1/2 bottom-32 z-[100] px-5 py-3 rounded-2xl backdrop-blur-xl border text-sm font-bold pointer-events-none",
+				"fixed left-1/2 -translate-x-1/2 bottom-32 z-[100] px-5 py-3 rounded-2xl backdrop-blur-xl transform-gpu translate-z-0 border text-sm font-bold pointer-events-none",
 				tone === "success" &&
 					"bg-lime-500/15 border-lime-400/50 text-lime-200 shadow-[0_0_25px_rgba(57,255,20,0.45)]",
 				tone === "warning" &&

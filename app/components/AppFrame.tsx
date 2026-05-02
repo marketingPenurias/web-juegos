@@ -4,7 +4,7 @@ type Props = { children: React.ReactNode; className?: string };
 
 export function AppFrame({ children, className }: Props) {
 	return (
-		<div className="relative z-10 min-h-dvh w-full flex items-center justify-center sm:p-4 md:p-6 lg:p-8">
+		<div className="relative z-10 min-h-dvh w-full flex items-center justify-center sm:p-4 md:p-6 lg:p-8 overscroll-none">
 			<div
 				className={cn(
 					"relative w-full h-[100dvh] bg-[#050505] overflow-hidden flex flex-col",

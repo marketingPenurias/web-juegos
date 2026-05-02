@@ -72,14 +72,18 @@ export function SongRow({
 				</span>
 			</div>
 
-			<div className="h-14 w-full bg-zinc-900/60 rounded-2xl overflow-hidden border border-zinc-800/80 relative backdrop-blur-md shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
+			<div className="h-14 w-full bg-zinc-900/60 rounded-2xl overflow-hidden border border-zinc-800/80 relative backdrop-blur-md transform-gpu translate-z-0 shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
 				<div
 					ref={barRef}
 					className={cn(
-						"absolute top-0 left-0 h-full flex items-center justify-end pr-4",
+						"absolute top-0 left-0 h-full w-full flex items-center justify-end pr-4 will-change-transform",
 						palette.bar,
 					)}
-					style={{ width: `${percent}%`, boxShadow: palette.shadow }}
+					style={{
+						transformOrigin: "left center",
+						transform: `scaleX(${percent / 100})`,
+						boxShadow: palette.shadow,
+					}}
 				>
 					<Music2
 						className={cn("w-5 h-5 opacity-60", palette.chip)}

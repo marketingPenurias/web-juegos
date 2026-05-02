@@ -30,12 +30,18 @@ export function PlayersPanel({
 
 	useGSAP(
 		() => {
-			if (!bodyRef.current) return;
-			gsap.to(bodyRef.current, {
-				height: open ? "auto" : 0,
+			const node = bodyRef.current;
+			if (!node) return;
+			if (open) node.style.height = "auto";
+			gsap.to(node, {
+				scaleY: open ? 1 : 0,
 				opacity: open ? 1 : 0,
 				duration: 0.32,
 				ease: "power2.inOut",
+				force3D: true,
+				onComplete: () => {
+					if (!open && bodyRef.current) bodyRef.current.style.height = "0px";
+				},
 			});
 		},
 		{ dependencies: [open] },
@@ -68,8 +74,11 @@ export function PlayersPanel({
 			<div
 				id="players-body"
 				ref={bodyRef}
-				className="overflow-hidden"
-				style={{ height: open ? "auto" : 0 }}
+				className="overflow-hidden will-change-transform"
+				style={{
+					transformOrigin: "top center",
+					height: open ? "auto" : 0,
+				}}
 			>
 				<div className="pt-3">
 					<div className="flex items-center justify-end gap-1 mb-2">

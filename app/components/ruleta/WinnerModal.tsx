@@ -60,7 +60,7 @@ export function WinnerModal({ loserName, onAnotherRound, onExit }: Props) {
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="winner-title"
-			className="fixed inset-0 z-90 bg-black/75 backdrop-blur-md flex items-center justify-center px-6"
+			className="fixed inset-0 z-90 bg-black/75 backdrop-blur-md transform-gpu translate-z-0 flex items-center justify-center px-6"
 			onClick={onExit}
 		>
 			<div

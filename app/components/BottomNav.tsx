@@ -35,7 +35,7 @@ export function BottomNav() {
 	return (
 		<div
 			ref={containerRef}
-			className="bg-zinc-950/85 backdrop-blur-xl border-t border-zinc-800/50 pt-1.5 px-2 relative z-50 shrink-0 pb-safe"
+			className="bg-zinc-950/85 backdrop-blur-xl transform-gpu translate-z-0 border-t border-zinc-800/50 pt-1.5 px-2 relative z-50 shrink-0 pb-safe"
 			style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)" }}
 		>
 			<div className="flex justify-around items-center">

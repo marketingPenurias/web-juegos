@@ -92,11 +92,12 @@ export function Ticket() {
 		if (status === "redeemed" || burning) return;
 		setBurning(true);
 		if (burnFillRef.current) {
-			gsap.set(burnFillRef.current, { width: "0%" });
+			gsap.set(burnFillRef.current, { scaleX: 0 });
 			burnTweenRef.current = gsap.to(burnFillRef.current, {
-				width: "100%",
+				scaleX: 1,
 				duration: HOLD_MS / 1000,
 				ease: "none",
+				force3D: true,
 				onComplete: completeBurn,
 			});
 		}
@@ -111,9 +112,10 @@ export function Ticket() {
 		}
 		if (burnFillRef.current) {
 			gsap.to(burnFillRef.current, {
-				width: "0%",
+				scaleX: 0,
 				duration: 0.3,
 				ease: "power2.out",
+				force3D: true,
 			});
 		}
 	};
@@ -265,8 +267,8 @@ export function Ticket() {
 					>
 						<div
 							ref={burnFillRef}
-							className="absolute top-0 left-0 h-full bg-linear-to-r from-orange-600 via-red-500 to-amber-400 shadow-[0_0_25px_rgba(249,115,22,0.6)]"
-							style={{ width: "0%" }}
+							className="absolute top-0 left-0 h-full w-full bg-linear-to-r from-orange-600 via-red-500 to-amber-400 shadow-[0_0_25px_rgba(249,115,22,0.6)] will-change-transform"
+							style={{ transformOrigin: "left center", transform: "scaleX(0)" }}
 							aria-hidden="true"
 						/>
 						<span

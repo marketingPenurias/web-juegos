@@ -11,7 +11,7 @@ export function ViralLoopCard() {
 		>
 			<div className="absolute -top-10 -right-10 w-40 h-40 bg-purple-500/20 blur-[40px] rounded-full pointer-events-none" />
 
-			<div className="bg-zinc-950/80 backdrop-blur-sm rounded-[20px] p-5 h-full">
+			<div className="bg-zinc-950/80 backdrop-blur-sm transform-gpu translate-z-0 rounded-[20px] p-5 h-full">
 				<div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-950/60 border border-purple-500/40 mb-3">
 					<Gift className="w-3.5 h-3.5 text-purple-400" aria-hidden="true" />
 					<span className="text-[10px] font-black tracking-widest text-purple-300 uppercase">

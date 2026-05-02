@@ -262,7 +262,7 @@ function MenuItemCard({ item, onOrder }: { item: Item; onOrder: () => void }) {
 	return (
 		<article
 			className={cn(
-				"item-card relative bg-zinc-900/40 backdrop-blur-md rounded-2xl p-3 flex gap-3 items-center group border",
+				"item-card relative bg-zinc-900/40 backdrop-blur-md transform-gpu translate-z-0 rounded-2xl p-3 flex gap-3 items-center group border",
 				item.sponsored
 					? "border-cyan-400/60 shadow-[0_0_25px_rgba(0,240,255,0.25)]"
 					: "border-zinc-800",

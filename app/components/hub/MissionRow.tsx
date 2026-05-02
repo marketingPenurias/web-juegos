@@ -15,7 +15,7 @@ export function MissionRow({ mission }: { mission: Mission }) {
 	const Icon = ICONS[mission.icon] ?? Share2;
 
 	return (
-		<div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800 rounded-2xl p-4 flex items-center gap-3">
+		<div className="bg-zinc-900/60 backdrop-blur-md transform-gpu translate-z-0 border border-zinc-800 rounded-2xl p-4 flex items-center gap-3">
 			<div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
 				<Icon className="w-5 h-5" aria-hidden="true" />
 			</div>

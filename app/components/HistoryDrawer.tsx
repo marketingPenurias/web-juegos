@@ -51,7 +51,7 @@ export function HistoryDrawer({ open, onClose }: Props) {
 	return (
 		<div
 			ref={overlayRef}
-			className="fixed inset-0 z-90 bg-black/60 backdrop-blur-sm flex items-end justify-center"
+			className="fixed inset-0 z-90 bg-black/60 backdrop-blur-sm transform-gpu translate-z-0 flex items-end justify-center"
 			onClick={onClose}
 			role="presentation"
 		>

@@ -10,8 +10,8 @@ export const BoostBurst = forwardRef<HTMLDivElement>((_props, ref) => {
 			className="absolute inset-0 z-50 pointer-events-none items-center justify-center hidden"
 		>
 			<div className="absolute inset-0 bg-amber-500/20 mix-blend-screen" />
-			<div className="burst-glow w-40 h-40 bg-amber-400/40 rounded-full blur-[40px]" />
-			<div className="burst-text absolute flex items-center gap-2">
+			<div className="burst-glow w-40 h-40 bg-amber-400/40 rounded-full blur-[40px] will-change-transform" />
+			<div className="burst-text absolute flex items-center gap-2 will-change-transform">
 				<Zap
 					className="w-12 h-12 text-amber-300 fill-amber-400 drop-shadow-[0_0_20px_rgba(251,191,36,0.8)]"
 					aria-hidden="true"

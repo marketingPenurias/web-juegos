@@ -130,6 +130,7 @@ export function TinderMusical() {
 			opacity: 0,
 			duration: 0.55,
 			ease: "power3.in",
+			force3D: true,
 			onComplete: () => {
 				const next = index + 1;
 				const nextStats = {
@@ -148,6 +149,7 @@ export function TinderMusical() {
 							scale: 1,
 							duration: 0.6,
 							ease: "back.out(1.8)",
+							force3D: true,
 							onComplete: () => {
 								animatingRef.current = false;
 							},
@@ -187,6 +189,7 @@ export function TinderMusical() {
 							rotation: 0,
 							duration: 0.35,
 							ease: "back.out(1.4)",
+							force3D: true,
 						});
 					}
 				},
@@ -258,7 +261,7 @@ export function TinderMusical() {
 								cardRefs.current[i] = el;
 							}}
 							className={cn(
-								"tm-card absolute inset-0 rounded-[28px] overflow-hidden border border-white/10 shadow-[0_25px_60px_rgba(0,0,0,0.6)]",
+								"tm-card absolute inset-0 rounded-[28px] overflow-hidden border border-white/10 shadow-[0_25px_60px_rgba(0,0,0,0.6)] touch-none will-change-transform",
 								i < index && "pointer-events-none",
 							)}
 							style={{ zIndex: DECK.length - i }}
@@ -276,7 +279,7 @@ export function TinderMusical() {
 								className="absolute inset-0 w-full h-full object-cover mix-blend-overlay opacity-90"
 							/>
 							<div className="absolute inset-0 bg-linear-to-t from-black via-black/60 to-transparent" />
-							<div className="absolute top-4 left-4 inline-flex items-center gap-1.5 bg-black/40 border border-white/20 rounded-full px-2.5 py-1 backdrop-blur-md">
+							<div className="absolute top-4 left-4 inline-flex items-center gap-1.5 bg-black/40 border border-white/20 rounded-full px-2.5 py-1 backdrop-blur-md transform-gpu translate-z-0">
 								<Music2 className="w-3 h-3 text-white" aria-hidden="true" />
 								<span className="text-[10px] font-bold text-white uppercase tracking-widest">
 									{t("tinder.track", { n: i + 1 })}
@@ -332,7 +335,7 @@ export function TinderMusical() {
 			</footer>
 
 			{done && (
-				<div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center px-8">
+				<div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md transform-gpu translate-z-0 flex items-center justify-center px-8">
 					<div
 						ref={successRef}
 						className="w-full max-w-[320px] rounded-[28px] bg-linear-to-br from-zinc-900 to-zinc-950 border border-amber-400/50 p-6 text-center shadow-[0_0_50px_rgba(245,158,11,0.4)]"

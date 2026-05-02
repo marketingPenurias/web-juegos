@@ -167,7 +167,7 @@ export function Jukebox() {
 									if (el) rowRefs.current.set(song.id, el);
 								}}
 								className={cn(
-									"jb-row flex items-center gap-3 rounded-2xl p-3 border bg-zinc-900/40 backdrop-blur-md",
+									"jb-row flex items-center gap-3 rounded-2xl p-3 border bg-zinc-900/40 backdrop-blur-md transform-gpu translate-z-0",
 									song.boosted
 										? "border-amber-400/60 shadow-[0_0_20px_rgba(245,158,11,0.35)]"
 										: "border-zinc-800",

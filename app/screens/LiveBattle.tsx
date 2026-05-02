@@ -74,12 +74,18 @@ export function LiveBattle() {
 		tl.fromTo(
 			".burst-glow",
 			{ scale: 0.4, opacity: 0 },
-			{ scale: 3, opacity: 0, duration: 1, ease: "power3.out" },
+			{ scale: 3, opacity: 0, duration: 1, ease: "power3.out", force3D: true },
 		)
 			.fromTo(
 				".burst-text",
 				{ y: 40, opacity: 0 },
-				{ y: -30, opacity: 1, duration: 0.5, ease: "back.out(2)" },
+				{
+					y: -30,
+					opacity: 1,
+					duration: 0.5,
+					ease: "back.out(2)",
+					force3D: true,
+				},
 				"<",
 			)
 			.to(".burst-text", {
@@ -87,6 +93,7 @@ export function LiveBattle() {
 				duration: 0.5,
 				delay: 0.4,
 				ease: "power2.in",
+				force3D: true,
 			});
 	};
 
@@ -124,7 +131,7 @@ export function LiveBattle() {
 
 			<main className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-6 flex flex-col justify-center relative z-10 -mt-2 pb-2">
 				<div className="live-fade flex flex-col items-center mb-6">
-					<div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/40 border border-red-500/30 backdrop-blur-sm mb-4">
+					<div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/40 border border-red-500/30 backdrop-blur-sm transform-gpu translate-z-0 mb-4">
 						<span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,1)] animate-pulse" />
 						<span className="text-[10px] font-black tracking-[0.15em] text-red-400 uppercase">
 							{t("live.liveBadge")}
@@ -191,9 +198,10 @@ export function LiveBattle() {
 function animateBar(node: HTMLDivElement | null, target: number) {
 	if (!node) return;
 	gsap.to(node, {
-		width: `${target}%`,
+		scaleX: target / 100,
 		duration: 0.9,
 		ease: "power3.out",
+		force3D: true,
 	});
 }
 

@@ -12,7 +12,7 @@ export function StreakCard() {
 	return (
 		<section
 			aria-label={t("hub.loyalty")}
-			className="hub-card bg-zinc-900/60 backdrop-blur-md rounded-[24px] p-5 border border-zinc-800"
+			className="hub-card bg-zinc-900/60 backdrop-blur-md transform-gpu translate-z-0 rounded-[24px] p-5 border border-zinc-800"
 		>
 			<div className="flex justify-between items-center mb-4">
 				<h3 className="text-white font-bold text-[15px]">{t("hub.loyalty")}</h3>
@@ -35,7 +35,7 @@ export function StreakCard() {
 						<div
 							key={step}
 							className={cn(
-								"hub-streak-flame relative z-10 w-10 h-10 rounded-full flex items-center justify-center border-2 shadow-lg transition-colors",
+								"hub-streak-flame relative z-10 w-10 h-10 rounded-full flex items-center justify-center border-2 shadow-lg transition-colors will-change-transform",
 								active
 									? "bg-zinc-950 border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.4)]"
 									: "bg-zinc-900 border-zinc-800",
