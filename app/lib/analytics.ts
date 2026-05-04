@@ -7,11 +7,17 @@
  * ── Never lose an event.  When the network is down (or the API replies
  *    with anything other than 2xx) we append the payload to a localStorage
  *    queue and replay it on the next successful boot.
+ * ── Auth-aware.  When a Supabase session is present we inject the
+ *    `Authorization: Bearer <jwt>` header so the worker can resolve the
+ *    user from the JWT (zero-trust — server overrides anything the
+ *    client claims).
  * ── Multi-tenant by default.  The endpoint accepts a tenant slug; the
  *    worker resolves it to a tenant_id and applies RLS-safe inserts.
  *
  * No third-party libraries (no axios, no localforage).
  */
+
+import { getAccessToken } from "./supabase.client";
 
 const ENDPOINT = "/api/track";
 const QUEUE_KEY = "offline_events_queue";
@@ -76,14 +82,28 @@ function enqueue(payload: TrackEventPayload | TrackEventPayload[]): void {
 	writeQueue(next);
 }
 
+async function buildHeaders(): Promise<HeadersInit> {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	try {
+		const token = await getAccessToken();
+		if (token) headers.Authorization = `Bearer ${token}`;
+	} catch {
+		// Supabase not configured — proceed anonymously.
+	}
+	return headers;
+}
+
 async function postJson(
 	body: TrackEventPayload | TrackEventPayload[],
 ): Promise<boolean> {
 	if (!isBrowser) return false;
 	try {
+		const headers = await buildHeaders();
 		const res = await fetch(ENDPOINT, {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers,
 			body: JSON.stringify(body),
 			keepalive: true,
 		});

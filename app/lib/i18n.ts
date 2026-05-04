@@ -20,6 +20,7 @@ const resources = {
 				subtitle: "Entra para jugar y ganar premios.",
 				continueApple: "Continuar con Apple",
 				continueGoogle: "Continuar con Google",
+				connecting: "Conectando…",
 				terms: "Al continuar aceptas las normas de la sala. +18.",
 			},
 			hub: {
@@ -242,6 +243,7 @@ const resources = {
 				subtitle: "Step in to play and win prizes.",
 				continueApple: "Continue with Apple",
 				continueGoogle: "Continue with Google",
+				connecting: "Connecting…",
 				terms: "By continuing you accept the venue rules. 18+.",
 			},
 			hub: {

@@ -1,14 +1,64 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Apple } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { LanguageSwitch } from "../components/LanguageSwitch";
+import { getBrowserSupabase } from "../lib/supabase.client";
 
 export function Onboarding() {
 	const { t } = useTranslation();
 	const setScreen = useGameState((s) => s.setScreen);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const [authBusy, setAuthBusy] = useState(false);
+	const [authError, setAuthError] = useState<string | null>(null);
+
+	// If a session already exists (e.g. user just returned from the OAuth
+	// redirect), advance to the hub.  Listener stays mounted to handle
+	// SIGNED_IN events as soon as Supabase parses the URL hash.
+	useEffect(() => {
+		const supabase = getBrowserSupabase();
+		if (!supabase) return;
+
+		void supabase.auth.getSession().then(({ data }) => {
+			if (data.session) setScreen("hub");
+		});
+
+		const { data } = supabase.auth.onAuthStateChange((event, session) => {
+			if (event === "SIGNED_IN" && session) setScreen("hub");
+		});
+
+		return () => data.subscription.unsubscribe();
+	}, [setScreen]);
+
+	const handleGoogleLogin = async () => {
+		const supabase = getBrowserSupabase();
+		if (!supabase) {
+			// Demo fallback when Supabase isn't configured yet — keep the CEO
+			// flow alive without throwing in their face.
+			setScreen("hub");
+			return;
+		}
+		setAuthBusy(true);
+		setAuthError(null);
+		try {
+			const { error } = await supabase.auth.signInWithOAuth({
+				provider: "google",
+				options: {
+					redirectTo:
+						typeof window !== "undefined" ? window.location.origin : undefined,
+				},
+			});
+			if (error) {
+				setAuthError(error.message);
+				setAuthBusy(false);
+			}
+			// On success the browser navigates to Google; no further work here.
+		} catch (err) {
+			setAuthError(err instanceof Error ? err.message : "auth_failed");
+			setAuthBusy(false);
+		}
+	};
 
 	useGSAP(
 		() => {
@@ -110,8 +160,9 @@ export function Onboarding() {
 
 					<button
 						type="button"
-						onClick={() => setScreen("hub")}
-						className="onb-btn w-full h-[60px] rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-cyan-400"
+						onClick={handleGoogleLogin}
+						disabled={authBusy}
+						className="onb-btn w-full h-[60px] rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-60 disabled:cursor-not-allowed"
 					>
 						<svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
 							<path
@@ -132,9 +183,20 @@ export function Onboarding() {
 							/>
 						</svg>
 						<span className="text-[17px] tracking-tight">
-							{t("onboarding.continueGoogle")}
+							{authBusy
+								? t("onboarding.connecting")
+								: t("onboarding.continueGoogle")}
 						</span>
 					</button>
+
+					{authError && (
+						<p
+							role="alert"
+							className="text-[11px] text-rose-300 text-center mt-1"
+						>
+							{authError}
+						</p>
+					)}
 				</div>
 
 				<div className="w-[120px] h-1.5 bg-zinc-800 rounded-full mx-auto mt-4 mb-2" />
