@@ -4,6 +4,7 @@ import { Heart, X, Music2, ArrowLeft, Sparkles } from "lucide-react";
 import { Draggable, gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { TokenBadge } from "../components/TokenBadge";
+import { trackEvent } from "../lib/analytics";
 import { cn } from "../lib/utils";
 
 const SWIPE_THRESHOLD = 100;
@@ -182,7 +183,19 @@ export function TinderMusical() {
 				},
 				onDragEnd(this: Draggable) {
 					if (Math.abs(this.x) > SWIPE_THRESHOLD) {
-						swipeRef.current(this.x > 0 ? "like" : "dislike");
+						const direction = this.x > 0 ? "like" : "dislike";
+						const currentSong = DECK[index];
+						// Fire-and-forget — never blocks the GSAP swipe.
+						void trackEvent(
+							"music_preference",
+							direction === "like" ? "swipe_right" : "swipe_left",
+							{
+								song: currentSong?.title,
+								artist: currentSong?.artist,
+								song_id: currentSong?.id,
+							},
+						);
+						swipeRef.current(direction);
 					} else {
 						gsap.to(card, {
 							x: 0,

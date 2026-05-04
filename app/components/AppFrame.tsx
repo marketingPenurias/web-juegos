@@ -1,8 +1,17 @@
+import { useEffect } from "react";
 import { cn } from "../lib/utils";
+import { flushOfflineQueue, installAnalyticsListeners } from "../lib/analytics";
 
 type Props = { children: React.ReactNode; className?: string };
 
 export function AppFrame({ children, className }: Props) {
+	useEffect(() => {
+		// Drain any events that were queued while offline on the previous session.
+		void flushOfflineQueue();
+		// Wire network-recovery + visibility listeners; cleanup on unmount.
+		return installAnalyticsListeners();
+	}, []);
+
 	return (
 		<div className="relative z-10 min-h-dvh w-full flex items-center justify-center sm:p-4 md:p-6 lg:p-8 overscroll-none">
 			<div

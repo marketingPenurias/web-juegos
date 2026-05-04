@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@gsap/react": "^2.1.2",
+		"@supabase/supabase-js": "^2.105.1",
 		"clsx": "^2.1.1",
 		"gsap": "^3.15.0",
 		"i18next": "^26.0.8",
@@ -49,6 +50,7 @@
 		"deploy": "wrangler deploy",
 		"dev": "react-router dev",
 		"preview": "npm run build && vite preview",
+		"seed": "npx tsx scripts/seed-dashboard.ts",
 		"typecheck": "npm run typegen && tsc -b"
 	},
 	"type": "module"
