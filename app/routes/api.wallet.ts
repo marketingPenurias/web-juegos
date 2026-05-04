@@ -6,24 +6,26 @@ import {
 	verifyAuthToken,
 } from "../lib/api.server";
 import { getServiceSupabase } from "../lib/supabase.server";
+import { extractSlugFromHost } from "../lib/tenant";
 
 /**
  * POST /api/wallet  — strict financial transactions.
  *
- *   Body: { tenant_slug, amount: number, reason: string,
+ *   Body: { tenant_slug?, amount: number, reason: string,
  *           metadata?: object }
  *
  *   - JWT REQUIRED.  No anon access — overdraft / fraud risk.
  *   - user_id ALWAYS comes from the verified JWT, never from the body.
- *   - Spend (amount < 0): the worker reads the materialized
- *     `token_balance` from user_profiles and rejects with 400 when the
- *     resulting balance would go negative.  RLS on the read still applies.
- *   - Earn (amount > 0): inserted directly; the trigger updates the
+ *   - Tenant resolution is STRICT: payload `tenant_slug` → `X-Tenant-
+ *     Slug` header → hostname.  No fallback.  Missing → 400.
+ *   - Spend (amount < 0): atomic SQL RPC `spend_tokens` (SELECT FOR
+ *     UPDATE + insert in one transaction).  NULL response → 400
+ *     insufficient_funds.
+ *   - Earn (amount > 0): direct insert; the trigger updates the
  *     read-side projection.
  *   - Returns the new balance on success.
  */
 
-const DEFAULT_TENANT = "lapocha";
 const MIN_AMOUNT = -10_000;
 const MAX_AMOUNT = 10_000;
 
@@ -34,11 +36,15 @@ type WalletRequest = {
 	metadata?: Record<string, unknown> | null;
 };
 
-function normaliseSlug(slug: string | undefined | null): string {
-	return String(slug || DEFAULT_TENANT)
-		.trim()
-		.toLowerCase()
-		.slice(0, 64);
+function pickWalletSlug(
+	bodySlug: string | undefined,
+	headerSlug: string | null,
+	hostSlug: string | null,
+): string | null {
+	const raw = bodySlug || headerSlug || hostSlug;
+	if (!raw) return null;
+	const cleaned = String(raw).trim().toLowerCase().slice(0, 64);
+	return cleaned || null;
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -98,6 +104,23 @@ export async function action({ request, context }: Route.ActionArgs) {
 		);
 	}
 
+	// Strict multi-tenant resolution — no defaults.
+	const headerSlug = request.headers.get("x-tenant-slug");
+	const hostSlug = (() => {
+		try {
+			return extractSlugFromHost(new URL(request.url).hostname) || null;
+		} catch {
+			return null;
+		}
+	})();
+	const slug = pickWalletSlug(body.tenant_slug, headerSlug, hostSlug);
+	if (!slug) {
+		return jsonResponse(
+			{ ok: false, error: "missing_tenant" },
+			{ status: 400, request },
+		);
+	}
+
 	// Wallet writes ALWAYS go through the service-role client.  The
 	// `spend_tokens` RPC is locked down to service_role only (see
 	// database/03_secure_rpc.sql) so a stray anon-key call would fail
@@ -112,7 +135,6 @@ export async function action({ request, context }: Route.ActionArgs) {
 			{ status: 503, request },
 		);
 	}
-	const slug = normaliseSlug(body.tenant_slug);
 
 	// Resolve tenant + caller's profile.  Both are read-only and safe
 	// under RLS with the service role key.

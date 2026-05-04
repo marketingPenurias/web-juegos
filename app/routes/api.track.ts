@@ -6,6 +6,7 @@ import {
 	preflight,
 	verifyAuthToken,
 } from "../lib/api.server";
+import { extractSlugFromHost } from "../lib/tenant";
 
 /**
  * POST /api/track  — analytics ingestion endpoint (zero-trust).
@@ -17,9 +18,10 @@ import {
  *  - Anonymous (no JWT) requests are still accepted for pre-login
  *    onboarding analytics; their user_id is forced to NULL.
  *  - Single event or batch (offline-queue flush hits the same handler).
+ *  - Strict multi-tenant: every event MUST resolve to a tenant slug
+ *    (payload, header, or hostname).  No fallback default.
  */
 
-const DEFAULT_TENANT = "lapocha";
 const MAX_BATCH = 200;
 
 type IncomingEvent = {
@@ -38,17 +40,17 @@ function pickTenantSlug(
 	event: IncomingEvent,
 	headerSlug: string | null,
 	hostSlug: string | null,
-): string {
-	const slug = event.tenant_slug || headerSlug || hostSlug || DEFAULT_TENANT;
-	return String(slug).trim().toLowerCase().slice(0, 64);
+): string | null {
+	const raw = event.tenant_slug || headerSlug || hostSlug;
+	if (!raw) return null;
+	const cleaned = String(raw).trim().toLowerCase().slice(0, 64);
+	return cleaned || null;
 }
 
 function hostnameToSlug(request: Request): string | null {
 	try {
-		const host = new URL(request.url).hostname;
-		const sub = host.split(".")[0];
-		if (!sub || sub === "localhost" || sub === "www") return null;
-		return sub.toLowerCase();
+		const slug = extractSlugFromHost(new URL(request.url).hostname);
+		return slug || null;
 	} catch {
 		return null;
 	}
@@ -108,10 +110,17 @@ export async function action({ request, context }: Route.ActionArgs) {
 		);
 	}
 
-	// Resolve unique tenant slugs to tenant_ids in a single query.
-	const slugs = Array.from(
-		new Set(events.map((e) => pickTenantSlug(e, headerSlug, hostSlug))),
+	// Strict multi-tenant — every event MUST carry a slug.  No defaults.
+	const perEventSlugs = events.map((e) =>
+		pickTenantSlug(e, headerSlug, hostSlug),
 	);
+	if (perEventSlugs.some((s) => !s)) {
+		return jsonResponse(
+			{ ok: false, error: "missing_tenant" },
+			{ status: 400, request },
+		);
+	}
+	const slugs = Array.from(new Set(perEventSlugs as string[]));
 
 	const { data: tenants, error: tenantErr } = await supabase
 		.from("tenants")
@@ -148,8 +157,8 @@ export async function action({ request, context }: Route.ActionArgs) {
 	}
 
 	const rows = events
-		.map((e) => {
-			const slug = pickTenantSlug(e, headerSlug, hostSlug);
+		.map((e, idx) => {
+			const slug = perEventSlugs[idx]!;
 			const tenant_id = slugToId.get(slug);
 			if (!tenant_id) return null;
 
