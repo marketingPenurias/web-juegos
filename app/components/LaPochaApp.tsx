@@ -10,6 +10,7 @@ import { RuletaRondas } from "../screens/RuletaRondas";
 import { Ticket } from "../screens/Ticket";
 import { Profile } from "../screens/Profile";
 import { Jukebox } from "../screens/Jukebox";
+import { DJDashboard } from "../screens/DJDashboard";
 
 const SCREENS_WITH_NAV = new Set<Screen>(["hub", "live", "menu", "ticket"]);
 
@@ -51,6 +52,8 @@ function ScreenRouter({ screen }: { screen: Screen }) {
 			return <Profile />;
 		case "jukebox":
 			return <Jukebox />;
+		case "dj":
+			return <DJDashboard />;
 		default:
 			return <Onboarding />;
 	}

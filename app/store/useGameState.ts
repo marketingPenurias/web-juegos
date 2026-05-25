@@ -10,7 +10,8 @@ export type Screen =
 	| "ruleta"
 	| "ticket"
 	| "jukebox"
-	| "profile";
+	| "profile"
+	| "dj";
 
 export type Mission = {
 	id: string;

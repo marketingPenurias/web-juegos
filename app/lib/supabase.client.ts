@@ -20,7 +20,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  */
 
 const VITE_URL = import.meta.env.VITE_SUPABASE_URL;
-const VITE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const VITE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
@@ -92,7 +92,7 @@ function buildClient(): SupabaseClient | null {
 	if (typeof window === "undefined") return null;
 	if (!VITE_URL || !VITE_KEY) {
 		console.warn(
-			"[supabase.client] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY missing; auth disabled.",
+			"[supabase.client] VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY missing; auth disabled.",
 		);
 		return null;
 	}

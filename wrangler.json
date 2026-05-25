@@ -11,6 +11,6 @@
 	"vars": {
 		"VALUE_FROM_CLOUDFLARE": "Hello from Cloudflare",
 		"SUPABASE_URL": "",
-		"SUPABASE_ANON_KEY": ""
+		"SUPABASE_PUBLISHABLE_KEY": ""
 	}
 }

@@ -5,9 +5,9 @@
  *
  * Required environment variables (read from `.dev.vars`, `.env`, or the
  * shell):
- *   SUPABASE_URL                — your project REST URL
- *   SUPABASE_SERVICE_ROLE_KEY   — needed to bypass RLS on writes
- *   SEED_TENANT_SLUG            — optional, default "lapocha"
+ *   SUPABASE_URL              — your project REST URL
+ *   SUPABASE_SECRET_KEY       — needed to bypass RLS on writes
+ *   SEED_TENANT_SLUG          — optional, default "lapocha"
  *
  * The script is idempotent on the tenant row but appends fresh users +
  * events on every run so the dashboards always look alive.
@@ -37,19 +37,19 @@ loadDotEnv(".env");
 loadDotEnv(".env.local");
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY =
-	process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+const SUPABASE_SECRET_KEY =
+	process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY;
 const TENANT_SLUG = process.env.SEED_TENANT_SLUG ?? "lapocha";
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
 	console.error(
-		"Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. " +
+		"Missing SUPABASE_URL or SUPABASE_SECRET_KEY. " +
 			"Fill them in `.dev.vars` first.",
 	);
 	process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
 	auth: { persistSession: false, autoRefreshToken: false },
 });
 

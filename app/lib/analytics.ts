@@ -19,7 +19,7 @@
 
 import { getAccessToken } from "./supabase.client";
 
-const ENDPOINT = "/api/track";
+const ENDPOINT = "/api/analytics";
 const QUEUE_KEY = "offline_events_queue";
 const QUEUE_MAX = 200;
 const FLUSH_BATCH_SIZE = 50;

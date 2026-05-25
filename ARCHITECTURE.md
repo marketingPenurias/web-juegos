@@ -1,7 +1,7 @@
 # ARCHITECTURE — Nightgraph (La Pocha Gamification MVP)
 
 > **Status**: production-ready, deployed to Cloudflare Pages from `main`.
-> **Last reviewed**: 2026-05-04.
+> **Last reviewed**: 2026-05-04 (rewards + music API wired, new Supabase key naming).
 > **Scope**: full-stack — frontend, edge worker, database, observability, security.
 
 This document is the canonical technical reference for the project. It
@@ -84,8 +84,11 @@ web-juegos/
 │   │
 │   ├── routes/
 │   │   ├── home.tsx             # "/"   — SSR splash, hydrates LaPochaApp
-│   │   ├── api.track.ts         # "/api/track"   — POST events (resource)
-│   │   └── api.wallet.ts        # "/api/wallet"  — POST tx (resource)
+│   │   ├── api.analytics.ts     # "/api/analytics" — POST events (canonical)
+│   │   ├── api.track.ts         # "/api/track"     — alias for /api/analytics
+│   │   ├── api.wallet.ts        # "/api/wallet"    — POST token tx (RPC)
+│   │   ├── api.rewards.ts       # "/api/rewards"   — purchase / redeem (RPC)
+│   │   └── api.music.ts         # "/api/music"     — GET deck + POST vote
 │   │
 │   ├── components/
 │   │   ├── LaPochaApp.tsx       # screen orchestrator (Zustand selector)
@@ -95,12 +98,13 @@ web-juegos/
 │   │   ├── Toast.tsx            # GSAP-driven toast (z-100)
 │   │   ├── LanguageSwitch.tsx   # ES/EN toggle (compact + pill modes)
 │   │   ├── HistoryDrawer.tsx    # slide-up sheet for token history
+│   │   ├── RedemptionScreen.tsx # 5-min countdown + GSAP wave (anti-screenshot)
 │   │   │
 │   │   ├── hub/*                # 7 split cards (TokenWallet, Streak, …)
 │   │   ├── live/*               # 4 LiveBattle sub-components
 │   │   └── ruleta/*              # PlayersPanel + WinnerModal
 │   │
-│   ├── screens/                 # 9 screens, one per `Screen` union value
+│   ├── screens/                 # 10 screens, one per `Screen` union value
 │   │   ├── Onboarding.tsx       # Google OAuth + Apple demo skip
 │   │   ├── Hub.tsx              # 50-line orchestrator; assembles cards
 │   │   ├── LiveBattle.tsx       # two-step voting + boost burst
@@ -109,7 +113,8 @@ web-juegos/
 │   │   ├── RuletaRondas.tsx     # 2-8 player wheel (safe-jitter spin)
 │   │   ├── Ticket.tsx           # hold-to-burn anti-fraud screen
 │   │   ├── Profile.tsx          # email, level, settings, logout
-│   │   └── Jukebox.tsx          # request + 50-tokens Boost
+│   │   ├── Jukebox.tsx          # request + 50-tokens Boost
+│   │   └── DJDashboard.tsx      # B2B live leaderboard (dj role required)
 │   │
 │   ├── store/
 │   │   └── useGameState.ts      # Zustand store + persist (sessionStorage)
@@ -119,12 +124,18 @@ web-juegos/
 │   │   ├── utils.ts             # cn() = clsx + tailwind-merge
 │   │   ├── i18n.ts              # react-i18next config (es + en, inline)
 │   │   ├── tenant.tsx           # TenantContext + slug extractor + theme
+│   │   ├── tenant-resolver.server.ts  # tenant/profile/role resolver (shared)
 │   │   ├── analytics.ts         # offline-queue fetcher + JWT injection
+│   │   ├── analytics-handler.server.ts # shared handler for /api/{analytics,track}
 │   │   ├── api.server.ts        # CORS, JWT verify, jsonResponse helper
 │   │   ├── supabase.client.ts   # browser singleton + cookie storage
-│   │   └── supabase.server.ts   # anon + service-role factories
+│   │   ├── supabase.server.ts   # publishable + SECRET client factories
+│   │   ├── useRewards.ts        # client hook over /api/rewards
+│   │   └── useMusic.ts          # client hooks: useMusic + useDJLeaderboard
 │   │
-│   └── types/env.d.ts           # VITE_* ambient types
+│   └── types/
+│       ├── env.d.ts             # VITE_* ambient types
+│       └── database.ts          # hand-written Supabase schema interfaces
 │
 ├── workers/
 │   └── app.ts                   # Worker entrypoint → createRequestHandler
@@ -134,8 +145,9 @@ web-juegos/
 │   ├── 02_production_ready.sql  # CQRS columns + trigger + spend_tokens
 │   ├── 03_secure_rpc.sql        # REVOKE PUBLIC / GRANT service_role
 │   ├── 04_tenant_theme.sql      # theme jsonb + Kapital demo tenant
-│   └── 05_scalability_ready.sql # NIGHTGRAPH upgrade: promoters, products,
-│                                #   staff RBAC, events, codes, audit
+│   ├── 05_scalability_ready.sql # NIGHTGRAPH upgrade: promoters, products,
+│   │                            #   staff RBAC, events, codes, audit
+│   └── 06_music_rpc.sql         # vote_track RPC + DJ leaderboard view
 │
 ├── scripts/
 │   └── seed-dashboard.ts        # tsx seeder (50 users / 200 visits / ~1.2k events)
@@ -329,6 +341,46 @@ Summary:
 
 Result: stable 60 FPS on iPhone SE / iOS 16 in Safari.
 
+### 4.9 Self-Redemption Visual (anti-screenshot)
+
+`app/components/RedemptionScreen.tsx` is rendered as a full-screen
+overlay after a successful `/api/rewards` redeem call. It uses three
+animations running simultaneously to make screenshots obviously stale
+to the bartender:
+
+| Layer | What | Why |
+|---|---|---|
+| Background wave | `gsap.to({ backgroundPosition: "200% 0", repeat: -1 })` on a `linear-gradient` masked card | a static screenshot can never show the moving sheen |
+| Pulsating short-code | `gsap.to({ opacity: 0.45, yoyo: true, repeat: -1 })` over a 6-char code derived from the reward UUID | flickering text is impossible to capture cleanly |
+| Conic ring | continuous 18s `rotation` on a `conic-gradient` SVG mask | another loop-on-screen telltale |
+| Live countdown | a `setInterval(250)` ticks the `MM:SS` display from `expires_at - now()` | rejects any screen from earlier in the day |
+
+The countdown drives an `onExpire` callback that tears the overlay
+down at zero. The DB row stays as `redeeming` until a backend reaper
+flips it to `expired` (post-MVP).
+
+### 4.10 Tinder Musical client pattern
+
+`app/lib/useMusic.ts` exposes two hooks:
+
+- **`useMusic(eventId)`** — drives the player-facing swipe deck.
+  Calls `GET /api/music?event_id=…&mode=swipe`, which returns only
+  unplayed tracks the user hasn't voted on yet. `castVote({ track_id,
+  vote_type, tokens_spent })` posts to the same endpoint and
+  **optimistically drops the card from `deck`** so the next swipe is
+  available even before the network round-trip finishes. The Edge
+  worker rejects double-votes via the UNIQUE index; the client falls
+  back to its own state if the response says `already_voted`.
+- **`useDJLeaderboard(eventId, autoMs)`** — drives `DJDashboard`.
+  Polls `mode=leaderboard` every `autoMs` (default 5 s). The Edge
+  worker checks `tenant_staff.role = 'dj'`; the hook surfaces a `403`
+  as `error: "forbidden"` and the UI shows a "DJ role required"
+  banner.
+
+Realtime via Supabase channels is the long-term path; polling is the
+demo-friendly stopgap that doesn't open a WS straight from the browser
+to the DB.
+
 ---
 
 ## 5. Edge layer (Cloudflare Workers)
@@ -352,7 +404,11 @@ every loader/action reads secrets via `context.cloudflare.env`.
 
 ### 5.2 Edge routes
 
-**`/api/track`** — `app/routes/api.track.ts`
+**`/api/analytics`** (canonical) and **`/api/track`** (legacy alias) —
+`app/routes/api.{analytics,track}.ts`
+
+Both files are one-line shims pointing to
+`app/lib/analytics-handler.server.ts`.
 
 | Property | Value |
 |---|---|
@@ -364,6 +420,10 @@ every loader/action reads secrets via `context.cloudflare.env`.
 | Limits | `MAX_BATCH = 200` events per request |
 | Behavior | Anon ingestion writes `user_id = NULL` (pre-login funnel) |
 
+The frontend lib (`app/lib/analytics.ts`) targets `/api/analytics`;
+`/api/track` exists only so older offline queues persisted in
+`localStorage` from previous builds still drain on the next boot.
+
 **`/api/wallet`** — `app/routes/api.wallet.ts`
 
 | Property | Value |
@@ -372,9 +432,33 @@ every loader/action reads secrets via `context.cloudflare.env`.
 | Body | `{ tenant_slug?, amount: int, reason: string, metadata? }` |
 | Auth | **JWT required** (401 otherwise) |
 | Tenant | strict, 400 if missing |
-| Spend (`amount < 0`) | atomic `rpc('spend_tokens', …)` via service-role client; NULL → 400 `insufficient_funds` |
+| Spend (`amount < 0`) | atomic `rpc('spend_tokens', …)` via SECRET-key client; NULL → 400 `insufficient_funds` |
 | Earn (`amount > 0`) | direct insert; trigger updates the projection |
 | Bounds | `[-10_000, 10_000]`, non-zero, integer |
+
+**`/api/rewards`** — `app/routes/api.rewards.ts`  *(NEW)*
+
+| Property | Value |
+|---|---|
+| Method | POST (OPTIONS for preflight) |
+| Body | `{ action_type: "purchase", product_id, event_id?, tenant_slug? }` **or** `{ action_type: "redeem", reward_id, tenant_slug? }` |
+| Auth | **JWT required** (401 otherwise) |
+| Tenant | strict, 400 if missing |
+| Purchase | calls `rpc('purchase_reward', …)` — atomic price snapshot + ledger debit + `user_rewards` row insert. Returns `{ reward_id, balance }`. |
+| Redeem  | calls `rpc('start_reward_redemption', …)` — flips status to `redeeming` with `expires_at = now() + 5 min`. Returns `{ expires_at }`. |
+| Errors | `insufficient_funds` (400), `product_unavailable` (404), `reward_unavailable` (409). |
+
+**`/api/music`** — `app/routes/api.music.ts`  *(NEW)*
+
+| Property | Value |
+|---|---|
+| Method | `GET ?event_id&mode=swipe|leaderboard` · `POST` |
+| Auth | **JWT required** on both verbs (401 otherwise) |
+| Tenant | strict, 400 if missing |
+| GET swipe | unplayed `event_tracks` for the active event minus tracks the caller already voted on, ordered by `total_votes DESC`, limit 40 |
+| GET leaderboard | full sorted list. **Requires `dj` role** in `tenant_staff`; 403 otherwise |
+| POST | atomic `rpc('vote_track', …)` — locks the track row, optionally debits tokens for `boost`, inserts vote, bumps `total_votes` (free +1, boost +5). |
+| Errors | `track_unavailable` (409), `already_voted` (409), `insufficient_funds` (400). |
 
 Both routes share `app/lib/api.server.ts`:
 
@@ -392,18 +476,33 @@ Both routes share `app/lib/api.server.ts`:
 
 ### 5.3 Trust model (zero-trust)
 
+Nightgraph uses the **new Supabase API key naming** (no more "anon" /
+"service_role" labels in our code):
+
+| Key (env) | Audience | Trust |
+|---|---|---|
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | browser bundle | public, RLS-bound |
+| `SUPABASE_PUBLISHABLE_KEY` | Cloudflare Worker | reads only, RLS-bound |
+| `SUPABASE_SECRET_KEY` | Cloudflare Worker only | bypasses RLS, never bundled |
+
 | Boundary | Trust |
 |---|---|
 | Client → API body | Untrusted. `user_id` always overridden by JWT. `tenant_slug` validated against the `tenants` table. |
 | JWT signature | Trusted (verified by Supabase Auth on the worker). |
-| Service-role key | Trusted, **server-only**, never bundled. |
-| Anon key | Trusted for reads under RLS, **never** trusted for privileged RPCs (locked down in `03_secure_rpc.sql`). |
+| `SUPABASE_SECRET_KEY` | Trusted, **server-only**, only the Worker holds it. |
+| `*_PUBLISHABLE_KEY` | Trusted for reads under RLS, **never** trusted for privileged RPCs (locked down in `03_secure_rpc.sql` + `06_music_rpc.sql`). |
 
 There is no path by which a client can:
 - spend tokens belonging to another user;
 - read another tenant's data;
-- overdraft their own balance (the RPC takes a row lock);
-- invoke `spend_tokens` directly via PostgREST (privileges revoked).
+- overdraft their own balance (every spend RPC takes a row lock);
+- vote twice on the same track (`vote_track` returns `already_voted`,
+  backed by a UNIQUE `(track_id, user_id)` index);
+- redeem a reward they don't own (`start_reward_redemption` joins on
+  `user_id` inside the RPC);
+- invoke `spend_tokens` / `purchase_reward` /
+  `start_reward_redemption` / `vote_track` directly via PostgREST
+  (privileges revoked from `anon`, `authenticated`, `public`).
 
 ### 5.4 Frontend ↔ Worker contract
 
@@ -662,8 +761,83 @@ without a code change.
 | `behavior_events` | ~1200 | 6 categories × random actions, GIN-friendly metadata |
 | `wallet_ledger` | ~250 | 450-token welcome + 0–6 random movements per user |
 
-Requires `SUPABASE_SERVICE_ROLE_KEY` to bypass RLS. Reads `.dev.vars`
-automatically; falls back to env vars if the file is missing.
+Requires `SUPABASE_SECRET_KEY` (new naming) to bypass RLS. Reads
+`.dev.vars` automatically; falls back to env vars if the file is
+missing. Old envs (`SUPABASE_SERVICE_ROLE_KEY`) are still read as a
+fallback so a partially-migrated environment doesn't break the seed.
+
+### 6.9 Tinder Musical — track economy
+
+Three tables sit at the heart of the music game:
+
+```
+event_tracks         (catalog for a given tenant_event)
+  ├─ id, tenant_id, event_id          → tenant_events.id
+  ├─ spotify_id, title, artist
+  ├─ cover_image_url
+  ├─ total_votes      int             ← materialized counter (CQRS)
+  ├─ is_played        bool
+  └─ played_at        timestamptz
+
+track_votes          (append-only audit of every vote cast)
+  ├─ id, tenant_id, event_id, track_id, user_id
+  ├─ vote_type        text  ("free" | "boost")
+  ├─ tokens_spent     int
+  └─ created_at
+  UNIQUE (track_id, user_id)          ← one vote per user per track
+
+user_rewards         (token-funded inventory, see §6.10)
+```
+
+The `vote_track` RPC (in `06_music_rpc.sql`) is the atomic primitive:
+
+1. `SELECT … FOR UPDATE` on `event_tracks` rejects votes on
+   `is_played = true`.
+2. Dedupe check + UNIQUE index belt-and-braces.
+3. On `vote_type = 'boost'`, lock the user's profile, debit the spend
+   via a `wallet_ledger` insert (trigger updates `token_balance` in
+   the projection). Insufficient funds → returns `ok: false` with the
+   current balance.
+4. Insert the `track_votes` row.
+5. `UPDATE event_tracks SET total_votes = total_votes + delta`
+   (free = +1, boost = +5).
+
+Locked down via `REVOKE … FROM public, anon, authenticated; GRANT … TO
+service_role`. The frontend never touches `track_votes` directly —
+every vote flows through `/api/music` POST.
+
+The DJ leaderboard read is a single ORDER BY on the materialized
+`total_votes` column; no aggregation at read time.
+
+### 6.10 Rewards inventory — atomic purchase + 5-min redeem
+
+```
+user_rewards
+  ├─ id, tenant_id, user_id, product_id, event_id
+  ├─ status        text  ("available" | "redeeming" | "redeemed" | "expired")
+  ├─ redeemed_at   timestamptz     ← set on first redemption tap
+  ├─ expires_at    timestamptz     ← redeemed_at + 5 minutes
+  └─ created_at
+```
+
+Two RPCs:
+
+- **`purchase_reward(p_tenant_id, p_user_id, p_product_id, p_event_id)`**
+  — locks the user's profile, validates the product is `is_active`,
+  inserts a `wallet_ledger` debit with the *price snapshot*
+  (`product_name_at_time`, `price_tokens_at_time`), and creates a
+  `user_rewards` row with `status = 'available'`. Returns
+  `{ reward_id, new_balance }`.
+- **`start_reward_redemption(p_tenant_id, p_user_id, p_reward_id)`**
+  — flips `status` to `redeeming`, sets `redeemed_at = now()` and
+  `expires_at = now() + interval '5 minutes'`. Idempotency-safe: the
+  UPDATE only matches rows whose status is still `'available'`.
+
+Both are `SECURITY DEFINER` + locked down to `service_role`.
+
+After expiry the frontend tears down the redemption UI; the row
+remains as `redeeming` in the DB and is reaped by a future scheduled
+job (out of scope for the MVP; see §14).
 
 ---
 
@@ -870,11 +1044,17 @@ both bundles. Re-deploy time: ~25 s.
 
 Cloudflare Pages and Workers Secrets are managed separately:
 
-| Source | Variable |
-|---|---|
-| `wrangler.json` `vars` | `VALUE_FROM_CLOUDFLARE`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` |
-| Worker Secrets (CF dashboard) | `SUPABASE_SERVICE_ROLE_KEY` (production) |
-| Vite `.env` (build-time) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` |
+| Source | Variable | Audience |
+|---|---|---|
+| `wrangler.json` `vars` | `VALUE_FROM_CLOUDFLARE`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | worker (public-ish, set in source) |
+| Cloudflare Workers Secrets | `SUPABASE_SECRET_KEY` | worker only, **never in source** |
+| Vite `.env` (build-time) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | bundled into the browser |
+
+The new Supabase API key naming has fully replaced the legacy `anon` /
+`service_role` labels. Nothing in our code still references those.
+The seeder (`scripts/seed-dashboard.ts`) keeps a one-line fallback to
+the legacy env names so a partially-migrated dev box doesn't break,
+but the production deploy uses the new names everywhere.
 
 ### 12.4 Typecheck
 
@@ -910,49 +1090,74 @@ working path. Fixing the script is a 1-line patch on the next pass.
 
 ### Limitations
 
-- **Wallet is local-first.** Token mutations live in Zustand
-  (`useGameState`). `/api/wallet` is built and tested but not wired
-  to the spend paths — current spends update the client store only.
-- **`api.track` ingestion still lands in `behavior_events` only.** The
-  enterprise tables (`tenant_events`, `tenant_products`, `audit_logs`)
-  exist in SQL but aren't yet referenced by code paths.
+- **Wallet is local-first.** Token mutations in the original demo
+  screens (SecretMenu, Jukebox, LiveBattle boost, Tinder reward) live
+  in Zustand (`useGameState`). `/api/wallet` is built and tested but
+  not yet wired into those spend paths — current spends update the
+  client store only. **The Rewards path IS wired**: any UI calling
+  `useRewards().purchase(...)` goes through `/api/rewards →
+  purchase_reward(...)` and is the canonical pattern to follow when
+  porting the rest.
+- **Music inventory needs seeding.** `/api/music` is wired and the
+  `DJDashboard` polls it correctly, but `event_tracks` and
+  `tenant_events` are empty until a tenant operator seeds them. The
+  Tinder Musical screen still reads from the in-memory `DECK` const;
+  swapping it for `useMusic(eventId)` is a 10-line change.
 - **No real Apple OAuth.** Button skips to hub.
 - **`useGameState` ignores `auth_user_id`.** Real user identity from
   Supabase Auth isn't yet mapped into the demo store; the demo profile
-  is hardcoded (`Alejandro Vega`).
+  is hardcoded (`Alejandro Vega`). Onboarding needs to upsert into
+  `user_profiles` on first `SIGNED_IN`.
+- **Reward reaper.** `user_rewards` rows whose `expires_at < now()`
+  stay as `redeeming` forever. A pg_cron job or a worker cron trigger
+  flipping them to `expired` is one SQL function away.
 - **No Realtime channel.** Live battle votes drift via a 3.5s
   `setInterval`; the production version should subscribe to
-  `behavior_events` filtered by `event_category = 'vote'`.
+  `track_votes` filtered by the active event. DJ dashboard polling
+  (5s) is good enough for the MVP.
 
 ### Migration plan
 
-The order that gets us from demo to production with no breaking change
-visible to the CEO:
+What's already done (post 06-music-rpc):
 
-1. **Wire `/api/wallet` into the store.** Replace
+- ✅ `/api/rewards` wired with `purchase_reward` + `start_reward_redemption`.
+- ✅ `/api/music` wired with `vote_track` + DJ leaderboard polling.
+- ✅ `/api/wallet` exists with atomic `spend_tokens`.
+- ✅ Cookie-based cross-subdomain SSO.
+- ✅ New Supabase key naming (`PUBLISHABLE_KEY` / `SECRET_KEY`).
+
+What's next, in order:
+
+1. **Wire `/api/wallet` into Zustand spend paths.** Replace
    `useGameState.spendTokens / addTokens` with thin wrappers that POST
-   to `/api/wallet`. Keep the local optimistic update; reconcile on
-   response. Failure → revert + toast.
+   to `/api/wallet`. Keep the optimistic update; reconcile on response.
+   Failure → revert + toast.
 2. **Onboarding writes `user_profiles`.** On `SIGNED_IN`, upsert
    `(tenant_id, auth_user_id, email)` and seed the welcome 450 tokens
    via `/api/wallet`. Read profile id → store.
-3. **Replace mock leaderboard.** Hub's `LeaderboardCard` reads
+3. **Port Tinder Musical to `/api/music`.** Replace the in-memory
+   `DECK` const in `TinderMusical.tsx` with `useMusic(eventId).deck`.
+   Hook into the existing GSAP swipe handler — `castVote()` returns
+   the new `total_votes` for the optimistic UI.
+4. **Replace mock leaderboard.** Hub's `LeaderboardCard` reads
    `user_profiles ORDER BY lifetime_earned DESC LIMIT 3 WHERE tenant_id
-   = ?` via PostgREST (anon key + RLS). New index already exists.
-4. **Realtime votes.** Subscribe to
-   `behavior_events` filtered by `event_category = 'vote'`; replace
-   the `setInterval` drift.
-5. **Apply `05_scalability_ready.sql` in production.** Existing data is
-   safe (additive); the worker code path doesn't yet read the new
-   columns so deploy order is decoupled from app deploys.
-6. **Wire `tenant_products` into Secret Menu and Jukebox.** Current
-   catalogs are hardcoded in `SecretMenu.tsx` and the Zustand store;
-   move them to `tenant_products` and let each tenant edit pricing
-   without code changes.
-7. **Audit logging.** Every privileged write in `api.wallet` and (when
-   added) `api.admin` writes an `audit_logs` row with
-   `{ actor_id, action, table_name, record_id, old_data, new_data,
-   ip_address }`. RLS on this table is read-only for `admin` role.
+   = ?` via PostgREST. Index already exists.
+5. **Seed `event_tracks` for the demo.** Add a section to the seeder
+   that creates one `tenant_events` row and ~20 `event_tracks` so the
+   Tinder + DJ flows have real content out of the box.
+6. **Reward reaper.** Add a SQL function `expire_old_rewards()` and
+   schedule it (pg_cron or CF cron trigger) to flip stale `redeeming`
+   rows to `expired`.
+7. **Realtime votes.** Subscribe to `track_votes` filtered by the
+   active event; replace the LiveBattle `setInterval` drift and the
+   DJ-dashboard polling.
+8. **Wire `tenant_products` into Secret Menu and Jukebox.** Current
+   catalogs are hardcoded; move them to `tenant_products` and let each
+   tenant edit pricing without a code change.
+9. **Audit logging.** Every privileged write in `api.wallet` and
+   `api.rewards` writes an `audit_logs` row with `{ actor_id, action,
+   table_name, record_id, old_data, new_data, ip_address }`. RLS on
+   this table is read-only for the `admin` role.
 
 ---
 

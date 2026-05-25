@@ -1,4 +1,5 @@
 # Copy to .dev.vars and fill in your Supabase project values.
+# New Supabase API key naming (no more "anon" / "service_role" labels).
 SUPABASE_URL="https://YOUR-PROJECT-REF.supabase.co"
-SUPABASE_ANON_KEY="eyJ...your-anon-key..."
-SUPABASE_SERVICE_ROLE_KEY="eyJ...service-role-key..."
+SUPABASE_PUBLISHABLE_KEY="sb_publishable_xxxxxxxxxxxxxxxxxxxxxxx"
+SUPABASE_SECRET_KEY="sb_secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

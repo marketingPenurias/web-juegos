@@ -1,15 +1,14 @@
-import type { Route } from "./+types/api.track";
+import type { Route } from "./+types/api.analytics";
 import {
 	analyticsLoader,
 	handleAnalyticsAction,
 } from "../lib/analytics-handler.server";
 
 /**
- * POST /api/track — LEGACY alias for /api/analytics.
+ * POST /api/analytics — canonical event ingestion endpoint.
  *
- * Kept so that older client builds (with hardcoded /api/track URLs in
- * their offline-queue payloads) continue to work after the rename.
- * Forwards to the shared handler — no duplication.
+ * Single source of truth implemented in lib/analytics-handler.server.ts
+ * so the legacy /api/track route can reuse the exact same handler.
  */
 export async function action({ request, context }: Route.ActionArgs) {
 	return handleAnalyticsAction(request, context);
