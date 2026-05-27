@@ -328,7 +328,7 @@ export function Jumbotron({ tenantId, eventId, initialTracks }: Props) {
 
 			<footer className="relative z-10 px-12 pb-8 text-center">
 				<p className="text-xs uppercase tracking-[0.4em] text-zinc-600 font-bold">
-					Vota desde tu móvil · {tenant.slug}.bildy.es
+					Vota desde tu móvil · {tenant.slug}.nightgraph.es
 				</p>
 			</footer>
 		</div>

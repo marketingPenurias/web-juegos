@@ -517,7 +517,7 @@ The frontend lib (`app/lib/analytics.ts`) targets `/api/analytics`;
 Both routes share `app/lib/api.server.ts`:
 
 - **CORS allowlist**: `localhost:5173`, `localhost:8788`, `127.0.0.1:5173`,
-  `web-juegos.pages.dev`, `lapocha.bildy.es`, plus a regex for
+  `web-juegos.pages.dev`, `lapocha.nightgraph.es`, plus a regex for
   `*.web-juegos.pages.dev` (preview deploys). **No wildcards** —
   `Access-Control-Allow-Origin` is the request origin only when it
   passes the allowlist, otherwise the header is omitted (browser blocks).
@@ -903,7 +903,7 @@ job (out of scope for the MVP; see §14).
 `tracking_campaigns` is the *one* table that every acquisition source
 funnels through.  A QR sticker on the VIP toilet, a WhatsApp link from
 a promoter, a Tinder Musical share, an Instagram paid ad — all of them
-land the user on `https://<slug>.bildy.es/?ref=BATHROOM_VIP` and the
+land the user on `https://<slug>.nightgraph.es/?ref=BATHROOM_VIP` and the
 attribution machinery doesn't need to know the difference.
 
 ```
@@ -1037,7 +1037,7 @@ admin | manager | door | bar | dj | promoter | display
 HDMI input.  It has **read-only** access to the live event and zero
 write privileges anywhere.  A venue manager creates one
 `tenant_staff` row per projector and signs the kiosk into a dedicated
-auth account (e.g. `tv@lapocha.bildy.es`).  Both `display` and `admin`
+auth account (e.g. `tv@lapocha.nightgraph.es`).  Both `display` and `admin`
 can open `/tv/music`.
 
 ### 7.1 OAuth flow
@@ -1063,7 +1063,7 @@ so the CEO demo never breaks.
 
 **Without** explicit configuration, Supabase's default storage is
 `localStorage`, which is host-scoped — logging in at
-`lapocha.bildy.es` doesn't carry over to `kapital.bildy.es`.
+`lapocha.nightgraph.es` doesn't carry over to `kapital.nightgraph.es`.
 
 We replaced it with a **custom cookie storage** in
 `app/lib/supabase.client.ts`. The cookie's `Domain` attribute is
@@ -1074,13 +1074,13 @@ computed at runtime:
 | `localhost`, `127.0.0.1` | (none — host-only) |
 | `1.2.3.4` (IPv4) | (none — host-only) |
 | `*.pages.dev` | (none — Cloudflare preview) |
-| `kapital.bildy.es` | `.bildy.es` |
-| `bildy.es` | `.bildy.es` |
+| `kapital.nightgraph.es` | `.nightgraph.es` |
+| `nightgraph.es` | `.nightgraph.es` |
 
 The cookie name is the Supabase default (`sb-<projectRef>-auth-token`)
 — we explicitly removed the previous `storageKey: "lapocha-auth"` so
 that **every subdomain reads the same cookie**. One Google login →
-authenticated everywhere on `*.bildy.es`.
+authenticated everywhere on `*.nightgraph.es`.
 
 Other settings: `SameSite=Lax`, `Secure` only on HTTPS, 30-day
 `max-age`. Storage adapter is synchronous (Supabase JS accepts both),
@@ -1106,12 +1106,12 @@ Pre-login analytics still ingest (no JWT → anonymous events with
 Shared helper in `app/lib/tenant.tsx`:
 
 ```ts
-extractSlugFromHost("lapocha.bildy.es")   → "lapocha"
-extractSlugFromHost("kapital.bildy.es")   → "kapital"
+extractSlugFromHost("lapocha.nightgraph.es")   → "lapocha"
+extractSlugFromHost("kapital.nightgraph.es")   → "kapital"
 extractSlugFromHost("localhost")           → "lapocha" (demo)
 extractSlugFromHost("127.0.0.1")           → "lapocha" (demo)
 extractSlugFromHost("web-juegos.pages.dev")→ "lapocha" (preview)
-extractSlugFromHost("bildy.es")            → ""       (apex → 404)
+extractSlugFromHost("nightgraph.es")            → ""       (apex → 404)
 ```
 
 The same helper is used by:
@@ -1374,7 +1374,7 @@ What's next, in order:
 | **CQRS (ledger + projection)** | Append-only audit + O(1) reads. The trigger makes the projection correct-by-construction. |
 | **Service-role-only RPC** | The TOCTOU race between SELECT and INSERT was real; SQL FOR UPDATE is the only correct fix; locking down the function ensures only the trusted worker can call it. |
 | **Strict tenant resolution (no defaults)** | The cost of accidentally writing one venue's data to another is unrecoverable. Better to surface 400 in dev than to ship a silent leak. |
-| **Cookie SSO** | The product is white-label; users need to log into `lapocha.bildy.es` once and walk into `kapital.bildy.es` with the same session. `localStorage` would have made every venue a separate auth domain. |
+| **Cookie SSO** | The product is white-label; users need to log into `lapocha.nightgraph.es` once and walk into `kapital.nightgraph.es` with the same session. `localStorage` would have made every venue a separate auth domain. |
 | **Offline queue in `localStorage`** | The phones inside the venue have terrible Wi-Fi; the queue is what makes 60 % of the events actually arrive. |
 | **`keepalive: true` fetch** | Survives page-unload; the venue users will absolutely close the tab mid-tween. |
 | **i18n inline (no HTTP namespaces)** | The MVP is one document; the keys fit in the bundle; no race condition between hydration and language load. |
@@ -1407,8 +1407,8 @@ values ('coliseum', 'Coliseum BCN', 'active', jsonb_build_object(
 
 Then:
 
-- Cloudflare DNS: add `coliseum.bildy.es` CNAME to the Worker route.
-- Supabase Auth → URL Configuration: add `https://coliseum.bildy.es` to
+- Cloudflare DNS: add `coliseum.nightgraph.es` CNAME to the Worker route.
+- Supabase Auth → URL Configuration: add `https://coliseum.nightgraph.es` to
   Site URL / Redirect URLs.
 - (Optional) Run a tenant-scoped seeder (`SEED_TENANT_SLUG=coliseum
   npm run seed`).

@@ -8,8 +8,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  *
  *   localhost / 127.0.0.1   → host-only cookie
  *   foo.bar.pages.dev       → host-only cookie (CF preview deploys)
- *   kapital.bildy.es        → `.bildy.es`        (root domain, SSO)
- *   bildy.es                → `.bildy.es`
+ *   kapital.nightgraph.es        → `.nightgraph.es`        (root domain, SSO)
+ *   nightgraph.es                → `.nightgraph.es`
  *
  * We rely on supabase-js's default storageKey (`sb-<projectRef>-auth-token`)
  * so every subdomain reads the same cookie automatically — log in once on
@@ -39,7 +39,7 @@ function getCookieDomain(): string | undefined {
 
 	const parts = host.split(".");
 	if (parts.length < 2) return undefined;
-	// Take the last two labels: `kapital.bildy.es` → `.bildy.es`.
+	// Take the last two labels: `kapital.nightgraph.es` → `.nightgraph.es`.
 	return `.${parts.slice(-2).join(".")}`;
 }
 

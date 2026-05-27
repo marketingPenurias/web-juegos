@@ -41,6 +41,17 @@ export const FALLBACK_TENANT: Tenant = {
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 
+// Brand apex domains we own.  When a user lands on the apex (no
+// subdomain) we want to give them the demo experience instead of a
+// 404 — the Supabase OAuth Site URL also lives on the apex so the
+// post-login redirect MUST resolve to a valid tenant.
+//
+// To add a new brand: include its apex here.  Any subdomain of a
+// brand apex still gets its own slug via the `parts[0]` branch below.
+const BRAND_APEX = new Set([
+	"nightgraph.io",
+]);
+
 /**
  * Pull a tenant slug from a hostname.
  *
@@ -48,8 +59,9 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
  *   - localhost / 127.0.0.1            → "lapocha" (demo)
  *   - bare IPv4                        → "lapocha" (demo)
  *   - *.pages.dev                      → "lapocha" (Cloudflare preview)
+ *   - nightgraph.io / nightgraph.es (apex)  → "lapocha" (brand landing → demo)
  *   - foo.bar.es                       → "foo"
- *   - bar.es (no subdomain)            → "" (caller throws 404)
+ *   - bar.es (unknown apex)            → "" (caller throws 404)
  */
 export function extractSlugFromHost(hostname: string): string {
 	const lower = (hostname || "").toLowerCase();
@@ -57,6 +69,7 @@ export function extractSlugFromHost(hostname: string): string {
 	if (LOCAL_HOSTS.has(lower)) return "lapocha";
 	if (/^\d+(\.\d+){3}$/.test(lower)) return "lapocha";
 	if (lower.endsWith(".pages.dev")) return "lapocha";
+	if (BRAND_APEX.has(lower)) return "lapocha";
 
 	const parts = lower.split(".");
 	if (parts.length < 3) return "";

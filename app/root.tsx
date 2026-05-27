@@ -125,6 +125,19 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	}
 
 	if (!data) {
+		// Same forgiving fallback as the lookup-error branch: when the
+		// caller is the demo slug AND no row exists, paint the in-memory
+		// FALLBACK_TENANT.  Saves new contributors from a confusing 404
+		// before they've run `database/schema.sql` (which seeds the
+		// lapocha row).  For any other slug, 404 stays strict — accidental
+		// cross-tenant leaks are far worse than a confusing dev message.
+		if (slug === "lapocha") {
+			console.warn(
+				"[root.loader] tenant row 'lapocha' missing — falling back to in-memory demo. " +
+					"Run database/schema.sql to seed it.",
+			);
+			return { tenant: { ...FALLBACK_TENANT } as Tenant };
+		}
 		throw new Response("tenant_not_found", { status: 404 });
 	}
 
@@ -199,7 +212,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 	}
 
 	return (
-		<main className="pt-16 p-4 container mx-auto text-white bg-black min-h-[100dvh]">
+		<main className="pt-16 p-4 container mx-auto text-white bg-black min-h-dvh">
 			<h1>{message}</h1>
 			<p>{details}</p>
 			{stack && (

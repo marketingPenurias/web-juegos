@@ -70,11 +70,15 @@ const ALLOWED_ORIGINS = new Set<string>([
 	"http://localhost:8788",
 	"http://127.0.0.1:5173",
 	"https://web-juegos.pages.dev",
-	"https://lapocha.bildy.es",
+	"https://lapocha.nightgraph.es",
+	"https://nightgraph.io",
+	"https://www.nightgraph.io",
 ]);
 
 const ALLOWED_PATTERNS: RegExp[] = [
 	/^https:\/\/[a-z0-9-]+\.web-juegos\.pages\.dev$/, // Cloudflare preview deploys
+	/^https:\/\/[a-z0-9-]+\.nightgraph\.io$/, // every venue subdomain
+	/^https:\/\/[a-z0-9-]+\.nightgraph\.es$/, // legacy brand
 ];
 
 export function isAllowedOrigin(origin: string | null): boolean {
