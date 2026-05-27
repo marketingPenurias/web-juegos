@@ -33,18 +33,61 @@ export const links: Route.LinksFunction = () => [
 ];
 
 /**
- * Root loader — resolves the tenant from the request hostname.  Skipped
- * for `/api/*` paths (those routes are POST-only resource routes; their
- * actions don't need tenant context from the parent).
+ * Root loader — two responsibilities, both pre-render:
  *
- *  - localhost / preview deploys default to slug "lapocha".
- *  - Real subdomains hit the `tenants` table; missing tenant → 404.
- *  - When Supabase isn't configured, falls back to the in-memory demo
- *    tenant ONLY for slug "lapocha" so the CEO presentation never
- *    breaks even before the keys are dropped in.
+ *   1. **Attribution capture.**  If the URL carries a `?ref=CODE` query
+ *      param (QR signage, WhatsApp promoter link, Tinder share — every
+ *      acquisition source funnels through the same shape), set an
+ *      HttpOnly `ng_tracking_ref` cookie that survives the OAuth round-
+ *      trip and gets consumed by `/api/auth-sync` after SIGNED_IN.
+ *      Then 303 redirect to the cleaned URL so the param doesn't end
+ *      up in the user's history, in shared screenshots, or in logs.
+ *
+ *   2. **Tenant resolution** (existing behavior).  Skipped for
+ *      `/api/*` resource routes; localhost / preview deploys default
+ *      to slug "lapocha"; missing tenant → 404; Supabase unconfigured
+ *      + slug != "lapocha" → 503.
  */
+
+const REF_COOKIE = "ng_tracking_ref";
+const REF_COOKIE_MAX_AGE = 60 * 60 * 24; // 24 hours
+
+function captureRefCookie(request: Request): Response | null {
+	const url = new URL(request.url);
+	const ref = url.searchParams.get("ref");
+	if (!ref) return null;
+
+	const cleaned = ref.trim().toUpperCase().slice(0, 64);
+	if (!cleaned) return null;
+
+	url.searchParams.delete("ref");
+	const isHttps = url.protocol === "https:";
+	const cookie = [
+		`${REF_COOKIE}=${encodeURIComponent(cleaned)}`,
+		"Path=/",
+		`Max-Age=${REF_COOKIE_MAX_AGE}`,
+		"SameSite=Lax",
+		"HttpOnly",
+		isHttps ? "Secure" : "",
+	]
+		.filter(Boolean)
+		.join("; ");
+
+	return new Response(null, {
+		status: 303,
+		headers: {
+			Location: url.pathname + url.search + url.hash,
+			"Set-Cookie": cookie,
+		},
+	});
+}
+
 export async function loader({ request, context }: Route.LoaderArgs) {
 	const url = new URL(request.url);
+
+	// ── 1. Attribution capture ────────────────────────────────────────
+	const refRedirect = captureRefCookie(request);
+	if (refRedirect) throw refRedirect;
 
 	if (url.pathname.startsWith("/api/")) {
 		return { tenant: FALLBACK_TENANT };

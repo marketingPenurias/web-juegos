@@ -1,7 +1,7 @@
 # ARCHITECTURE — Nightgraph (La Pocha Gamification MVP)
 
 > **Status**: production-ready, deployed to Cloudflare Pages from `main`.
-> **Last reviewed**: 2026-05-04 (rewards + music API wired, new Supabase key naming).
+> **Last reviewed**: 2026-05-27 (universal attribution engine + Jumbotron / Realtime broadcasting).
 > **Scope**: full-stack — frontend, edge worker, database, observability, security.
 
 This document is the canonical technical reference for the project. It
@@ -84,11 +84,13 @@ web-juegos/
 │   │
 │   ├── routes/
 │   │   ├── home.tsx             # "/"   — SSR splash, hydrates LaPochaApp
+│   │   ├── tv.music.tsx         # "/tv/music" — Jumbotron (cookie auth + Realtime)
 │   │   ├── api.analytics.ts     # "/api/analytics" — POST events (canonical)
 │   │   ├── api.track.ts         # "/api/track"     — alias for /api/analytics
 │   │   ├── api.wallet.ts        # "/api/wallet"    — POST token tx (RPC)
 │   │   ├── api.rewards.ts       # "/api/rewards"   — purchase / redeem (RPC)
-│   │   └── api.music.ts         # "/api/music"     — GET deck + POST vote
+│   │   ├── api.music.ts         # "/api/music"     — GET deck + POST vote
+│   │   └── api.auth-sync.ts     # "/api/auth-sync" — profile upsert + ref consumption
 │   │
 │   ├── components/
 │   │   ├── LaPochaApp.tsx       # screen orchestrator (Zustand selector)
@@ -99,6 +101,7 @@ web-juegos/
 │   │   ├── LanguageSwitch.tsx   # ES/EN toggle (compact + pill modes)
 │   │   ├── HistoryDrawer.tsx    # slide-up sheet for token history
 │   │   ├── RedemptionScreen.tsx # 5-min countdown + GSAP wave (anti-screenshot)
+│   │   ├── Jumbotron.tsx        # TV leaderboard fed by Supabase Realtime
 │   │   │
 │   │   ├── hub/*                # 7 split cards (TokenWallet, Streak, …)
 │   │   ├── live/*               # 4 LiveBattle sub-components
@@ -127,7 +130,9 @@ web-juegos/
 │   │   ├── tenant-resolver.server.ts  # tenant/profile/role resolver (shared)
 │   │   ├── analytics.ts         # offline-queue fetcher + JWT injection
 │   │   ├── analytics-handler.server.ts # shared handler for /api/{analytics,track}
-│   │   ├── api.server.ts        # CORS, JWT verify, jsonResponse helper
+│   │   ├── api.server.ts        # CORS, JWT verify, cookie parse, jsonResponse
+│   │   ├── cookie-auth.server.ts # parse Supabase cookie + role guard (page loaders)
+│   │   ├── tv-music-handler.server.ts  # /tv/music loader logic
 │   │   ├── supabase.client.ts   # browser singleton + cookie storage
 │   │   ├── supabase.server.ts   # publishable + SECRET client factories
 │   │   ├── useRewards.ts        # client hook over /api/rewards
@@ -147,7 +152,9 @@ web-juegos/
 │   ├── 04_tenant_theme.sql      # theme jsonb + Kapital demo tenant
 │   ├── 05_scalability_ready.sql # NIGHTGRAPH upgrade: promoters, products,
 │   │                            #   staff RBAC, events, codes, audit
-│   └── 06_music_rpc.sql         # vote_track RPC + DJ leaderboard view
+│   ├── 06_music_rpc.sql         # vote_track RPC + DJ leaderboard view
+│   └── 07_growth_and_realtime.sql # tracking_campaigns + Realtime publication
+│                                #   + display role + acquisition_campaign_id
 │
 ├── scripts/
 │   └── seed-dashboard.ts        # tsx seeder (50 users / 200 visits / ~1.2k events)
@@ -381,6 +388,32 @@ Realtime via Supabase channels is the long-term path; polling is the
 demo-friendly stopgap that doesn't open a WS straight from the browser
 to the DB.
 
+### 4.11 Jumbotron (live TV broadcast)
+
+`/tv/music` is a standalone full-bleed route consumed by the staff
+laptop driving the venue projector.  It is fundamentally different
+from every other screen:
+
+- **Read-only.** Zero `POST` on the page.  Even logging in is done
+  out-of-band (a kiosk account in `tenant_staff`).
+- **Cookie-auth from the server.**  No `Authorization: Bearer` header —
+  on a page load, the only auth signal is the Supabase cookie.  The
+  `cookie-auth.server.ts` helper parses `sb-<projectRef>-auth-token`,
+  validates the JWT, and checks `tenant_staff.role IN ('display',
+  'admin')`.  401 / 403 are surfaced as RR7 `Response` throws.
+- **Realtime, not polling.**  The browser opens **one** WebSocket via
+  `supabase.channel('tv:event_tracks:<eventId>').on('postgres_changes',
+  …)` and never polls.  Every `INSERT/UPDATE/DELETE` on
+  `event_tracks` is filtered server-side (`event_id=eq.<id>`).
+- **GSAP-driven layout.**  Re-sorts (boost → rank 1) animate via per-
+  row `gsap.to(el, { y: idx * 96 })` with `force3D: true`.  The vote
+  counter uses the same snap-tween pattern as `TokenBadge`.  An
+  ambient pulse on the leader card makes the projector feel alive
+  even between updates.
+- **SSR-painted leaderboard.**  The loader hydrates with the initial
+  top-20, so even if the WS doesn't connect immediately (or drops),
+  the projector never shows a black void.
+
 ---
 
 ## 5. Edge layer (Cloudflare Workers)
@@ -459,6 +492,27 @@ The frontend lib (`app/lib/analytics.ts`) targets `/api/analytics`;
 | GET leaderboard | full sorted list. **Requires `dj` role** in `tenant_staff`; 403 otherwise |
 | POST | atomic `rpc('vote_track', …)` — locks the track row, optionally debits tokens for `boost`, inserts vote, bumps `total_votes` (free +1, boost +5). |
 | Errors | `track_unavailable` (409), `already_voted` (409), `insufficient_funds` (400). |
+
+**`/api/auth-sync`** — `app/routes/api.auth-sync.ts`  *(NEW)*
+
+| Property | Value |
+|---|---|
+| Method | POST (OPTIONS for preflight) |
+| Body | `{ tenant_slug?: string }` — defaults to header / host resolution. |
+| Auth | **JWT required** (401 otherwise) |
+| Tenant | strict, 400 if missing |
+| Behavior | Upsert `user_profiles` keyed on `(tenant_id, auth_user_id)`. On first insert, set `acquisition_campaign_id` from the `ng_tracking_ref` cookie via `resolve_tracking_campaign(tenant, code)`. **Always** clears the cookie via `Set-Cookie: ng_tracking_ref=; Max-Age=0` on the response, so attribution can only fire once. |
+| Returns | `{ profile: { id, is_new, token_balance, lifetime_earned, display_name, acquisition_campaign_id } }` |
+
+**`/tv/music`** — `app/routes/tv.music.tsx`  *(UI route — Jumbotron)*
+
+| Property | Value |
+|---|---|
+| Method | GET (page) |
+| Auth | Cookie-based (`sb-<projectRef>-auth-token` parsed server-side). 401 if missing or invalid. |
+| Role | Requires `display` OR `admin` in `tenant_staff` for the tenant. 403 otherwise. |
+| Loader returns | `{ tenant_id, event_id, tracks: EventTrack[] }` — initial state painted server-side so the projector never shows a black screen during reconnects. |
+| Realtime | Browser subscribes to `postgres_changes` on `event_tracks` filtered by `event_id`. **No HTTP polling**. |
 
 Both routes share `app/lib/api.server.ts`:
 
@@ -548,10 +602,15 @@ database/03_secure_rpc.sql           # RPC lockdown (REVOKE PUBLIC)
 database/04_tenant_theme.sql         # theme jsonb + Kapital demo tenant
         ↓
 database/05_scalability_ready.sql    # NIGHTGRAPH enterprise upgrade
+        ↓
+database/06_music_rpc.sql            # vote_track RPC + DJ leaderboard view
+        ↓
+database/07_growth_and_realtime.sql  # tracking_campaigns + Realtime publication
+                                     #   + display role + acquisition_campaign_id
 ```
 
 Each file is idempotent (`create … if not exists`, `add column if not
-exists`, etc.) so re-runs are safe.
+exists`, `do $$ ... if not exists ... $$`) so re-runs are safe.
 
 ### 6.2 Core schema (`schema.sql`)
 
@@ -839,9 +898,147 @@ After expiry the frontend tears down the redemption UI; the row
 remains as `redeeming` in the DB and is reaped by a future scheduled
 job (out of scope for the MVP; see §14).
 
----
+### 6.11 Universal attribution engine
 
-## 7. Authentication & SSO
+`tracking_campaigns` is the *one* table that every acquisition source
+funnels through.  A QR sticker on the VIP toilet, a WhatsApp link from
+a promoter, a Tinder Musical share, an Instagram paid ad — all of them
+land the user on `https://<slug>.bildy.es/?ref=BATHROOM_VIP` and the
+attribution machinery doesn't need to know the difference.
+
+```
+tracking_campaigns
+  ├─ id            uuid PK
+  ├─ tenant_id     → tenants.id
+  ├─ code          text          ("BATHROOM_VIP", "JUAN_RRPP", …)
+  ├─ campaign_type text          (location | promoter | game | social | paid_ads)
+  ├─ metadata      jsonb         (placement, label, source URL, …)
+  ├─ is_active     bool
+  └─ created_at
+  UNIQUE (tenant_id, code)       ← codes scoped per tenant
+```
+
+`user_profiles` gained an `acquisition_campaign_id uuid` FK so cohort
+queries (`WHERE acquisition_campaign_id = ?`) stay O(1).
+
+**The Bermuda Triangle of OAuth** — attribution survives the Google
+redirect via an HttpOnly cookie:
+
+```
+┌────────────────────────────┐
+│ 1. User taps the QR        │
+│    URL:  /?ref=BATHROOM_VIP│
+└──────────────┬─────────────┘
+               ▼
+┌────────────────────────────────────────────┐
+│ 2. Cloudflare Worker · root.loader         │
+│    - reads ?ref=                           │
+│    - Set-Cookie: ng_tracking_ref=…         │
+│       Max-Age=86400 HttpOnly SameSite=Lax  │
+│    - 303 redirect → clean URL              │
+└──────────────┬─────────────────────────────┘
+               ▼
+┌──────────────────────────┐
+│ 3. User clicks "Google"  │
+│    → accounts.google.com │
+└──────────────┬───────────┘
+               ▼
+┌──────────────────────────────────────┐
+│ 4. Google redirects back to origin   │
+│    The ng_tracking_ref cookie        │
+│    survives this round-trip          │
+│    (same-origin, HttpOnly)           │
+└──────────────┬───────────────────────┘
+               ▼
+┌────────────────────────────────────────────┐
+│ 5. supabase-js parses URL hash,            │
+│    fires SIGNED_IN                         │
+└──────────────┬─────────────────────────────┘
+               ▼
+┌────────────────────────────────────────────┐
+│ 6. Onboarding listener:                    │
+│    POST /api/auth-sync                     │
+│      Authorization: Bearer <jwt>           │
+│      Cookie: ng_tracking_ref=BATHROOM_VIP  │
+└──────────────┬─────────────────────────────┘
+               ▼
+┌────────────────────────────────────────────┐
+│ 7. Edge Worker /api/auth-sync:             │
+│    - verify JWT via Supabase auth.getUser  │
+│    - resolve_tracking_campaign(tenant,code)│
+│    - INSERT user_profiles with             │
+│        acquisition_campaign_id = <uuid>    │
+│    - Set-Cookie: ng_tracking_ref=;Max-Age=0│
+└────────────────────────────────────────────┘
+```
+
+Key design points:
+
+- **One cookie, one source of truth.**  Whether the entry is a QR, a
+  WhatsApp link, or a deep-link from another app, all of them set the
+  same cookie with the same shape.  Frontend never reads it (HttpOnly).
+- **Attribution is once-and-done.**  The cookie is cleared the first
+  time `/api/auth-sync` runs.  If the user is an existing profile, we
+  only PATCH `acquisition_campaign_id` if it was NULL (you can't be
+  re-attributed mid-relationship).
+- **The resolver lives in SQL.**  `resolve_tracking_campaign(tenant,
+  code)` is a `SECURITY DEFINER` stable function — easy to lock down
+  later and unit-test in the Supabase SQL editor.
+- **Codes are case-insensitive.**  Internally normalised to UPPER on
+  both the cookie write side and the SQL resolver.
+
+### 6.12 Realtime broadcasting
+
+The TV / Jumbotron projector is read-only, but it needs *immediate*
+updates when a Boost vote lands.  Polling every 5 s is fine for the DJ
+laptop but would burn the database for a 12-hour party showing a
+projector across N venues simultaneously.
+
+Solution: enable Supabase Realtime on the right tables.
+
+```sql
+alter publication supabase_realtime add table public.event_tracks;
+alter publication supabase_realtime add table public.behavior_events;
+```
+
+That makes Postgres logical replication ship `INSERT/UPDATE/DELETE`
+events for those tables onto the Realtime broadcast service.  The
+browser subscribes over a single WebSocket:
+
+```ts
+supabase
+  .channel(`tv:event_tracks:${eventId}`)
+  .on("postgres_changes", {
+    event: "*",
+    schema: "public",
+    table: "event_tracks",
+    filter: `event_id=eq.${eventId}`,
+  }, applyDiff)
+  .subscribe();
+```
+
+The filter is enforced **on the Realtime server** — the WebSocket only
+receives changes that match `event_id = …`.  No client-side filtering,
+no over-fetching.
+
+Authorisation flows through the existing Postgres RLS policies — the
+Realtime server consults them with the user's JWT (sent as part of the
+WS handshake by the supabase-js client when a session is present).
+
+### 6.13 `display` role for kiosks
+
+A new value joins `tenant_staff.role`:
+
+```
+admin | manager | door | bar | dj | promoter | display
+```
+
+`display` is intended for the staff laptop hard-wired to the projector
+HDMI input.  It has **read-only** access to the live event and zero
+write privileges anywhere.  A venue manager creates one
+`tenant_staff` row per projector and signs the kiosk into a dedicated
+auth account (e.g. `tv@lapocha.bildy.es`).  Both `display` and `admin`
+can open `/tv/music`.
 
 ### 7.1 OAuth flow
 
@@ -1118,13 +1315,17 @@ working path. Fixing the script is a 1-line patch on the next pass.
 
 ### Migration plan
 
-What's already done (post 06-music-rpc):
+What's already done (post 07-growth-and-realtime):
 
 - ✅ `/api/rewards` wired with `purchase_reward` + `start_reward_redemption`.
 - ✅ `/api/music` wired with `vote_track` + DJ leaderboard polling.
 - ✅ `/api/wallet` exists with atomic `spend_tokens`.
+- ✅ `/api/auth-sync` upserts profile + consumes the tracking cookie.
 - ✅ Cookie-based cross-subdomain SSO.
 - ✅ New Supabase key naming (`PUBLISHABLE_KEY` / `SECRET_KEY`).
+- ✅ Universal attribution engine (`tracking_campaigns` + `?ref=` capture).
+- ✅ Supabase Realtime publication on `event_tracks` + `behavior_events`.
+- ✅ `/tv/music` Jumbotron with cookie-auth, `display` role, and Realtime.
 
 What's next, in order:
 

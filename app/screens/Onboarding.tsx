@@ -4,32 +4,62 @@ import { Apple } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { LanguageSwitch } from "../components/LanguageSwitch";
-import { getBrowserSupabase } from "../lib/supabase.client";
+import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
+import { useTenant } from "../lib/tenant";
 
 export function Onboarding() {
 	const { t } = useTranslation();
 	const setScreen = useGameState((s) => s.setScreen);
+	const tenant = useTenant();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [authBusy, setAuthBusy] = useState(false);
 	const [authError, setAuthError] = useState<string | null>(null);
 
 	// If a session already exists (e.g. user just returned from the OAuth
-	// redirect), advance to the hub.  Listener stays mounted to handle
-	// SIGNED_IN events as soon as Supabase parses the URL hash.
+	// redirect), sync the profile (consumes the ng_tracking_ref cookie) and
+	// advance to the hub.  Listener stays mounted to handle SIGNED_IN events
+	// as soon as Supabase parses the URL hash.
 	useEffect(() => {
 		const supabase = getBrowserSupabase();
 		if (!supabase) return;
 
+		const sync = async () => {
+			try {
+				const token = await getAccessToken();
+				if (!token) return;
+				// Fire-and-forget: response carries the cleared ng_tracking_ref
+				// cookie + the user_profile id.  We don't block the UI on it.
+				await fetch("/api/auth-sync", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${token}`,
+					},
+					body: JSON.stringify({ tenant_slug: tenant.slug }),
+					credentials: "include",
+				});
+			} catch {
+				// Profile sync failures don't block the user — they'll be
+				// retried implicitly on the next privileged write.
+			}
+		};
+
 		void supabase.auth.getSession().then(({ data }) => {
-			if (data.session) setScreen("hub");
+			if (data.session) {
+				void sync();
+				setScreen("hub");
+			}
 		});
 
 		const { data } = supabase.auth.onAuthStateChange((event, session) => {
-			if (event === "SIGNED_IN" && session) setScreen("hub");
+			if (event === "SIGNED_IN" && session) {
+				void sync();
+				setScreen("hub");
+			}
 		});
 
 		return () => data.subscription.unsubscribe();
-	}, [setScreen]);
+	}, [setScreen, tenant.slug]);
 
 	const handleGoogleLogin = async () => {
 		const supabase = getBrowserSupabase();

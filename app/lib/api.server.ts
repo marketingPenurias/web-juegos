@@ -2,6 +2,59 @@ import type { AppLoadContext } from "react-router";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "./supabase.server";
 
+// ─── Cookie parsing ──────────────────────────────────────────────────────
+
+/**
+ * Parse a `Cookie` request header into a plain map.  Returns an empty
+ * map when the header is absent.  Values are URI-decoded.
+ */
+export function parseCookies(request: Request): Record<string, string> {
+	const header = request.headers.get("cookie");
+	if (!header) return {};
+	const out: Record<string, string> = {};
+	for (const piece of header.split(";")) {
+		const eq = piece.indexOf("=");
+		if (eq < 0) continue;
+		const name = piece.slice(0, eq).trim();
+		if (!name) continue;
+		const value = piece.slice(eq + 1).trim();
+		try {
+			out[name] = decodeURIComponent(value);
+		} catch {
+			out[name] = value;
+		}
+	}
+	return out;
+}
+
+export type SerializeCookieOptions = {
+	path?: string;
+	maxAge?: number;
+	httpOnly?: boolean;
+	sameSite?: "Lax" | "Strict" | "None";
+	secure?: boolean;
+	domain?: string;
+};
+
+/**
+ * Build a `Set-Cookie` header value with sensible defaults.  Used by
+ * the auth-sync route to expire `ng_tracking_ref` once consumed.
+ */
+export function serializeCookie(
+	name: string,
+	value: string,
+	opts: SerializeCookieOptions = {},
+): string {
+	const parts = [`${name}=${encodeURIComponent(value)}`];
+	parts.push(`Path=${opts.path ?? "/"}`);
+	if (typeof opts.maxAge === "number") parts.push(`Max-Age=${opts.maxAge}`);
+	parts.push(`SameSite=${opts.sameSite ?? "Lax"}`);
+	if (opts.httpOnly ?? true) parts.push("HttpOnly");
+	if (opts.secure) parts.push("Secure");
+	if (opts.domain) parts.push(`Domain=${opts.domain}`);
+	return parts.join("; ");
+}
+
 /**
  * Shared edge-API helpers: CORS, JWT verification, JSON helpers.
  *

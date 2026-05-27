@@ -7,4 +7,6 @@ export default [
 	route("api/wallet", "routes/api.wallet.ts"),
 	route("api/rewards", "routes/api.rewards.ts"),
 	route("api/music", "routes/api.music.ts"),
+	route("api/auth-sync", "routes/api.auth-sync.ts"),
+	route("tv/music", "routes/tv.music.tsx"),
 ] satisfies RouteConfig;

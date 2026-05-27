@@ -76,6 +76,7 @@ export interface UserProfileRow {
 	email: string;
 	display_name: string | null;
 	acquisition_source: string | null;
+	acquisition_campaign_id: string | null;
 	vip_level: number;
 	token_balance: number;
 	lifetime_earned: number;
@@ -193,7 +194,8 @@ export type StaffRole =
 	| "door"
 	| "bar"
 	| "dj"
-	| "promoter";
+	| "promoter"
+	| "display";
 
 export interface TenantStaffRow {
 	id: string;
@@ -217,6 +219,32 @@ export interface PromoterCodeRow {
 	commission_percent: number | null;
 	created_at: string;
 }
+
+// ─── tracking_campaigns ───────────────────────────────────────────────────
+
+export type CampaignType =
+	| "location"
+	| "promoter"
+	| "game"
+	| "social"
+	| "paid_ads";
+
+export interface TrackingCampaignRow {
+	id: string;
+	tenant_id: string;
+	code: string;
+	campaign_type: CampaignType;
+	metadata: Json;
+	is_active: boolean;
+	created_at: string;
+}
+export type TrackingCampaignInsert = Omit<
+	TrackingCampaignRow,
+	"id" | "created_at" | "is_active" | "metadata"
+> &
+	Partial<
+		Pick<TrackingCampaignRow, "id" | "created_at" | "is_active" | "metadata">
+	>;
 
 // ─── audit_logs ───────────────────────────────────────────────────────────
 
