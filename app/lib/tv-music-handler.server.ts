@@ -63,6 +63,10 @@ export async function loadJumbotron(
 
 	let tracks: JumbotronLoaderData["tracks"] = [];
 	if (event_id) {
+		// Jumbotron renders MAX_ROWS = 8.  Fetching 10 gives us a tiny
+		// safety margin (covers the case where the WS reconciliation
+		// races ahead and a row falls off the bottom) without paying
+		// for the rest of the catalog on every loader hit.
 		const { data } = await supabase
 			.from("event_tracks")
 			.select(
@@ -72,7 +76,7 @@ export async function loadJumbotron(
 			.eq("event_id", event_id)
 			.order("total_votes", { ascending: false })
 			.order("title", { ascending: true })
-			.limit(20);
+			.limit(10);
 		tracks = (data ?? []) as JumbotronLoaderData["tracks"];
 	}
 

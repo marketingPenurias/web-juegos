@@ -57,6 +57,26 @@ export function Jumbotron({ tenantId, eventId, initialTracks }: Props) {
 		[tracks],
 	);
 
+	// ── Map sweep: prune refs for tracks that have left the visible
+	// window.  The TV runs for 8h+, so without this, demoted tracks
+	// would accumulate as detached DOM nodes inside the closure of the
+	// `Map` (DOM references in long-lived Refs == GC pin).  The ref
+	// callbacks already delete on unmount-of-element, but a sort drop
+	// from the top-8 to position 9 KEEPS the DOM node mounted somewhere
+	// off-screen until React reconciles, so we sweep explicitly.
+	useEffect(() => {
+		const alive = new Set(sorted.map((t) => t.id));
+		for (const id of rowRefs.current.keys()) {
+			if (!alive.has(id)) rowRefs.current.delete(id);
+		}
+		for (const id of voteRefs.current.keys()) {
+			if (!alive.has(id)) voteRefs.current.delete(id);
+		}
+		for (const id of previousVotes.current.keys()) {
+			if (!alive.has(id)) previousVotes.current.delete(id);
+		}
+	}, [sorted]);
+
 	// ── Realtime subscription ───────────────────────────────────────────
 	useEffect(() => {
 		const supabase = getBrowserSupabase();
@@ -227,6 +247,7 @@ export function Jumbotron({ tenantId, eventId, initialTracks }: Props) {
 								key={track.id}
 								ref={(el) => {
 									if (el) rowRefs.current.set(track.id, el);
+									else rowRefs.current.delete(track.id);
 								}}
 								className={cn(
 									"absolute top-0 left-0 right-0 flex items-center gap-6 px-6 rounded-2xl border transform-gpu translate-z-0 will-change-transform",
@@ -282,6 +303,7 @@ export function Jumbotron({ tenantId, eventId, initialTracks }: Props) {
 										<span
 											ref={(el) => {
 												if (el) voteRefs.current.set(track.id, el);
+												else voteRefs.current.delete(track.id);
 											}}
 											className="text-4xl font-black tabular-nums text-(--jumbo-accent)"
 										>

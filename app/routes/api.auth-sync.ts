@@ -175,18 +175,84 @@ export async function action({ request, context }: Route.ActionArgs) {
 		.select("id, token_balance, lifetime_earned, display_name")
 		.maybeSingle();
 
-	if (insertErr || !inserted) {
+	// ── TOCTOU recovery ───────────────────────────────────────────────
+	// React StrictMode + a fast SIGNED_IN re-fire can trigger this
+	// handler twice in parallel.  The second call's INSERT collides
+	// with the partial UNIQUE index on (auth_user_id) — Postgres
+	// returns SQLSTATE 23505.  Treat it as if it were the existing
+	// branch from the start: re-SELECT and return 200.
+	if (insertErr) {
+		const code =
+			(insertErr as { code?: string | null }).code ?? "";
+		const isUniqueViolation =
+			code === "23505" ||
+			/duplicate key|unique constraint/i.test(insertErr.message ?? "");
+
+		if (isUniqueViolation) {
+			const { data: recovered } = await supabase
+				.from("user_profiles")
+				.select(
+					"id, token_balance, lifetime_earned, acquisition_campaign_id, display_name",
+				)
+				.eq("tenant_id", tenant_id)
+				.eq("auth_user_id", verified.id)
+				.maybeSingle();
+
+			if (recovered) {
+				// If the loser of the race had a fresh attribution to apply,
+				// PATCH it onto the winner (only when the row is still NULL).
+				if (
+					acquisition_campaign_id &&
+					!recovered.acquisition_campaign_id
+				) {
+					await supabase
+						.from("user_profiles")
+						.update({ acquisition_campaign_id })
+						.eq("id", recovered.id);
+				}
+
+				return jsonResponse(
+					{
+						ok: true,
+						profile: {
+							id: recovered.id,
+							is_new: false,
+							token_balance: recovered.token_balance ?? 0,
+							lifetime_earned: recovered.lifetime_earned ?? 0,
+							display_name: recovered.display_name,
+							acquisition_campaign_id:
+								acquisition_campaign_id ??
+								recovered.acquisition_campaign_id,
+						},
+					},
+					{
+						request,
+						// Success path → consume the tracking cookie.
+						headers: { "Set-Cookie": clearCookie },
+					},
+				);
+			}
+		}
+
 		console.warn(
 			"[api.auth-sync] profile insert failed",
-			insertErr?.message,
+			insertErr.message,
 		);
+		// IMPORTANT: do NOT clear the cookie on failure.  The user
+		// will retry on the next privileged write; attribution must
+		// survive that retry.
 		return jsonResponse(
 			{ ok: false, error: "profile_insert_failed" },
-			{
-				status: 500,
-				request,
-				headers: { "Set-Cookie": clearCookie },
-			},
+			{ status: 500, request },
+		);
+	}
+
+	if (!inserted) {
+		// Defensive: PostgREST returned null without an error — bail
+		// without clearing the cookie so attribution survives.
+		return jsonResponse(
+			{ ok: false, error: "profile_insert_failed" },
+			{ status: 500, request },
 		);
 	}
 
