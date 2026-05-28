@@ -11,6 +11,9 @@ export default [
 	route("api/session", "routes/api.session.ts"),
 	route("api/history", "routes/api.history.ts"),
 	route("api/auth-sync", "routes/api.auth-sync.ts"),
+	// TODO: CLEANUP DEBUG — verificado: `auth/callback` no colisiona con
+	// ninguna otra entrada (ni con la convención de archivos de RR7
+	// porque usamos `route(...)` explícito).  Path final: /auth/callback.
 	route("auth/callback", "routes/auth.callback.tsx"),
 	route("tv/music", "routes/tv.music.tsx"),
 	route("legal", "routes/legal.tsx"),

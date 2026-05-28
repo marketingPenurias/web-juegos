@@ -35,12 +35,24 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export default function AuthCallback() {
+	// TODO: CLEANUP DEBUG
+	console.log("[AUTH DEBUG] auth.callback render", {
+		href: typeof window !== "undefined" ? window.location.href : "(ssr)",
+		search:
+			typeof window !== "undefined" ? window.location.search : "(ssr)",
+	});
+
 	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const [error, setError] = useState<string | null>(null);
 	const exchangedRef = useRef(false);
 
 	useEffect(() => {
+		// TODO: CLEANUP DEBUG
+		console.log("[AUTH DEBUG] auth.callback useEffect fired", {
+			alreadyExchanged: exchangedRef.current,
+		});
+
 		// React Strict Mode dispara useEffect dos veces en dev.  Sin esta
 		// guarda, el segundo intento de `exchangeCodeForSession` falla con
 		// "code verifier mismatch" porque el primero ya consumió el code.
@@ -48,7 +60,13 @@ export default function AuthCallback() {
 		exchangedRef.current = true;
 
 		const supabase = getBrowserSupabase();
+		// TODO: CLEANUP DEBUG
+		console.log("[AUTH DEBUG] supabase client", {
+			hasClient: !!supabase,
+		});
 		if (!supabase) {
+			// TODO: CLEANUP DEBUG
+			console.error("[AUTH DEBUG] no supabase client → bouncing /");
 			navigate("/", { replace: true });
 			return;
 		}
@@ -59,28 +77,78 @@ export default function AuthCallback() {
 		const oauthError =
 			params.get("error_description") || params.get("error");
 		if (oauthError) {
+			// TODO: CLEANUP DEBUG
+			console.error("[AUTH DEBUG] oauth error from provider", oauthError);
 			setError(oauthError);
 			return;
 		}
 
 		const code = params.get("code");
+		// TODO: CLEANUP DEBUG
+		console.log("[AUTH DEBUG] code received", {
+			present: !!code,
+			length: code?.length ?? 0,
+			preview: code ? `${code.slice(0, 8)}…` : null,
+		});
 		if (!code) {
 			// Sin code y sin error: el usuario aterrizó aquí sin pasar por
 			// Google (refresh manual, share del link).  Vuelve al inicio.
+			// TODO: CLEANUP DEBUG
+			console.warn("[AUTH DEBUG] no code in URL → bouncing /");
 			navigate("/", { replace: true });
 			return;
 		}
 
 		void (async () => {
-			const { error: exchangeError } =
+			// TODO: CLEANUP DEBUG
+			console.log("[AUTH DEBUG] calling exchangeCodeForSession…");
+			const exchangeResult =
 				await supabase.auth.exchangeCodeForSession(code);
-			if (exchangeError) {
-				setError(exchangeError.message);
+			// TODO: CLEANUP DEBUG
+			console.log("[AUTH DEBUG] exchange result", {
+				hasError: !!exchangeResult.error,
+				errorMessage: exchangeResult.error?.message,
+				hasSession: !!exchangeResult.data?.session,
+				userId: exchangeResult.data?.session?.user?.id,
+				email: exchangeResult.data?.session?.user?.email,
+				accessTokenPresent:
+					!!exchangeResult.data?.session?.access_token,
+				expiresAt: exchangeResult.data?.session?.expires_at,
+			});
+
+			if (exchangeResult.error) {
+				// TODO: CLEANUP DEBUG
+				console.error(
+					"[AUTH DEBUG] exchange failed",
+					exchangeResult.error,
+				);
+				setError(exchangeResult.error.message);
 				return;
 			}
-			// onAuthStateChange en Onboarding capturará el SIGNED_IN y
-			// pondrá `currentScreen = "hub"`.  Aquí solo limpiamos URL y
-			// volvemos al root.
+
+			// TODO: CLEANUP DEBUG
+			// Pausa intencionada de 500 ms para garantizar que cookieStorage
+			// termina de escribir antes de la siguiente lectura en `/`.
+			// Si esto soluciona el bug, confirma que hay un race entre la
+			// escritura asincrónica de la cookie y el getSession() inmediato
+			// del Onboarding.
+			console.log(
+				"[AUTH DEBUG] exchange OK · sleeping 500ms before navigate",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			// TODO: CLEANUP DEBUG
+			// Releemos la sesión justo antes de navegar para confirmar que
+			// persistió en cookieStorage.
+			const { data: postSession } = await supabase.auth.getSession();
+			// TODO: CLEANUP DEBUG
+			console.log("[AUTH DEBUG] post-sleep getSession", {
+				hasSession: !!postSession.session,
+				userId: postSession.session?.user?.id,
+			});
+
+			// TODO: CLEANUP DEBUG
+			console.log("[AUTH DEBUG] navigating to /");
 			navigate("/", { replace: true });
 		})();
 	}, [navigate, params]);
@@ -93,7 +161,7 @@ export default function AuthCallback() {
 						<h1 className="text-2xl font-black italic tracking-tight mb-3">
 							No pudimos completar tu inicio de sesión
 						</h1>
-						<p className="text-sm text-zinc-400 mb-6 break-words">
+						<p className="text-sm text-zinc-400 mb-6 wrap-break-word">
 							{error}
 						</p>
 						<button
