@@ -22,6 +22,10 @@ const resources = {
 				continueGoogle: "Continuar con Google",
 				connecting: "Conectando…",
 				terms: "Al continuar aceptas las normas de la sala. +18.",
+				legalPrefix: "Al continuar, aceptas nuestros ",
+				legalLink: "Términos de Uso y Política de Privacidad",
+				legalSuffix:
+					". Solo usaremos tus datos para el funcionamiento de la app durante este piloto.",
 			},
 			hub: {
 				tierTitle: "Tu nivel",
@@ -335,6 +339,10 @@ const resources = {
 				continueGoogle: "Continue with Google",
 				connecting: "Connecting…",
 				terms: "By continuing you accept the venue rules. 18+.",
+				legalPrefix: "By continuing you accept our ",
+				legalLink: "Terms of Use and Privacy Policy",
+				legalSuffix:
+					". We'll only use your data to run the app during this pilot.",
 			},
 			hub: {
 				profileName: "Alejandro",

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Apple } from "lucide-react";
+import { Link } from "react-router";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { LanguageSwitch } from "../components/LanguageSwitch";
@@ -229,6 +230,21 @@ export function Onboarding() {
 							{authError}
 						</p>
 					)}
+
+					{/*
+					 * Escudo Legal MVP (RGPD Art. 13 — info al sujeto en la
+					 * recogida).  Cookies sólo técnicas → sin banner.
+					 */}
+					<p className="onb-btn text-xs text-zinc-500 text-center leading-relaxed px-2 mt-2">
+						{t("onboarding.legalPrefix")}
+						<Link
+							to="/legal"
+							className="text-zinc-300 underline underline-offset-2 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 rounded"
+						>
+							{t("onboarding.legalLink")}
+						</Link>
+						{t("onboarding.legalSuffix")}
+					</p>
 				</div>
 
 				<div className="w-[120px] h-1.5 bg-zinc-800 rounded-full mx-auto mt-4 mb-2" />

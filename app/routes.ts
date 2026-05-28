@@ -11,4 +11,5 @@ export default [
 	route("api/session", "routes/api.session.ts"),
 	route("api/auth-sync", "routes/api.auth-sync.ts"),
 	route("tv/music", "routes/tv.music.tsx"),
+	route("legal", "routes/legal.tsx"),
 ] satisfies RouteConfig;
