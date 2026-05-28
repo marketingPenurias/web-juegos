@@ -127,7 +127,12 @@ export function useMusic(eventId: string | null) {
 				});
 				// Optimistically drop the voted track from the deck.
 				setDeck((d) => d.filter((t) => t.id !== params.track_id));
-				return { ok: true as const, ...data };
+				return {
+					ok: true as const,
+					vote_id: data.vote_id,
+					total_votes: data.total_votes,
+					balance: data.balance,
+				};
 			} catch (err) {
 				const message = err instanceof Error ? err.message : "network_error";
 				return {

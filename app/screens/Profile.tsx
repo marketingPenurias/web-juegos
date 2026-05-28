@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	ArrowLeft,
@@ -14,16 +14,57 @@ import {
 } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
+import { useAuthUser } from "../lib/useAuthUser";
+import { TIERS, tierFromLifetime, tierProgressFraction } from "../lib/tier";
+import { getBrowserSupabase } from "../lib/supabase.client";
 import { LanguageSwitch } from "../components/LanguageSwitch";
+
+/**
+ * Profile — versión REAL.
+ *
+ *   · email/handle ← Supabase Auth (`useAuthUser`).  Sin sesión, se
+ *     muestra etiqueta "Invitado" en vez de un mock que parezca real.
+ *   · tokens disponibles ← `useGameState.tokens` (sincronizado por
+ *     useSession).
+ *   · tier + progreso ← `lifetimeEarned` vía helpers en `lib/tier`.
+ *   · "Cerrar sesión" cierra la sesión Supabase Y limpia el store
+ *     (logout).  Sin eso, el SIGNED_OUT no llega y el usuario se queda
+ *     con balance de la sesión anterior persistido en sessionStorage.
+ */
 
 export function Profile() {
 	const { t } = useTranslation();
-	const profile = useGameState((s) => s.profile);
 	const tokens = useGameState((s) => s.tokens);
+	const lifetime = useGameState((s) => s.lifetimeEarned);
 	const setScreen = useGameState((s) => s.setScreen);
-	const logout = useGameState((s) => s.logout);
+	const logoutStore = useGameState((s) => s.logout);
+	const authUser = useAuthUser();
 
 	const containerRef = useRef<HTMLDivElement>(null);
+
+	const tier = useMemo(() => tierFromLifetime(lifetime), [lifetime]);
+	const tierMeta = TIERS[tier];
+	const progress = useMemo(
+		() => tierProgressFraction(lifetime, tier),
+		[lifetime, tier],
+	);
+
+	const displayName =
+		authUser?.displayName?.trim() ||
+		authUser?.email?.split("@")[0] ||
+		t("profile.guest", "Invitado");
+
+	const handleLogout = async () => {
+		const supabase = getBrowserSupabase();
+		if (supabase) {
+			try {
+				await supabase.auth.signOut();
+			} catch {
+				/* swallow — store logout still clears UI */
+			}
+		}
+		logoutStore();
+	};
 
 	useGSAP(
 		() => {
@@ -59,51 +100,91 @@ export function Profile() {
 			</header>
 
 			<section className="px-6 pt-6 profile-fade flex flex-col items-center text-center">
-				<div className="w-24 h-24 rounded-full bg-linear-to-tr from-cyan-600 to-blue-500 p-1 shadow-[0_0_40px_rgba(0,212,255,0.45)]">
-					<div className="w-full h-full bg-zinc-950 rounded-full flex items-center justify-center">
-						<User
-							className="w-12 h-12 text-cyan-400"
-							aria-hidden="true"
-						/>
+				<div
+					className="w-24 h-24 rounded-full p-1 shadow-[0_0_40px_rgba(0,212,255,0.45)]"
+					style={{
+						background: `linear-gradient(135deg, ${tierMeta.colorPrimary}, ${tierMeta.colorAccent})`,
+					}}
+				>
+					<div className="w-full h-full bg-zinc-950 rounded-full flex items-center justify-center overflow-hidden">
+						{authUser?.avatarUrl ? (
+							<img
+								src={authUser.avatarUrl}
+								alt=""
+								referrerPolicy="no-referrer"
+								className="w-full h-full object-cover"
+							/>
+						) : (
+							<User
+								className="w-12 h-12"
+								style={{ color: tierMeta.colorPrimary }}
+								aria-hidden="true"
+							/>
+						)}
 					</div>
 				</div>
 				<h2 className="mt-4 text-2xl font-black italic tracking-tight text-white">
-					{profile.handle}
+					{displayName}
 				</h2>
 				<p className="text-zinc-400 text-sm flex items-center gap-1.5 mt-1">
 					<Mail className="w-3.5 h-3.5" aria-hidden="true" />
-					{profile.email}
+					{authUser?.email ?? t("profile.noEmail", "—")}
 				</p>
 			</section>
 
 			<section className="px-6 pt-6 profile-fade">
-				<div className="bg-linear-to-br from-[#0a192f] to-[#040b16] rounded-2xl border border-cyan-500/30 p-5 shadow-[0_10px_30px_rgba(0,240,255,0.18)]">
+				<div
+					className="rounded-2xl border p-5"
+					style={{
+						background: `linear-gradient(135deg, ${tierMeta.colorPrimary}1a, #040b16)`,
+						borderColor: `${tierMeta.colorPrimary}55`,
+						boxShadow: `0 10px 30px ${tierMeta.colorPrimary}33`,
+					}}
+				>
 					<div className="flex items-center justify-between mb-2">
 						<div className="flex items-center gap-2">
 							<Sparkles
-								className="w-4 h-4 text-amber-300"
+								className="w-4 h-4"
+								style={{ color: tierMeta.colorPrimary }}
 								aria-hidden="true"
 							/>
-							<span className="text-amber-300 text-xs font-black uppercase tracking-widest">
-								{t("profile.levelHeader", { level: profile.level })}
+							<span
+								className="text-xs font-black uppercase tracking-widest"
+								style={{ color: tierMeta.colorPrimary }}
+							>
+								{tierMeta.emoji} {t("profile.tierLevel", "Nivel {{tier}}", {
+									tier: tierMeta.displayName,
+								})}
 							</span>
 						</div>
-						<span className="text-xs text-cyan-200/70 font-bold">
-							{profile.levelProgress}% → Nivel {profile.level + 1}
+						<span className="text-xs text-zinc-300 font-bold tabular-nums">
+							{Math.round(progress * 100)}%
 						</span>
 					</div>
 					<div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden">
 						<div
-							className="h-full bg-linear-to-r from-cyan-500 to-blue-500 rounded-full shadow-[0_0_12px_rgba(0,240,255,0.6)]"
-							style={{ width: `${profile.levelProgress}%` }}
+							className="h-full rounded-full"
+							style={{
+								width: `${Math.round(progress * 100)}%`,
+								background: `linear-gradient(90deg, ${tierMeta.colorPrimary}, ${tierMeta.colorAccent})`,
+								boxShadow: `0 0 12px ${tierMeta.colorPrimary}99`,
+							}}
 						/>
 					</div>
-					<div className="mt-4 flex items-center gap-2 text-cyan-300">
-						<Coins className="w-4 h-4" aria-hidden="true" />
-						<span className="font-black text-lg tabular-nums">{tokens}</span>
-						<span className="text-xs text-cyan-200/60 uppercase tracking-widest font-bold">
-							{t("profile.balanceLabel")}
-						</span>
+					<div className="mt-4 flex items-center gap-4">
+						<div className="flex items-center gap-2 text-cyan-300">
+							<Coins className="w-4 h-4" aria-hidden="true" />
+							<span className="font-black text-lg tabular-nums">{tokens}</span>
+							<span className="text-[10px] text-cyan-200/60 uppercase tracking-widest font-bold">
+								{t("profile.balanceLabel")}
+							</span>
+						</div>
+						<div className="flex items-center gap-2 text-zinc-400 ml-auto">
+							<span className="font-black text-sm tabular-nums">{lifetime}</span>
+							<span className="text-[10px] uppercase tracking-widest font-bold">
+								{t("profile.lifetimeLabel", "histórico")}
+							</span>
+						</div>
 					</div>
 				</div>
 			</section>
@@ -131,7 +212,7 @@ export function Profile() {
 			<section className="px-6 pt-4 profile-fade">
 				<button
 					type="button"
-					onClick={logout}
+					onClick={() => void handleLogout()}
 					className="w-full h-12 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-rose-300 font-black tracking-tight flex items-center justify-center gap-2 active:scale-95 transition-transform focus-visible:ring-2 focus-visible:ring-rose-400"
 				>
 					<LogOut className="w-4 h-4" aria-hidden="true" />

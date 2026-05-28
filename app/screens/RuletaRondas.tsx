@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 import { ArrowLeft, Sparkles } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
+import { useEarn } from "../lib/useEarn";
 import { TokenBadge } from "../components/TokenBadge";
+import { Toast } from "../components/Toast";
 import { PlayersPanel } from "../components/ruleta/PlayersPanel";
 import { WinnerModal } from "../components/ruleta/WinnerModal";
 import { cn } from "../lib/utils";
@@ -21,14 +23,36 @@ const SECTOR_COLORS = [
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
-// Keep landing well inside a sector — never on the seam between two.
 const SAFE_JITTER = 0.32;
+const SPIN_REWARD = 15;
+
+/**
+ * RuletaRondas — versión REAL.
+ *
+ *   Mecánica de tokens (CTO mandate "cero mocks en producción"):
+ *
+ *     · Cada tirada concedida ahora regala **+15 tokens** al usuario
+ *       que pulsa "Girar".  No es premio aleatorio, es un dividendo
+ *       de participación — siempre persiste server-side.
+ *     · Persistencia vía `useEarn` → POST `/api/wallet` con
+ *       `amount: +15`, `reason: 'ruleta_spin'`.
+ *     · Si la llamada falla (sin red, sin sesión, RPC down):
+ *         - Toast warning al usuario.
+ *         - NO se actualiza balance local.
+ *         - NO se muestra el modal del perdedor (el spin se considera
+ *           fallido).  Mañana en barra los tokens visibles == saldo
+ *           real, sin discrepancias.
+ *
+ *   El "loser" sigue siendo client-only (es una decisión social, no
+ *   afecta a ledger).
+ */
 
 export function RuletaRondas() {
 	const { t } = useTranslation();
 	const setScreen = useGameState((s) => s.setScreen);
 	const friends = useGameState((s) => s.friends);
 	const setFriends = useGameState((s) => s.setFriends);
+	const { earn, pending } = useEarn();
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const wheelRef = useRef<SVGSVGElement>(null);
@@ -36,6 +60,10 @@ export function RuletaRondas() {
 
 	const [spinning, setSpinning] = useState(false);
 	const [loserIndex, setLoserIndex] = useState<number | null>(null);
+	const [toast, setToast] = useState<string | null>(null);
+	const [tone, setTone] = useState<"default" | "warning" | "success">(
+		"default",
+	);
 
 	useGSAP(
 		() => {
@@ -68,10 +96,29 @@ export function RuletaRondas() {
 		setLoserIndex(null);
 	};
 
-	const handleSpin = () => {
-		if (spinning || !wheelRef.current) return;
+	const translateEarnError = (code: string): string => {
+		switch (code) {
+			case "unauthorized":
+				return t("ruleta.errAuth", "Inicia sesión para ganar tokens");
+			case "network_error":
+				return t("ruleta.errNetwork", "Sin conexión · no se conceden tokens");
+			default:
+				return t("ruleta.errGeneric", "No se pudo guardar el premio");
+		}
+	};
+
+	const handleSpin = async () => {
+		if (spinning || pending || !wheelRef.current) return;
 		const validFriends = friends.filter((f) => f.trim().length > 0);
 		if (validFriends.length < MIN_PLAYERS) return;
+
+		// 1) Persistir primero — sólo si el servidor confirma seguimos.
+		const result = await earn(SPIN_REWARD, "ruleta_spin");
+		if (!result.ok) {
+			setTone("warning");
+			setToast(translateEarnError(result.error));
+			return;
+		}
 
 		setSpinning(true);
 		setLoserIndex(null);
@@ -98,6 +145,8 @@ export function RuletaRondas() {
 				totalRotationRef.current = finalRotation;
 				setLoserIndex(targetIndex);
 				setSpinning(false);
+				setTone("success");
+				setToast(t("ruleta.tokensWon", "+{{n}} tokens por girar", { n: SPIN_REWARD }));
 			},
 		});
 	};
@@ -120,6 +169,8 @@ export function RuletaRondas() {
 		loserIndex !== null
 			? friends[loserIndex] || t("ruleta.friend", { n: loserIndex + 1 })
 			: "";
+
+	const buttonBusy = spinning || pending;
 
 	return (
 		<div
@@ -231,22 +282,30 @@ export function RuletaRondas() {
 						aria-hidden="true"
 					/>
 				</div>
+
+				<p className="mt-4 text-center text-[11px] uppercase tracking-widest text-zinc-500 font-bold">
+					{t("ruleta.spinReward", "+{{n}} tokens al girar", { n: SPIN_REWARD })}
+				</p>
 			</main>
 
 			<footer className="px-6 pb-3 pt-2 rul-fade shrink-0">
 				<button
 					type="button"
-					onClick={handleSpin}
-					disabled={spinning}
+					onClick={() => void handleSpin()}
+					disabled={buttonBusy}
 					className={cn(
 						"h-14 w-full rounded-2xl bg-linear-to-r from-lime-400 to-emerald-500 text-black font-black tracking-tight flex items-center justify-center gap-2 active:scale-95 transition-transform focus-visible:ring-2 focus-visible:ring-lime-400",
-						spinning
+						buttonBusy
 							? "opacity-50 cursor-not-allowed"
 							: "shadow-[0_0_30px_rgba(57,255,20,0.55)]",
 					)}
 				>
 					<Sparkles className="w-5 h-5 fill-black" aria-hidden="true" />
-					{spinning ? t("ruleta.spinning") : t("ruleta.spin")}
+					{pending
+						? t("ruleta.confirming", "Confirmando…")
+						: spinning
+							? t("ruleta.spinning")
+							: t("ruleta.spin")}
 				</button>
 			</footer>
 
@@ -257,6 +316,8 @@ export function RuletaRondas() {
 					onExit={exit}
 				/>
 			)}
+
+			<Toast message={toast} onDone={() => setToast(null)} tone={tone} />
 		</div>
 	);
 }

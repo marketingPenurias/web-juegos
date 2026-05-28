@@ -173,7 +173,9 @@ export function Onboarding() {
 				</div>
 
 				<div className="flex flex-col gap-3 w-full">
-					<button
+
+					{/* commented until we implement it as the google one */}
+					{/* <button
 						type="button"
 						onClick={() => setScreen("hub")}
 						className="onb-btn w-full h-[60px] rounded-2xl bg-white text-black font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform focus-visible:ring-2 focus-visible:ring-cyan-400"
@@ -186,7 +188,7 @@ export function Onboarding() {
 						<span className="text-[17px] tracking-tight">
 							{t("onboarding.continueApple")}
 						</span>
-					</button>
+					</button> */}
 
 					<button
 						type="button"

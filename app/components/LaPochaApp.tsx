@@ -1,6 +1,8 @@
 import { useGameState, type Screen } from "../store/useGameState";
+import { useSession } from "../lib/useSession";
 import { AppFrame } from "./AppFrame";
 import { BottomNav } from "./BottomNav";
+import { RedemptionScreen } from "./RedemptionScreen";
 import { Onboarding } from "../screens/Onboarding";
 import { Hub } from "../screens/Hub";
 import { LiveBattle } from "../screens/LiveBattle";
@@ -15,7 +17,10 @@ import { DJDashboard } from "../screens/DJDashboard";
 const SCREENS_WITH_NAV = new Set<Screen>(["hub", "live", "menu", "ticket"]);
 
 export default function LaPochaApp() {
+	useSession();
 	const currentScreen = useGameState((s) => s.currentScreen);
+	const activeRedemption = useGameState((s) => s.activeRedemption);
+	const closeRedemption = useGameState((s) => s.closeRedemption);
 	const showNav = SCREENS_WITH_NAV.has(currentScreen);
 
 	return (
@@ -28,6 +33,17 @@ export default function LaPochaApp() {
 				<ScreenRouter screen={currentScreen} />
 				{showNav && <BottomNav />}
 			</AppFrame>
+
+			{activeRedemption && (
+				<RedemptionScreen
+					rewardId={activeRedemption.rewardId}
+					productName={activeRedemption.productName}
+					priceEur={activeRedemption.priceEur}
+					expiresAt={activeRedemption.expiresAt}
+					onExpire={closeRedemption}
+					onClose={closeRedemption}
+				/>
+			)}
 		</div>
 	);
 }

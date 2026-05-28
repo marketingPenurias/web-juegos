@@ -88,11 +88,23 @@ const INITIAL_SONG_REQUESTS: SongRequest[] = [
 	{ id: "s_5", title: "Insurrección", artist: "El Último de la Fila", cover: "🔥", boosted: false },
 ];
 
+// Profile real ahora vive en `useAuthUser` (Supabase Auth) + tier helpers.
+// Mantenemos `profile` en el store sólo como pieza vestigial para no
+// romper el contrato de Zustand persist v1 al migrar — la pantalla
+// Profile.tsx ya NO lo lee.  Cuando incrementemos a v3 del schema
+// persist lo retiramos del store entero.
 const INITIAL_PROFILE: UserProfile = {
-	handle: "Alejandro Vega",
-	email: "alejandro.vega@gmail.com",
-	level: 4,
-	levelProgress: 80,
+	handle: "",
+	email: "",
+	level: 1,
+	levelProgress: 0,
+};
+
+export type ActiveRedemption = {
+	rewardId: string;
+	productName: string;
+	priceEur: number; // 0 = GRATIS
+	expiresAt: string; // ISO timestamp
 };
 
 type GameState = {
@@ -108,6 +120,17 @@ type GameState = {
 	songRequests: SongRequest[];
 	profile: UserProfile;
 
+	// ── Datos reales servidos por /api/session ──────────────────────────
+	// Mientras estos sigan en null, la UI debe seguir tolerando el
+	// modo demo (Onboarding → Hub sin Supabase configurado).
+	userProfileId: string | null;
+	lifetimeEarned: number;
+	activeEventId: string | null;
+	activeEventName: string | null;
+
+	// ── Estado de canje activo (pantalla camarero) ──────────────────────
+	activeRedemption: ActiveRedemption | null;
+
 	setScreen: (s: Screen) => void;
 	addTokens: (n: number, labelKey?: string) => void;
 	spendTokens: (n: number, labelKey?: string) => boolean;
@@ -120,6 +143,18 @@ type GameState = {
 	clearTicket: () => void;
 	boostSongRequest: (id: string) => boolean;
 	logout: () => void;
+
+	// ── Acciones de sync con backend ───────────────────────────────────
+	syncSession: (s: {
+		userProfileId: string;
+		tokenBalance: number;
+		lifetimeEarned: number;
+		activeEventId: string | null;
+		activeEventName: string | null;
+	}) => void;
+	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
+	openRedemption: (r: ActiveRedemption) => void;
+	closeRedemption: () => void;
 };
 
 const recordTransaction = (
@@ -151,6 +186,12 @@ export const useGameState = create<GameState>()(
 			transactions: INITIAL_TRANSACTIONS,
 			songRequests: INITIAL_SONG_REQUESTS,
 			profile: INITIAL_PROFILE,
+
+			userProfileId: null,
+			lifetimeEarned: 0,
+			activeEventId: null,
+			activeEventName: null,
+			activeRedemption: null,
 
 			setScreen: (s) => set({ currentScreen: s }),
 
@@ -249,7 +290,40 @@ export const useGameState = create<GameState>()(
 					activeTicket: null,
 					transactions: INITIAL_TRANSACTIONS,
 					songRequests: INITIAL_SONG_REQUESTS,
+					userProfileId: null,
+					lifetimeEarned: 0,
+					activeEventId: null,
+					activeEventName: null,
+					activeRedemption: null,
 				}),
+
+			// ── Sync server ────────────────────────────────────────────
+			syncSession: ({
+				userProfileId,
+				tokenBalance,
+				lifetimeEarned,
+				activeEventId,
+				activeEventName,
+			}) =>
+				set({
+					userProfileId,
+					tokens: Math.max(0, tokenBalance),
+					lifetimeEarned: Math.max(0, lifetimeEarned),
+					activeEventId,
+					activeEventName,
+				}),
+
+			setBalance: (tokenBalance, lifetimeEarned) =>
+				set((state) => ({
+					tokens: Math.max(0, tokenBalance),
+					lifetimeEarned:
+						typeof lifetimeEarned === "number"
+							? Math.max(state.lifetimeEarned, lifetimeEarned)
+							: state.lifetimeEarned,
+				})),
+
+			openRedemption: (r) => set({ activeRedemption: r }),
+			closeRedemption: () => set({ activeRedemption: null }),
 		}),
 		{
 			name: "lapocha-state",
@@ -266,8 +340,17 @@ export const useGameState = create<GameState>()(
 				activeTicket: state.activeTicket,
 				transactions: state.transactions,
 				songRequests: state.songRequests,
+				// `userProfileId`, `lifetimeEarned`, `activeEventId`,
+				// `activeRedemption` se persisten para sobrevivir al reload
+				// (la noche del piloto, no queremos que un refresh accidental
+				// pierda el reward que el usuario acaba de pagar).
+				userProfileId: state.userProfileId,
+				lifetimeEarned: state.lifetimeEarned,
+				activeEventId: state.activeEventId,
+				activeEventName: state.activeEventName,
+				activeRedemption: state.activeRedemption,
 			}),
-			version: 1,
+			version: 2,
 		},
 	),
 );

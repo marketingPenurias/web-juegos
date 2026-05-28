@@ -2,12 +2,17 @@ import { useRef, useState } from "react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { HubHeader } from "../components/hub/HubHeader";
 import { TokenWalletCard } from "../components/hub/TokenWalletCard";
-import { StreakCard } from "../components/hub/StreakCard";
-import { MissionsCard } from "../components/hub/MissionsCard";
-import { LeaderboardCard } from "../components/hub/LeaderboardCard";
+import { TierRibbon } from "../components/hub/TierRibbon";
 import { GameLauncherCard } from "../components/hub/GameLauncherCard";
-import { ViralLoopCard } from "../components/hub/ViralLoopCard";
 import { HistoryDrawer } from "../components/HistoryDrawer";
+
+// Pilot scope: StreakCard / MissionsCard / LeaderboardCard / ViralLoopCard
+// quedan fuera del Hub porque siguen alimentándose de datos mock
+// (streak, missions array, top-3 invented, "1/4 amigos invitados").
+// Sus botones son inertes y conectarlos contra BD se programó en
+// Fase 2 (tablas `user_streaks`, `user_missions`, vista
+// `tenant_leaderboard`, RPC `redeem_referral`).  Mañana no se enseñan
+// al CEO — directriz CTO "cero mocks en producción".
 
 export function Hub() {
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -43,11 +48,8 @@ export function Hub() {
 
 			<main className="px-6 flex flex-col gap-5">
 				<TokenWalletCard onOpenHistory={() => setHistoryOpen(true)} />
-				<StreakCard />
-				<MissionsCard />
-				<LeaderboardCard />
+				<TierRibbon />
 				<GameLauncherCard />
-				<ViralLoopCard />
 			</main>
 
 			<HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
