@@ -76,8 +76,14 @@ export function Onboarding() {
 			const { error } = await supabase.auth.signInWithOAuth({
 				provider: "google",
 				options: {
+					// Ruta de callback dedicada — debe estar dada de alta en
+					// Supabase Dashboard → Authentication → URL Configuration
+					// → Redirect URLs para cada dominio de producción
+					// (`https://lapocha.nightgraph.io/auth/callback`, etc.).
 					redirectTo:
-						typeof window !== "undefined" ? window.location.origin : undefined,
+						typeof window !== "undefined"
+							? `${window.location.origin}/auth/callback`
+							: undefined,
 				},
 			});
 			if (error) {

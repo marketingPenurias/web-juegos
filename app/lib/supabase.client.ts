@@ -100,7 +100,14 @@ function buildClient(): SupabaseClient | null {
 		auth: {
 			persistSession: true,
 			autoRefreshToken: true,
-			detectSessionInUrl: true,
+			// PKCE flow exchange happens explícitamente en /auth/callback
+			// para evitar race conditions: si `detectSessionInUrl` queda en
+			// true, la lib intenta auto-exchange en CADA navegación con
+			// `?code=`, lo que consume el code_verifier antes de que el
+			// callback explícito pueda usarlo (resultado: "Invitado" + null
+			// access token, exactamente el síntoma reportado).
+			detectSessionInUrl: false,
+			flowType: "pkce",
 			storage: cookieStorage,
 			// storageKey intentionally omitted — the default `sb-<projectRef>-
 			// auth-token` lets every subdomain in the same root resolve the
