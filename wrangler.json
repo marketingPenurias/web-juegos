@@ -8,5 +8,9 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
+	"vars": {
+    "VITE_SUPABASE_URL": "https://cfxpwsexxwcxogwuykue.supabase.co",
+    "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_c-vtNNGaW7IATIjegGk5zg_rC4hVZXI"
+  }
 }
 
