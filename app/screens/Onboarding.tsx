@@ -16,20 +16,34 @@ export function Onboarding() {
 	const [authBusy, setAuthBusy] = useState(false);
 	const [authError, setAuthError] = useState<string | null>(null);
 
-	// If a session already exists (e.g. user just returned from the OAuth
-	// redirect), sync the profile (consumes the ng_tracking_ref cookie) and
-	// advance to the hub.  Listener stays mounted to handle SIGNED_IN events
-	// as soon as Supabase parses the URL hash.
+	// ── Captura de sesión post-OAuth ────────────────────────────────────
+	//
+	//   Bug histórico: el `SIGNED_IN` se dispara dentro de `/auth/callback`
+	//   cuando hacemos `exchangeCodeForSession(code)`.  Para cuando este
+	//   componente se monta tras `navigate("/")`, ese evento YA pasó —
+	//   suscribirse a `onAuthStateChange` aquí ya no captura nada y el
+	//   usuario se queda atascado en Onboarding.
+	//
+	//   Fix:
+	//     1. **Chequeo inicial síncrono** vía `getSession()`.  Si hay
+	//        sesión persistida (cookieStorage la guardó al hacer el
+	//        exchange), navegamos al hub INMEDIATAMENTE, sin esperar
+	//        ningún evento.
+	//     2. El listener se mantiene como red de seguridad para flujos
+	//        posteriores (refresh de token desde otra pestaña, login
+	//        manual sin redirect, etc.).
+	//     3. Guard `cancelled` evita setState post-unmount durante
+	//        navegaciones rápidas.
 	useEffect(() => {
 		const supabase = getBrowserSupabase();
 		if (!supabase) return;
 
-		const sync = async () => {
+		let cancelled = false;
+
+		const syncProfile = async () => {
 			try {
 				const token = await getAccessToken();
 				if (!token) return;
-				// Fire-and-forget: response carries the cleared ng_tracking_ref
-				// cookie + the user_profile id.  We don't block the UI on it.
 				await fetch("/api/auth-sync", {
 					method: "POST",
 					headers: {
@@ -40,26 +54,48 @@ export function Onboarding() {
 					credentials: "include",
 				});
 			} catch {
-				// Profile sync failures don't block the user — they'll be
-				// retried implicitly on the next privileged write.
+				// Sync failures se reintentan implícitamente en la próxima
+				// escritura privilegiada — no bloquean la UI.
 			}
 		};
 
-		void supabase.auth.getSession().then(({ data }) => {
+		const advanceToHub = () => {
+			if (cancelled) return;
+			// Navegación inmediata.  El sync de perfil va en paralelo, no
+			// bloquea la transición.
+			setScreen("hub");
+			void syncProfile();
+		};
+
+		// ─── 1. Chequeo inicial — la pieza crítica del fix ─────────────
+		void (async () => {
+			const { data, error } = await supabase.auth.getSession();
+			if (cancelled) return;
+			if (error) {
+				// No reventamos la UI por un error de lectura — dejamos al
+				// listener que capture cualquier login posterior.
+				console.warn("[onboarding] getSession failed", error.message);
+				return;
+			}
 			if (data.session) {
-				void sync();
-				setScreen("hub");
+				advanceToHub();
 			}
-		});
+		})();
 
-		const { data } = supabase.auth.onAuthStateChange((event, session) => {
-			if (event === "SIGNED_IN" && session) {
-				void sync();
-				setScreen("hub");
-			}
-		});
+		// ─── 2. Listener como red de seguridad ─────────────────────────
+		const { data: authListener } = supabase.auth.onAuthStateChange(
+			(event, session) => {
+				if (cancelled) return;
+				if (event === "SIGNED_IN" && session) {
+					advanceToHub();
+				}
+			},
+		);
 
-		return () => data.subscription.unsubscribe();
+		return () => {
+			cancelled = true;
+			authListener.subscription.unsubscribe();
+		};
 	}, [setScreen, tenant.slug]);
 
 	const handleGoogleLogin = async () => {
