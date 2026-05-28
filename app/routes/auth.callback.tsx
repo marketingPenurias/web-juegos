@@ -11,12 +11,15 @@ import { getBrowserSupabase } from "../lib/supabase.client";
  *   Pasos:
  *     1. Lee `code` del query string.
  *     2. Llama `supabase.auth.exchangeCodeForSession(code)`.
- *        Supabase recupera el `code_verifier` del cookieStorage
- *        (sobrevive el redirect porque vive en una cookie
- *        SameSite=Lax con domain `.nightgraph.io`).
- *     3. Al éxito → redirige a `/`.  El listener de Onboarding
- *        captura el SIGNED_IN y pone la pantalla en "hub";
- *        `useSession()` de LaPochaApp hace el bootstrap.
+ *        Supabase recupera el `code_verifier` del localStorage
+ *        (sobrevive el redirect porque la SPA persiste el flag PKCE
+ *        antes de saltar a Google).
+ *     3. Forzamos `setSession()` con el payload del exchange para
+ *        garantizar que el adaptador de storage escribe la sesión
+ *        antes de navegar — fix del bug "exchange OK pero
+ *        getSession() devuelve null 500 ms después".
+ *     4. Redirige a `/`.  `useSession()` y el listener del
+ *        Onboarding ven la sesión instantáneamente.
  *
  *   Por qué no `detectSessionInUrl: true`:
  *     Si la lib auto-procesa el code en CADA navegación, consume el
@@ -35,24 +38,12 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export default function AuthCallback() {
-	// TODO: CLEANUP DEBUG
-	console.log("[AUTH DEBUG] auth.callback render", {
-		href: typeof window !== "undefined" ? window.location.href : "(ssr)",
-		search:
-			typeof window !== "undefined" ? window.location.search : "(ssr)",
-	});
-
 	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const [error, setError] = useState<string | null>(null);
 	const exchangedRef = useRef(false);
 
 	useEffect(() => {
-		// TODO: CLEANUP DEBUG
-		console.log("[AUTH DEBUG] auth.callback useEffect fired", {
-			alreadyExchanged: exchangedRef.current,
-		});
-
 		// React Strict Mode dispara useEffect dos veces en dev.  Sin esta
 		// guarda, el segundo intento de `exchangeCodeForSession` falla con
 		// "code verifier mismatch" porque el primero ya consumió el code.
@@ -60,13 +51,7 @@ export default function AuthCallback() {
 		exchangedRef.current = true;
 
 		const supabase = getBrowserSupabase();
-		// TODO: CLEANUP DEBUG
-		console.log("[AUTH DEBUG] supabase client", {
-			hasClient: !!supabase,
-		});
 		if (!supabase) {
-			// TODO: CLEANUP DEBUG
-			console.error("[AUTH DEBUG] no supabase client → bouncing /");
 			navigate("/", { replace: true });
 			return;
 		}
@@ -77,78 +62,38 @@ export default function AuthCallback() {
 		const oauthError =
 			params.get("error_description") || params.get("error");
 		if (oauthError) {
-			// TODO: CLEANUP DEBUG
-			console.error("[AUTH DEBUG] oauth error from provider", oauthError);
 			setError(oauthError);
 			return;
 		}
 
 		const code = params.get("code");
-		// TODO: CLEANUP DEBUG
-		console.log("[AUTH DEBUG] code received", {
-			present: !!code,
-			length: code?.length ?? 0,
-			preview: code ? `${code.slice(0, 8)}…` : null,
-		});
 		if (!code) {
 			// Sin code y sin error: el usuario aterrizó aquí sin pasar por
 			// Google (refresh manual, share del link).  Vuelve al inicio.
-			// TODO: CLEANUP DEBUG
-			console.warn("[AUTH DEBUG] no code in URL → bouncing /");
 			navigate("/", { replace: true });
 			return;
 		}
 
 		void (async () => {
-			// TODO: CLEANUP DEBUG
-			console.log("[AUTH DEBUG] calling exchangeCodeForSession…");
-			const exchangeResult =
+			const { data, error: exchangeError } =
 				await supabase.auth.exchangeCodeForSession(code);
-			// TODO: CLEANUP DEBUG
-			console.log("[AUTH DEBUG] exchange result", {
-				hasError: !!exchangeResult.error,
-				errorMessage: exchangeResult.error?.message,
-				hasSession: !!exchangeResult.data?.session,
-				userId: exchangeResult.data?.session?.user?.id,
-				email: exchangeResult.data?.session?.user?.email,
-				accessTokenPresent:
-					!!exchangeResult.data?.session?.access_token,
-				expiresAt: exchangeResult.data?.session?.expires_at,
-			});
-
-			if (exchangeResult.error) {
-				// TODO: CLEANUP DEBUG
-				console.error(
-					"[AUTH DEBUG] exchange failed",
-					exchangeResult.error,
-				);
-				setError(exchangeResult.error.message);
+			if (exchangeError) {
+				setError(exchangeError.message);
 				return;
 			}
 
-			// TODO: CLEANUP DEBUG
-			// Pausa intencionada de 500 ms para garantizar que cookieStorage
-			// termina de escribir antes de la siguiente lectura en `/`.
-			// Si esto soluciona el bug, confirma que hay un race entre la
-			// escritura asincrónica de la cookie y el getSession() inmediato
-			// del Onboarding.
-			console.log(
-				"[AUTH DEBUG] exchange OK · sleeping 500ms before navigate",
-			);
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			// Refuerzo de persistencia: aunque `exchangeCodeForSession`
+			// debería escribir la sesión en storage, en producción CF +
+			// React 19 hemos visto el storage "evaporarse" entre el
+			// exchange y el siguiente `getSession()`.  Re-inyectamos la
+			// sesión a mano para garantizar la escritura.
+			if (data.session) {
+				await supabase.auth.setSession({
+					access_token: data.session.access_token,
+					refresh_token: data.session.refresh_token,
+				});
+			}
 
-			// TODO: CLEANUP DEBUG
-			// Releemos la sesión justo antes de navegar para confirmar que
-			// persistió en cookieStorage.
-			const { data: postSession } = await supabase.auth.getSession();
-			// TODO: CLEANUP DEBUG
-			console.log("[AUTH DEBUG] post-sleep getSession", {
-				hasSession: !!postSession.session,
-				userId: postSession.session?.user?.id,
-			});
-
-			// TODO: CLEANUP DEBUG
-			console.log("[AUTH DEBUG] navigating to /");
 			navigate("/", { replace: true });
 		})();
 	}, [navigate, params]);

@@ -35,17 +35,7 @@ export function Onboarding() {
 	//     3. Guard `cancelled` evita setState post-unmount durante
 	//        navegaciones rápidas.
 	useEffect(() => {
-		// TODO: CLEANUP DEBUG
-		console.log("[AUTH DEBUG] Onboarding useEffect mounted", {
-			tenantSlug: tenant.slug,
-			href: typeof window !== "undefined" ? window.location.href : "(ssr)",
-		});
-
 		const supabase = getBrowserSupabase();
-		// TODO: CLEANUP DEBUG
-		console.log("[AUTH DEBUG] Onboarding supabase client", {
-			hasClient: !!supabase,
-		});
 		if (!supabase) return;
 
 		let cancelled = false;
@@ -79,57 +69,22 @@ export function Onboarding() {
 
 		// ─── 1. Chequeo inicial — la pieza crítica del fix ─────────────
 		void (async () => {
-			// TODO: CLEANUP DEBUG
-			console.log("[AUTH DEBUG] Onboarding calling getSession()…");
 			const { data, error } = await supabase.auth.getSession();
-			// TODO: CLEANUP DEBUG
-			console.log("[AUTH DEBUG] Onboarding getSession result", {
-				cancelled,
-				hasSession: !!data?.session,
-				userId: data?.session?.user?.id,
-				email: data?.session?.user?.email,
-				accessTokenPresent: !!data?.session?.access_token,
-				errorMessage: error?.message,
-			});
 			if (cancelled) return;
 			if (error) {
-				// TODO: CLEANUP DEBUG
-				console.error(
-					"[AUTH DEBUG] Onboarding getSession failed",
-					error.message,
-				);
+				console.warn("[onboarding] getSession failed", error.message);
 				return;
 			}
 			if (data.session) {
-				// TODO: CLEANUP DEBUG
-				console.log(
-					"[AUTH DEBUG] Onboarding session present → advanceToHub()",
-				);
 				advanceToHub();
-			} else {
-				// TODO: CLEANUP DEBUG
-				console.warn(
-					"[AUTH DEBUG] Onboarding NO session on initial check — stuck on onboarding screen",
-				);
 			}
 		})();
 
 		// ─── 2. Listener como red de seguridad ─────────────────────────
 		const { data: authListener } = supabase.auth.onAuthStateChange(
 			(event, session) => {
-				// TODO: CLEANUP DEBUG
-				console.log("[AUTH DEBUG] Onboarding onAuthStateChange", {
-					event,
-					cancelled,
-					hasSession: !!session,
-					userId: session?.user?.id,
-				});
 				if (cancelled) return;
 				if (event === "SIGNED_IN" && session) {
-					// TODO: CLEANUP DEBUG
-					console.log(
-						"[AUTH DEBUG] Onboarding SIGNED_IN listener fired → advanceToHub()",
-					);
 					advanceToHub();
 				}
 			},
