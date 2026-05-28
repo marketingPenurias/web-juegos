@@ -9,6 +9,7 @@ export default [
 	route("api/music", "routes/api.music.ts"),
 	route("api/catalog", "routes/api.catalog.ts"),
 	route("api/session", "routes/api.session.ts"),
+	route("api/history", "routes/api.history.ts"),
 	route("api/auth-sync", "routes/api.auth-sync.ts"),
 	route("tv/music", "routes/tv.music.tsx"),
 	route("legal", "routes/legal.tsx"),

@@ -195,7 +195,7 @@ export function Onboarding() {
 						type="button"
 						onClick={handleGoogleLogin}
 						disabled={authBusy}
-						className="onb-btn w-full h-[60px] rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold flex items-center justify-center gap-3 active:scale-95 transition-transform hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-60 disabled:cursor-not-allowed"
+						className="onb-btn w-full mb-4 h-[60px] rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold flex items-center justify-center gap-3 active:scale-90 transition-transform hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-60 disabled:cursor-not-allowed"
 					>
 						<svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
 							<path

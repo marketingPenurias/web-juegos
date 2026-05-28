@@ -215,34 +215,37 @@ begin
 	--     colisiones con un futuro import real de Spotify.
 	-- ─────────────────────────────────────────────────────────────────
 
+	-- Spotify URIs en formato canónico `spotify:track:<22 base62>`
+	-- para que cualquier reproductor (Web SDK, deeplink móvil) las
+	-- consuma sin transformación.
 	with seed_tracks(spotify_id, title, artist, cover_image_url) as (
 		values
 		(
-			'pilot_lapocha_001',
+			'spotify:track:7vY2y8a8tBfWzMz6L5oRzo',
 			'Tu Cara Bonita',
 			'Estopa',
 			'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=600&q=80'
 		),
 		(
-			'pilot_lapocha_002',
+			'spotify:track:4kFwM3lTITKzu5x7iGsXcW',
 			'Zapatillas',
 			'El Canto del Loco',
 			'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=600&q=80'
 		),
 		(
-			'pilot_lapocha_003',
+			'spotify:track:5Y3yChnVa3uHfoZHk1S2pa',
 			'Bombay',
 			'El Arrebato',
 			'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=600&q=80'
 		),
 		(
-			'pilot_lapocha_004',
+			'spotify:track:7yLtmYbf6QkLpqXdBhO9Eo',
 			'Niño Soldado',
 			'Ska-P',
 			'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=600&q=80'
 		),
 		(
-			'pilot_lapocha_005',
+			'spotify:track:1z2EymPyYrIlVL08CmGqOO',
 			'Insurrección',
 			'El Último de la Fila',
 			'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=600&q=80'

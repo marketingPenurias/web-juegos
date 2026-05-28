@@ -3,16 +3,29 @@ import { gsap, useGSAP } from "../lib/gsap";
 import { HubHeader } from "../components/hub/HubHeader";
 import { TokenWalletCard } from "../components/hub/TokenWalletCard";
 import { TierRibbon } from "../components/hub/TierRibbon";
+import { StreakCard } from "../components/hub/StreakCard";
+import { MissionsCard } from "../components/hub/MissionsCard";
 import { GameLauncherCard } from "../components/hub/GameLauncherCard";
 import { HistoryDrawer } from "../components/HistoryDrawer";
 
-// Pilot scope: StreakCard / MissionsCard / LeaderboardCard / ViralLoopCard
-// quedan fuera del Hub porque siguen alimentándose de datos mock
-// (streak, missions array, top-3 invented, "1/4 amigos invitados").
-// Sus botones son inertes y conectarlos contra BD se programó en
-// Fase 2 (tablas `user_streaks`, `user_missions`, vista
-// `tenant_leaderboard`, RPC `redeem_referral`).  Mañana no se enseñan
-// al CEO — directriz CTO "cero mocks en producción".
+/**
+ * Hub — composición del piloto.
+ *
+ *   Cards activas:
+ *     · TokenWalletCard   — saldo real (server-truth).
+ *     · TierRibbon        — los 4 niveles con tu posición actual.
+ *     · MissionsCard      — 3 misiones derivadas de `daily_activity`.
+ *     · StreakCard        — "Día 1 de piloto" (MVP, sin invent).
+ *     · GameLauncherCard  — accesos a los juegos reales.
+ *
+ *   Cards retiradas hasta Fase 2 (sin tabla real):
+ *     · LeaderboardCard   (vista `tenant_leaderboard` pendiente).
+ *     · ViralLoopCard     (RPC `redeem_referral` pendiente).
+ *
+ *   El GSAP intro anima `.hub-card`; el selector huérfano
+ *   `.hub-streak-flame` se eliminó porque ya no tiene match en el DOM
+ *   (la StreakCard del piloto no marca las llamas individualmente).
+ */
 
 export function Hub() {
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -26,14 +39,6 @@ export function Hub() {
 				stagger: 0.08,
 				duration: 0.55,
 				ease: "power3.out",
-			});
-			gsap.from(".hub-streak-flame", {
-				scale: 0,
-				opacity: 0,
-				stagger: 0.08,
-				duration: 0.45,
-				delay: 0.2,
-				ease: "back.out(2)",
 			});
 		},
 		{ scope: containerRef },
@@ -49,6 +54,8 @@ export function Hub() {
 			<main className="px-6 flex flex-col gap-5">
 				<TokenWalletCard onOpenHistory={() => setHistoryOpen(true)} />
 				<TierRibbon />
+				<MissionsCard />
+				<StreakCard />
 				<GameLauncherCard />
 			</main>
 

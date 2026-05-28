@@ -24,6 +24,20 @@ import { useTenant } from "./tenant";
 
 const ENDPOINT = "/api/session";
 
+type DailyActivity = {
+	ruleta_spin: boolean;
+	tinder_swipe: boolean;
+	tinder_completion: boolean;
+	vote_track: boolean;
+	jukebox_boost: boolean;
+};
+
+type RewardRule = {
+	event_code: string;
+	amount: number;
+	description: string;
+};
+
 type SessionPayload = {
 	ok: true;
 	profile: {
@@ -31,8 +45,11 @@ type SessionPayload = {
 		token_balance: number;
 		lifetime_earned: number;
 	};
+	auth_email?: string | null;
 	active_event: { id: string; name: string } | null;
 	tier: "bronce" | "plata" | "oro" | "platino";
+	daily_activity?: DailyActivity;
+	reward_rules?: RewardRule[];
 };
 
 export function useSession() {
@@ -69,6 +86,8 @@ export function useSession() {
 					lifetimeEarned: Number(data.profile.lifetime_earned ?? 0),
 					activeEventId: data.active_event?.id ?? null,
 					activeEventName: data.active_event?.name ?? null,
+					dailyActivity: data.daily_activity,
+					rewardRules: data.reward_rules,
 				});
 			} catch {
 				// Network errors are non-fatal — UI keeps the persisted mock.

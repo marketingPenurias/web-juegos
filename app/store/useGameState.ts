@@ -107,6 +107,28 @@ export type ActiveRedemption = {
 	expiresAt: string; // ISO timestamp
 };
 
+export type DailyActivity = {
+	ruleta_spin: boolean;
+	tinder_swipe: boolean;
+	tinder_completion: boolean;
+	vote_track: boolean;
+	jukebox_boost: boolean;
+};
+
+export type RewardRule = {
+	event_code: string;
+	amount: number;
+	description: string;
+};
+
+const EMPTY_DAILY_ACTIVITY: DailyActivity = {
+	ruleta_spin: false,
+	tinder_swipe: false,
+	tinder_completion: false,
+	vote_track: false,
+	jukebox_boost: false,
+};
+
 type GameState = {
 	tokens: number;
 	streak: number;
@@ -131,6 +153,10 @@ type GameState = {
 	// ── Estado de canje activo (pantalla camarero) ──────────────────────
 	activeRedemption: ActiveRedemption | null;
 
+	// ── Misiones/economía dinámica (servidor authoritative) ─────────────
+	dailyActivity: DailyActivity;
+	rewardRules: RewardRule[];
+
 	setScreen: (s: Screen) => void;
 	addTokens: (n: number, labelKey?: string) => void;
 	spendTokens: (n: number, labelKey?: string) => boolean;
@@ -151,10 +177,14 @@ type GameState = {
 		lifetimeEarned: number;
 		activeEventId: string | null;
 		activeEventName: string | null;
+		dailyActivity?: DailyActivity;
+		rewardRules?: RewardRule[];
 	}) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
+	markDaily: (key: keyof DailyActivity) => void;
 	openRedemption: (r: ActiveRedemption) => void;
 	closeRedemption: () => void;
+	rewardAmount: (code: string, fallback?: number) => number;
 };
 
 const recordTransaction = (
@@ -192,6 +222,8 @@ export const useGameState = create<GameState>()(
 			activeEventId: null,
 			activeEventName: null,
 			activeRedemption: null,
+			dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
+			rewardRules: [],
 
 			setScreen: (s) => set({ currentScreen: s }),
 
@@ -295,6 +327,8 @@ export const useGameState = create<GameState>()(
 					activeEventId: null,
 					activeEventName: null,
 					activeRedemption: null,
+					dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
+					rewardRules: [],
 				}),
 
 			// ── Sync server ────────────────────────────────────────────
@@ -304,14 +338,18 @@ export const useGameState = create<GameState>()(
 				lifetimeEarned,
 				activeEventId,
 				activeEventName,
+				dailyActivity,
+				rewardRules,
 			}) =>
-				set({
+				set((state) => ({
 					userProfileId,
 					tokens: Math.max(0, tokenBalance),
 					lifetimeEarned: Math.max(0, lifetimeEarned),
 					activeEventId,
 					activeEventName,
-				}),
+					dailyActivity: dailyActivity ?? state.dailyActivity,
+					rewardRules: rewardRules ?? state.rewardRules,
+				})),
 
 			setBalance: (tokenBalance, lifetimeEarned) =>
 				set((state) => ({
@@ -322,8 +360,21 @@ export const useGameState = create<GameState>()(
 							: state.lifetimeEarned,
 				})),
 
+			markDaily: (key) =>
+				set((state) => {
+					if (state.dailyActivity[key]) return state;
+					return {
+						dailyActivity: { ...state.dailyActivity, [key]: true },
+					};
+				}),
+
 			openRedemption: (r) => set({ activeRedemption: r }),
 			closeRedemption: () => set({ activeRedemption: null }),
+
+			rewardAmount: (code, fallback = 0) => {
+				const rule = get().rewardRules.find((r) => r.event_code === code);
+				return rule ? rule.amount : fallback;
+			},
 		}),
 		{
 			name: "lapocha-state",
@@ -349,8 +400,12 @@ export const useGameState = create<GameState>()(
 				activeEventId: state.activeEventId,
 				activeEventName: state.activeEventName,
 				activeRedemption: state.activeRedemption,
+				// dailyActivity y rewardRules NO se persisten — son
+				// always-fresh-from-server (la verdad de hoy puede ser
+				// distinta a la de ayer, no queremos arrastrar checks
+				// verdes obsoletos del sessionStorage).
 			}),
-			version: 2,
+			version: 3,
 		},
 	),
 );

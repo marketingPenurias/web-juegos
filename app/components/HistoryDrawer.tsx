@@ -1,15 +1,42 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Coins, X } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
-import { useGameState } from "../store/useGameState";
+import { useHistory, type LedgerEntry } from "../lib/useHistory";
 import { cn } from "../lib/utils";
 
 type Props = { open: boolean; onClose: () => void };
 
+/**
+ * HistoryDrawer — consume `/api/history` en tiempo real.
+ *
+ *   El fetch sólo se dispara cuando el drawer está abierto (gate por
+ *   `active` en `useHistory`) para no gastar un round-trip por
+ *   sesión si el usuario no lo abre.  Cada apertura refresca, así
+ *   que tras una compra/canje no hace falta invalidar manualmente.
+ */
+
+const REASON_LABEL_KEYS: Record<string, string> = {
+	ruleta_spin: "history.tx_ruleta",
+	tinder_completion: "history.tx_tinder",
+	"history.tx_tinder": "history.tx_tinder",
+	vote_boost: "history.tx_boost_song",
+	vote_free: "history.tx_vote_free",
+	jukebox_boost: "history.tx_jukebox_boost",
+	reward_purchase: "history.tx_order",
+	signup_bonus: "history.tx_signup",
+};
+
+function entryLabel(entry: LedgerEntry, t: (key: string) => string): string {
+	if (entry.product_name_at_time) return entry.product_name_at_time;
+	const key = REASON_LABEL_KEYS[entry.reason];
+	if (key) return t(key);
+	return entry.reason;
+}
+
 export function HistoryDrawer({ open, onClose }: Props) {
 	const { t, i18n } = useTranslation();
-	const transactions = useGameState((s) => s.transactions);
+	const { rows, loading, error, reload } = useHistory(open);
 	const overlayRef = useRef<HTMLDivElement>(null);
 	const sheetRef = useRef<HTMLDivElement>(null);
 
@@ -39,14 +66,18 @@ export function HistoryDrawer({ open, onClose }: Props) {
 		return () => window.removeEventListener("keydown", onKey);
 	}, [open, onClose]);
 
-	if (!open) return null;
+	const fmt = useMemo(
+		() =>
+			new Intl.DateTimeFormat(i18n.resolvedLanguage ?? "es", {
+				hour: "2-digit",
+				minute: "2-digit",
+				day: "2-digit",
+				month: "short",
+			}),
+		[i18n.resolvedLanguage],
+	);
 
-	const fmt = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? "es", {
-		hour: "2-digit",
-		minute: "2-digit",
-		day: "2-digit",
-		month: "short",
-	});
+	if (!open) return null;
 
 	return (
 		<div
@@ -80,20 +111,46 @@ export function HistoryDrawer({ open, onClose }: Props) {
 					</button>
 				</div>
 
-				{transactions.length === 0 ? (
+				{loading && rows.length === 0 && (
+					<p className="py-12 text-center text-zinc-500 text-sm">
+						{t("history.loading", "Cargando…")}
+					</p>
+				)}
+
+				{error && rows.length === 0 && !loading && (
+					<div className="py-12 text-center flex flex-col items-center gap-3">
+						<p className="text-rose-300 text-sm">
+							{t("history.errLoad", "No se pudo cargar el historial")}
+						</p>
+						<button
+							type="button"
+							onClick={() => void reload()}
+							className="h-10 px-4 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs font-black uppercase tracking-widest active:scale-95"
+						>
+							{t("common.retry")}
+						</button>
+					</div>
+				)}
+
+				{!loading && !error && rows.length === 0 && (
 					<p className="py-12 text-center text-zinc-500 text-sm">
 						{t("history.empty")}
 					</p>
-				) : (
+				)}
+
+				{rows.length > 0 && (
 					<ul
 						className="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col gap-2 pr-1 pb-2"
-						style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}
+						style={{
+							WebkitOverflowScrolling: "touch",
+							overscrollBehavior: "contain",
+						}}
 					>
-						{transactions.map((tx) => {
-							const positive = tx.delta >= 0;
+						{rows.map((entry) => {
+							const positive = entry.amount >= 0;
 							return (
 								<li
-									key={tx.id}
+									key={entry.id}
 									className="flex items-center justify-between gap-3 bg-zinc-900/60 border border-zinc-800 rounded-2xl px-4 py-3"
 								>
 									<div className="flex items-center gap-3 min-w-0">
@@ -109,10 +166,10 @@ export function HistoryDrawer({ open, onClose }: Props) {
 										</div>
 										<div className="min-w-0">
 											<p className="text-sm font-bold text-white truncate">
-												{t(tx.labelKey)}
+												{entryLabel(entry, t)}
 											</p>
 											<p className="text-[11px] text-zinc-500">
-												{fmt.format(new Date(tx.createdAt))}
+												{fmt.format(new Date(entry.created_at))}
 											</p>
 										</div>
 									</div>
@@ -123,7 +180,7 @@ export function HistoryDrawer({ open, onClose }: Props) {
 										)}
 									>
 										{positive ? "+" : ""}
-										{tx.delta}
+										{entry.amount}
 									</span>
 								</li>
 							);
