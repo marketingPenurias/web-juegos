@@ -143,25 +143,56 @@ export type VerifiedUser = {
  *
  * Cost: a single round-trip to Supabase auth — keep it for any route
  * that mutates state.  Read-only / anon routes can skip this.
+ *
+ * Header parsing: `request.headers.get("authorization")` (lowercase
+ * canónico HTTP) cubre tanto `Authorization` como `authorization` —
+ * los Headers de Fetch hacen case-insensitive lookup.
  */
 export async function verifyAuthToken(
 	request: Request,
 	context: AppLoadContext,
 ): Promise<VerifiedUser | null> {
 	const auth = request.headers.get("authorization");
-	if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+	if (!auth || !auth.toLowerCase().startsWith("bearer ")) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.warn("[AUTH VERIFY] no Authorization header / not Bearer", {
+			hasHeader: !!auth,
+			preview: auth?.slice(0, 16),
+		});
+		return null;
+	}
 	const token = auth.slice("bearer ".length).trim();
-	if (!token) return null;
+	if (!token) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.warn("[AUTH VERIFY] empty token after Bearer");
+		return null;
+	}
 
 	let supabase: SupabaseClient;
 	try {
 		supabase = getSupabase(context);
-	} catch {
+	} catch (err) {
+		// `getSupabase` throws Response(503) cuando falta SUPABASE_URL o
+		// las dos keys (PUBLISHABLE/SECRET).  Eso es lo que produce un
+		// 401 misterioso en producción si las env vars no se cargaron.
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.error("[AUTH VERIFY] getSupabase threw — check env vars", {
+			thrown: err instanceof Response ? `Response(${err.status})` : String(err),
+		});
 		return null;
 	}
 
 	const { data, error } = await supabase.auth.getUser(token);
-	if (error || !data?.user) return null;
+	if (error || !data?.user) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.error("[AUTH VERIFY] supabase.auth.getUser rejected", {
+			errorMessage: error?.message,
+			errorStatus: (error as { status?: number } | undefined)?.status,
+			hasUser: !!data?.user,
+			tokenPreview: token.slice(0, 12) + "…",
+		});
+		return null;
+	}
 	return {
 		id: data.user.id,
 		email: data.user.email ?? null,

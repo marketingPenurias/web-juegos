@@ -80,10 +80,19 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		);
 	}
 
+	// Seguridad: el INSERT en `user_profiles` (JIT) y la lectura del
+	// `wallet_ledger` para `daily_activity` DEBEN usar service_role.
+	// La RLS de `user_profiles` exige que `current_tenant_id()` venga del
+	// JWT — el JIT no puede usar la clave publishable porque entonces la
+	// política bloquearía la creación del propio perfil que aún no existe.
 	let supabase: ReturnType<typeof getServiceSupabase>;
 	try {
 		supabase = getServiceSupabase(context);
 	} catch (err) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.error("[AUTH VERIFY] getServiceSupabase threw — falta SUPABASE_SECRET_KEY", {
+			thrown: err instanceof Response ? `Response(${err.status})` : String(err),
+		});
 		if (err instanceof Response) return err;
 		return jsonResponse(
 			{ ok: false, error: "service_unavailable" },

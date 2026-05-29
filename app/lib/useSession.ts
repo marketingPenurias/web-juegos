@@ -70,6 +70,11 @@ export function useSession() {
 			if (!token) return; // demo mode
 
 			try {
+				// TODO: CLEANUP AUTH VERIFY DEBUG
+				console.log("[SESSION] sending Bearer to /api/session", {
+					tenant: tenant.slug,
+					tokenPreview: token.slice(0, 12) + "…",
+				});
 				const res = await fetch(ENDPOINT, {
 					method: "GET",
 					headers: {
