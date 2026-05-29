@@ -82,18 +82,68 @@ export function SecretMenu() {
 
 	const containerRef = useRef<HTMLDivElement>(null);
 
+	// ISO weekday según la timezone de Madrid (alineado con la RPC
+	// `business_night` y el chequeo de día del `purchase_reward`).
+	const todayIsoDow = useMemo(() => {
+		const fmt = new Intl.DateTimeFormat("en-US", {
+			timeZone: "Europe/Madrid",
+			weekday: "short",
+		});
+		const day = fmt.format(new Date());
+		// Mon=1..Sun=7 (ISO).  Intl no nos lo da directo; lo mapeamos.
+		const map: Record<string, number> = {
+			Mon: 1,
+			Tue: 2,
+			Wed: 3,
+			Thu: 4,
+			Fri: 5,
+			Sat: 6,
+			Sun: 7,
+		};
+		return map[day] ?? (new Date().getDay() || 7);
+	}, []);
+
 	const groups = useMemo(() => {
-		const unlocked: CatalogProduct[] = [];
-		const locked: CatalogProduct[] = [];
+		const available: CatalogProduct[] = [];
+		const lockedTier: CatalogProduct[] = [];
+		const lockedDay: CatalogProduct[] = [];
 		for (const p of products) {
 			if (p.min_tier_required && p.min_tier_required !== "bronce") {
-				locked.push(p);
+				lockedTier.push(p);
+				continue;
+			}
+			// Disponible HOY: si `available_days` no se define (NULL o
+			// array vacío), el producto se considera siempre disponible.
+			const allowsToday =
+				!p.available_days ||
+				p.available_days.length === 0 ||
+				p.available_days.includes(todayIsoDow);
+			if (allowsToday) {
+				available.push(p);
 			} else {
-				unlocked.push(p);
+				lockedDay.push(p);
 			}
 		}
-		return { unlocked, locked };
-	}, [products]);
+		return { available, lockedTier, lockedDay };
+	}, [products, todayIsoDow]);
+
+	const formatDaysLong = (days: number[] | null | undefined): string => {
+		if (!days || days.length === 0) return "";
+		const labels: Record<number, string> = {
+			1: "Lun",
+			2: "Mar",
+			3: "Mié",
+			4: "Jue",
+			5: "Vie",
+			6: "Sáb",
+			7: "Dom",
+		};
+		return days
+			.slice()
+			.sort((a, b) => a - b)
+			.map((d) => labels[d] ?? "?")
+			.join(" · ");
+	};
 
 	useGSAP(
 		() => {
@@ -256,12 +306,12 @@ export function SecretMenu() {
 					</div>
 				)}
 
-				{groups.unlocked.length > 0 && (
+				{groups.available.length > 0 && (
 					<section className="flex flex-col gap-3">
 						<h2 className="text-[10px] uppercase tracking-[0.3em] text-lime-400 font-black px-1">
 							{t("menu.availableNow")}
 						</h2>
-						{groups.unlocked.map((p) => (
+						{groups.available.map((p) => (
 							<ProductCard
 								key={p.id}
 								product={p}
@@ -272,12 +322,27 @@ export function SecretMenu() {
 					</section>
 				)}
 
-				{groups.locked.length > 0 && (
+				{groups.lockedDay.length > 0 && (
+					<section className="flex flex-col gap-3 mt-4">
+						<h2 className="text-[10px] uppercase tracking-[0.3em] text-cyan-300 font-black px-1">
+							{t("menu.lockedDay", "Vuelve otro día")}
+						</h2>
+						{groups.lockedDay.map((p) => (
+							<LockedDayCard
+								key={p.id}
+								product={p}
+								daysLabel={formatDaysLong(p.available_days)}
+							/>
+						))}
+					</section>
+				)}
+
+				{groups.lockedTier.length > 0 && (
 					<section className="flex flex-col gap-3 mt-4">
 						<h2 className="text-[10px] uppercase tracking-[0.3em] text-amber-300 font-black px-1">
 							{t("menu.unlockSoon")}
 						</h2>
-						{groups.locked.map((p) => (
+						{groups.lockedTier.map((p) => (
 							<LockedCard key={p.id} product={p} />
 						))}
 					</section>
@@ -389,6 +454,55 @@ function ProductCard({
 						? t("menu.activate")
 						: t("menu.canjear")}
 			</button>
+		</article>
+	);
+}
+
+function LockedDayCard({
+	product,
+	daysLabel,
+}: {
+	product: CatalogProduct;
+	daysLabel: string;
+}) {
+	const { t } = useTranslation();
+	const isFree = Number(product.reference_fiat ?? 0) === 0;
+
+	return (
+		<article
+			className="sm-card relative bg-zinc-900/30 rounded-2xl p-4 flex gap-3 items-center border border-cyan-900/50 opacity-90"
+			aria-disabled="true"
+		>
+			<div
+				className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl shrink-0 border bg-cyan-950/30 border-cyan-800/40"
+				aria-hidden="true"
+			>
+				🕘
+			</div>
+			<div className="flex-1 min-w-0">
+				<h3 className="text-sm font-bold text-zinc-200 truncate">
+					{product.name}
+				</h3>
+				<p className="text-[11px] text-cyan-300/80 mt-0.5">
+					{t("menu.onlyOn", "Sólo {{days}}", { days: daysLabel })}
+				</p>
+				<div className="flex flex-wrap items-center gap-2 mt-1.5">
+					<div className="inline-flex items-center gap-1 bg-zinc-950 px-2 py-0.5 rounded-full border border-zinc-800">
+						<Coins className="w-3 h-3 text-zinc-500" aria-hidden="true" />
+						<span className="text-zinc-400 font-black text-[11px] tabular-nums">
+							{product.price_tokens}
+						</span>
+					</div>
+					{!isFree && (
+						<span className="font-bold text-[10px] text-zinc-500 tabular-nums">
+							€{Number(product.reference_fiat ?? 0).toFixed(2)}
+						</span>
+					)}
+				</div>
+			</div>
+			<span className="shrink-0 px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border text-cyan-300 border-cyan-500/40 bg-cyan-950/30">
+				{t("menu.comeBack", "Vuelve otro día")}
+			</span>
 		</article>
 	);
 }

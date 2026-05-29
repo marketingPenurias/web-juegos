@@ -174,10 +174,44 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 				{ status: 500, request },
 			);
 		}
+		// Welcome bonus: tras crear el perfil llamamos al RPC
+		// `grant_signup_bonus` (idempotente — si la fila ya tiene
+		// `reason='signup_bonus'` en el ledger, no doble).  El amount
+		// se lee de `tenant_token_rewards.signup_bonus` para que el
+		// negocio pueda ajustarlo desde la BD sin redeploy.  El
+		// trigger AFTER INSERT del ledger recalcula token_balance y
+		// lifetime_earned, así que releemos el perfil para devolver
+		// los valores reales en el bundle.
+		try {
+			const { error: bonusErr } = await supabase.rpc(
+				"grant_signup_bonus",
+				{ p_user_id: created.id },
+			);
+			if (bonusErr) {
+				console.warn(
+					"[api.session] grant_signup_bonus failed",
+					bonusErr.message,
+				);
+			}
+		} catch (err) {
+			console.warn(
+				"[api.session] grant_signup_bonus threw",
+				err instanceof Error ? err.message : String(err),
+			);
+		}
+
+		// Releer el perfil para capturar el balance tras el bonus.
+		const { data: refreshed } = await supabase
+			.from("user_profiles")
+			.select("id, token_balance, lifetime_earned")
+			.eq("id", created.id)
+			.maybeSingle();
+		const finalProfile = refreshed ?? created;
+
 		profile = {
-			id: created.id as string,
-			token_balance: Number(created.token_balance ?? 0),
-			lifetime_earned: Number(created.lifetime_earned ?? 0),
+			id: finalProfile.id as string,
+			token_balance: Number(finalProfile.token_balance ?? 0),
+			lifetime_earned: Number(finalProfile.lifetime_earned ?? 0),
 		};
 	}
 
