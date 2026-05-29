@@ -8,6 +8,33 @@ import { LanguageSwitch } from "../components/LanguageSwitch";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 import { useTenant } from "../lib/tenant";
 
+const BRAND_APEX_HOSTS = new Set([
+	"nightgraph.io",
+	"www.nightgraph.io",
+	"nightgraph.es",
+	"www.nightgraph.es",
+]);
+
+function brandRootForHost(hostname: string): string | null {
+	if (hostname.endsWith(".nightgraph.io") || hostname === "nightgraph.io") {
+		return "nightgraph.io";
+	}
+	if (hostname.endsWith(".nightgraph.es") || hostname === "nightgraph.es") {
+		return "nightgraph.es";
+	}
+	return null;
+}
+
+function buildOAuthRedirectUrl(tenantSlug: string): string | undefined {
+	if (typeof window === "undefined") return undefined;
+	const { origin, hostname } = window.location;
+	const brandRoot = brandRootForHost(hostname);
+	if (brandRoot && BRAND_APEX_HOSTS.has(hostname) && tenantSlug) {
+		return `https://${tenantSlug}.${brandRoot}/auth/callback`;
+	}
+	return `${origin}/auth/callback`;
+}
+
 export function Onboarding() {
 	const { t } = useTranslation();
 	const setScreen = useGameState((s) => s.setScreen);
@@ -15,6 +42,27 @@ export function Onboarding() {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [authBusy, setAuthBusy] = useState(false);
 	const [authError, setAuthError] = useState<string | null>(null);
+
+	// Defensa adicional: si el usuario aterriza directamente en el apex
+	// de marca con (o sin) sesión, le redirigimos en cliente al
+	// subdominio del tenant.  Pages NO sirve `/api/*` en el apex, así
+	// que cualquier intento de session sync acabará en 404.
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		const { hostname, pathname, search, hash } = window.location;
+		if (
+			BRAND_APEX_HOSTS.has(hostname) &&
+			tenant.slug &&
+			!pathname.startsWith("/auth/")
+		) {
+			const brandRoot = brandRootForHost(hostname);
+			if (brandRoot) {
+				window.location.replace(
+					`https://${tenant.slug}.${brandRoot}${pathname}${search}${hash}`,
+				);
+			}
+		}
+	}, [tenant.slug]);
 
 	// ── Captura de sesión post-OAuth ────────────────────────────────────
 	//
@@ -114,10 +162,14 @@ export function Onboarding() {
 					// Supabase Dashboard → Authentication → URL Configuration
 					// → Redirect URLs para cada dominio de producción
 					// (`https://lapocha.nightgraph.io/auth/callback`, etc.).
-					redirectTo:
-						typeof window !== "undefined"
-							? `${window.location.origin}/auth/callback`
-							: undefined,
+					//
+					// Fix 404 en producción: si el usuario llega desde el
+					// apex de marca (`nightgraph.io`) — donde Cloudflare Pages
+					// NO tiene atado el Worker que sirve `/api/*` — forzamos
+					// el callback al subdominio del tenant resuelto.  Sin
+					// esto, el exchange tiene éxito pero todas las llamadas
+					// posteriores (`/api/session`, `/api/catalog`, …) 404.
+					redirectTo: buildOAuthRedirectUrl(tenant.slug),
 				},
 			});
 			if (error) {
