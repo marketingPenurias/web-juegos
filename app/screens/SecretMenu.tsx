@@ -163,6 +163,33 @@ export function SecretMenu() {
 				return t("menu.errInsufficient");
 			case "product_unavailable":
 				return t("menu.errUnavailable");
+			case "product_wrong_day":
+				return t("menu.errWrongDay", "Este producto no está disponible hoy");
+			case "tier_required":
+				return t(
+					"menu.errTierRequired",
+					"Necesitas subir de nivel para canjear esto",
+				);
+			case "night_limit_reached":
+				return t(
+					"menu.errNightLimit",
+					"Ya canjeaste este producto esta noche",
+				);
+			case "week_limit_reached":
+				return t(
+					"menu.errWeekLimit",
+					"Has alcanzado el límite semanal de este producto",
+				);
+			case "month_limit_reached":
+				return t(
+					"menu.errMonthLimit",
+					"Has alcanzado el límite mensual de este producto",
+				);
+			case "profile_not_found":
+				return t(
+					"menu.errProfileMissing",
+					"No encontramos tu perfil. Recarga la app y reintenta.",
+				);
 			case "reward_unavailable":
 				return t("menu.errRewardUnavailable");
 			case "unauthorized":

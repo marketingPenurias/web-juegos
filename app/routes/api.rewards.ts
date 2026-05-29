@@ -139,21 +139,64 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 			if (error) {
 				const msg = (error.message || "").toLowerCase();
+				const detail = error.message;
+				// Orden: matches más específicos primero.  Las RAISE
+				// EXCEPTION del RPC `purchase_reward` cubren 8 escenarios
+				// distintos; cada uno se traduce a un código accionable
+				// + status HTTP para que el cliente decida qué toast
+				// mostrar (saldo, día, nivel, límite, etc.) en lugar de
+				// caer todo a un 500 genérico.
 				if (msg.includes("saldo")) {
 					return jsonResponse(
-						{ ok: false, error: "insufficient_funds" },
+						{ ok: false, error: "insufficient_funds", detail },
 						{ status: 400, request },
+					);
+				}
+				if (msg.includes("perfil")) {
+					return jsonResponse(
+						{ ok: false, error: "profile_not_found", detail },
+						{ status: 404, request },
+					);
+				}
+				if (msg.includes("nivel insuficiente")) {
+					return jsonResponse(
+						{ ok: false, error: "tier_required", detail },
+						{ status: 403, request },
+					);
+				}
+				if (msg.includes("no disponible hoy")) {
+					return jsonResponse(
+						{ ok: false, error: "product_wrong_day", detail },
+						{ status: 400, request },
+					);
+				}
+				if (msg.includes("límite por noche") || msg.includes("limite por noche")) {
+					return jsonResponse(
+						{ ok: false, error: "night_limit_reached", detail },
+						{ status: 429, request },
+					);
+				}
+				if (msg.includes("límite semanal") || msg.includes("limite semanal")) {
+					return jsonResponse(
+						{ ok: false, error: "week_limit_reached", detail },
+						{ status: 429, request },
+					);
+				}
+				if (msg.includes("límite mensual") || msg.includes("limite mensual")) {
+					return jsonResponse(
+						{ ok: false, error: "month_limit_reached", detail },
+						{ status: 429, request },
 					);
 				}
 				if (msg.includes("producto")) {
 					return jsonResponse(
-						{ ok: false, error: "product_unavailable" },
+						{ ok: false, error: "product_unavailable", detail },
 						{ status: 404, request },
 					);
 				}
 				console.warn("[api.rewards] purchase_reward error", error.message);
 				return jsonResponse(
-					{ ok: false, error: "rpc_failed", detail: error.message },
+					{ ok: false, error: "rpc_failed", detail },
 					{ status: 500, request },
 				);
 			}
