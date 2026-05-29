@@ -148,7 +148,16 @@ export function TinderMusical() {
 					});
 					if (!res.ok) {
 						setTone("warning");
-						setToast(t("tinder.errVote", "No se pudo registrar el voto"));
+						// Modo diagnóstico piloto: si el backend manda
+						// `detail` (mensaje raw del RPC) lo mostramos
+						// directamente — ayuda a cazar FK violations,
+						// unique violations o RAISE en vivo sin
+						// abrir wrangler tail.
+						setToast(
+							res.detail
+								? `${res.error}: ${res.detail}`
+								: t("tinder.errVote", "No se pudo registrar el voto"),
+						);
 					}
 				}
 

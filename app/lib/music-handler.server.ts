@@ -281,15 +281,54 @@ export async function handleMusicAction(
 
 	if (error) {
 		const msg = (error.message || "").toLowerCase();
+		const detail = error.message;
+		// El RPC `vote_track` tiene 4 RAISE EXCEPTION + 2 returns con
+		// `{ok:false, error:'...'}`.  Mapeamos cada uno con código
+		// accionable + `detail` (mensaje raw del RPC) para que el
+		// cliente pueda mostrar la causa exacta en lugar de un 500
+		// genérico que esconda FK violations, unique violations, etc.
 		if (msg.includes("track_unavailable")) {
 			return jsonResponse(
-				{ ok: false, error: "track_unavailable" },
+				{ ok: false, error: "track_unavailable", detail },
+				{ status: 409, request },
+			);
+		}
+		if (msg.includes("invalid_vote_type")) {
+			return jsonResponse(
+				{ ok: false, error: "invalid_vote_type", detail },
+				{ status: 400, request },
+			);
+		}
+		if (msg.includes("free_votes_must_be_zero_tokens")) {
+			return jsonResponse(
+				{ ok: false, error: "free_must_be_zero", detail },
+				{ status: 400, request },
+			);
+		}
+		if (msg.includes("negative_tokens")) {
+			return jsonResponse(
+				{ ok: false, error: "negative_tokens", detail },
+				{ status: 400, request },
+			);
+		}
+		// Errores de Postgres "duros" que llegan literales al cliente
+		// para que el operador pueda diagnosticar sin abrir wrangler
+		// tail (FK violations, unique violations, NOT NULL, etc.).
+		if (msg.includes("violates foreign key")) {
+			return jsonResponse(
+				{ ok: false, error: "fk_violation", detail },
+				{ status: 500, request },
+			);
+		}
+		if (msg.includes("duplicate key")) {
+			return jsonResponse(
+				{ ok: false, error: "duplicate_key", detail },
 				{ status: 409, request },
 			);
 		}
 		console.warn("[api.music] vote_track rpc failed", error.message);
 		return jsonResponse(
-			{ ok: false, error: "rpc_failed", detail: error.message },
+			{ ok: false, error: "rpc_failed", detail },
 			{ status: 500, request },
 		);
 	}

@@ -124,7 +124,13 @@ export function SecretMenu() {
 		const result = await purchase(product.id);
 		if (!result.ok) {
 			setTone("warning");
-			setToast(translateError(result.error));
+			// Modo diagnóstico piloto: si el backend manda `detail` raw
+			// del RPC, lo mostramos directamente.
+			setToast(
+				result.detail
+					? `${result.error}: ${result.detail}`
+					: translateError(result.error),
+			);
 			setPurchasing(null);
 			return;
 		}
@@ -141,7 +147,11 @@ export function SecretMenu() {
 			// La compra está hecha y queda como "available" en user_rewards.
 			// El usuario puede reintentar el canje desde el historial.
 			setTone("warning");
-			setToast(translateError(redeemResult.error));
+			setToast(
+				redeemResult.detail
+					? `${redeemResult.error}: ${redeemResult.detail}`
+					: translateError(redeemResult.error),
+			);
 			setPurchasing(null);
 			return;
 		}

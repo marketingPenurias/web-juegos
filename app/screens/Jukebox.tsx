@@ -113,7 +113,7 @@ export function Jukebox() {
 			});
 	};
 
-	const translateError = (code: string): string => {
+	const translateError = (code: string, detail?: string): string => {
 		switch (code) {
 			case "insufficient_funds":
 				return t("jukebox.toastNoTokens");
@@ -124,7 +124,12 @@ export function Jukebox() {
 			case "unauthorized":
 				return t("menu.errUnauth");
 			default:
-				return t("jukebox.toastError", "No se pudo procesar la petición");
+				// Modo diagnóstico piloto: propaga `detail` raw del RPC
+				// para cazar FK / unique / constraint violations sin
+				// abrir wrangler tail.
+				return detail
+					? `${code}: ${detail}`
+					: t("jukebox.toastError", "No se pudo procesar la petición");
 		}
 	};
 
@@ -151,7 +156,7 @@ export function Jukebox() {
 		setBusy(null);
 		if (!res.ok) {
 			setTone("warning");
-			setToast(translateError(res.error));
+			setToast(translateError(res.error, res.detail));
 			return;
 		}
 		setRequested((prev) => new Set(prev).add(id));
@@ -181,7 +186,7 @@ export function Jukebox() {
 		setBusy(null);
 		if (!res.ok) {
 			setTone("warning");
-			setToast(translateError(res.error));
+			setToast(translateError(res.error, res.detail));
 			return;
 		}
 		if (typeof res.balance === "number") setBalance(res.balance);

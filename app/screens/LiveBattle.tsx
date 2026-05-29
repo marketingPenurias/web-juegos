@@ -136,7 +136,12 @@ export function LiveBattle() {
 					? t("live.toastNoTokens")
 					: result.error === "already_voted"
 						? t("live.toastAlreadyVoted", "Ya votaste esta noche")
-						: t("live.toastError", "No se pudo registrar el voto"),
+						// Modo diagnóstico piloto: propaga `detail` del RPC
+						// directamente al toast para cazar FK / unique /
+						// constraint violations sin wrangler tail.
+						: result.detail
+							? `${result.error}: ${result.detail}`
+							: t("live.toastError", "No se pudo registrar el voto"),
 			);
 			return;
 		}

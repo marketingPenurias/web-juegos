@@ -36,8 +36,13 @@ export type MusicError =
 	| "forbidden"
 	| "missing_tenant"
 	| "track_unavailable"
+	| "invalid_vote_type"
+	| "free_must_be_zero"
+	| "negative_tokens"
 	| "insufficient_funds"
 	| "already_voted"
+	| "fk_violation"
+	| "duplicate_key"
 	| "service_unavailable"
 	| "network_error"
 	| "rpc_failed";
@@ -55,6 +60,22 @@ async function buildHeaders(): Promise<HeadersInit> {
 	return headers;
 }
 
+/**
+ * Custom Error subclass para que el caller pueda leer tanto el código
+ * canónico (`error`) como el mensaje raw del backend (`detail`) — clave
+ * cuando el RPC tira RAISE con texto descriptivo y queremos mostrarlo
+ * literalmente en un toast de diagnóstico.
+ */
+class ApiError extends Error {
+	code: string;
+	detail?: string;
+	constructor(code: string, detail?: string) {
+		super(detail ? `${code}: ${detail}` : code);
+		this.code = code;
+		this.detail = detail;
+	}
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	const headers = await buildHeaders();
 	const res = await fetch(url, {
@@ -64,9 +85,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	const payload = (await res.json().catch(() => ({}))) as T & {
 		ok?: boolean;
 		error?: string;
+		detail?: string;
 	};
 	if (!res.ok || payload.ok === false) {
-		throw new Error(payload.error ?? `http_${res.status}`);
+		throw new ApiError(payload.error ?? `http_${res.status}`, payload.detail);
 	}
 	return payload;
 }
@@ -134,6 +156,13 @@ export function useMusic(eventId: string | null) {
 					balance: data.balance,
 				};
 			} catch (err) {
+				if (err instanceof ApiError) {
+					return {
+						ok: false as const,
+						error: (err.code as MusicError) ?? "rpc_failed",
+						detail: err.detail,
+					};
+				}
 				const message = err instanceof Error ? err.message : "network_error";
 				return {
 					ok: false as const,

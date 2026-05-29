@@ -84,11 +84,12 @@ async function postRewards<T>(body: unknown): Promise<RewardResult<T>> {
 	}
 
 	const err = (payload as { error?: string })?.error as RewardError | undefined;
-	if (err) return { ok: false, error: err };
+	const detail = (payload as { detail?: string })?.detail;
+	if (err) return { ok: false, error: err, detail };
 
-	if (res.status === 401) return { ok: false, error: "unauthorized" };
-	if (res.status === 503) return { ok: false, error: "service_unavailable" };
-	return { ok: false, error: "rpc_failed" };
+	if (res.status === 401) return { ok: false, error: "unauthorized", detail };
+	if (res.status === 503) return { ok: false, error: "service_unavailable", detail };
+	return { ok: false, error: "rpc_failed", detail };
 }
 
 export function useRewards() {
