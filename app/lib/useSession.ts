@@ -77,8 +77,20 @@ export function useSession() {
 						"X-Tenant-Slug": tenant.slug,
 					},
 				});
-				if (!res.ok) return;
-				const data = (await res.json()) as SessionPayload;
+				const payload = (await res.json().catch(() => ({}))) as
+					| SessionPayload
+					| { ok: false; error?: string; detail?: string };
+
+				if (!res.ok || (payload as { ok?: boolean }).ok === false) {
+					// TODO: CLEANUP SESSION DEBUG
+					console.error("[SESSION ERROR] Fallo desde el backend:", {
+						status: res.status,
+						payload,
+					});
+					return;
+				}
+
+				const data = payload as SessionPayload;
 				if (cancelled || !data?.ok) return;
 				syncSession({
 					userProfileId: data.profile.id,
@@ -89,8 +101,9 @@ export function useSession() {
 					dailyActivity: data.daily_activity,
 					rewardRules: data.reward_rules,
 				});
-			} catch {
-				// Network errors are non-fatal — UI keeps the persisted mock.
+			} catch (err) {
+				// TODO: CLEANUP SESSION DEBUG
+				console.error("[SESSION ERROR] Excepción de red:", err);
 			}
 		}
 
