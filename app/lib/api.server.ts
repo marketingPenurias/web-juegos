@@ -137,36 +137,141 @@ export type VerifiedUser = {
 	supabase: SupabaseClient;
 };
 
+type JwtPayload = {
+	sub?: string;
+	email?: string;
+	exp?: number;
+	aud?: string;
+	role?: string;
+};
+
 /**
- * Pull `Authorization: Bearer <jwt>` from the request and verify it via
- * **local JWT payload decode** — sin round-trip de red a Supabase.
+ * Decode a base64url string into its raw byte-string representation
+ * (each char is a byte 0..255).  Pads to a multiple of 4 so `atob`
+ * doesn't reject the input.
+ */
+function decodeB64Url(b64url: string): string {
+	const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
+	const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+	return atob(padded);
+}
+
+/**
+ * Importa una clave pública PEM (curva P-256) al formato SPKI que
+ * espera Web Crypto API.  Acepta tanto el formato con cabeceras
+ * `-----BEGIN PUBLIC KEY-----` como un cuerpo base64 plano (por si
+ * la variable de entorno se inyecta sin saltos de línea).
+ */
+async function importPublicKey(pem: string): Promise<CryptoKey> {
+	const b64 = pem.replace(/(-----(BEGIN|END) PUBLIC KEY-----|\n|\r)/g, "");
+	const binaryDerString = atob(b64);
+	const binaryDer = new Uint8Array(binaryDerString.length);
+	for (let i = 0; i < binaryDerString.length; i++) {
+		binaryDer[i] = binaryDerString.charCodeAt(i);
+	}
+	return crypto.subtle.importKey(
+		"spki",
+		binaryDer,
+		{ name: "ECDSA", namedCurve: "P-256" },
+		false,
+		["verify"],
+	);
+}
+
+/**
+ * Verifica un JWT de Supabase **localmente** (ES256 / ECDSA P-256)
+ * usando Web Crypto API.
  *
- *   Por qué decode local:
- *     - `supabase.auth.getUser(token)` hace un fetch a
- *       `<project>.supabase.co/auth/v1/user`.  En el runtime de
- *       Cloudflare Workers ese fetch ha venido fallando de forma
- *       intermitente (latencia, rate-limit del cold-start, etc.) y
+ *   Por qué asimétrica (ES256) en lugar de simétrica (HS256):
+ *     - El proyecto Supabase está en modo "ECC P-256 Current Key,
+ *       HS256 Legacy".  La firma de los nuevos tokens es ECDSA.
+ *     - Asimétrica significa que el Worker sólo necesita la clave
+ *       PÚBLICA — si se filtra no compromete la emisión de tokens.
+ *     - La firma JWT viene en formato IEEE P1363 (raw r||s, 64 bytes
+ *       para P-256), que es exactamente lo que espera
+ *       `crypto.subtle.verify` con algoritmo ECDSA.
+ *
+ *   Returns the decoded payload on success, `null` on:
+ *     - JWT no tiene 3 segmentos
+ *     - firma no verifica contra la clave pública
+ *     - `exp` ya pasó
+ *     - cualquier excepción durante decode / import / verify
+ */
+async function verifySupabaseJwtLocally(
+	token: string,
+	publicKeyPem: string,
+): Promise<JwtPayload | null> {
+	const parts = token.split(".");
+	if (parts.length !== 3) return null;
+
+	try {
+		const key = await importPublicKey(publicKeyPem);
+
+		const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+		const signatureStr = decodeB64Url(parts[2]);
+		const signature = new Uint8Array(signatureStr.length);
+		for (let i = 0; i < signatureStr.length; i++) {
+			signature[i] = signatureStr.charCodeAt(i);
+		}
+
+		const isValid = await crypto.subtle.verify(
+			{ name: "ECDSA", hash: { name: "SHA-256" } },
+			key,
+			signature,
+			data,
+		);
+		if (!isValid) return null;
+
+		const payload = JSON.parse(decodeB64Url(parts[1])) as JwtPayload;
+		if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
+			return null;
+		}
+
+		return payload;
+	} catch {
+		return null;
+	}
+}
+
+type WorkerEnv = {
+	SUPABASE_JWT_PUBLIC_KEY?: string;
+};
+
+function readJwtPublicKey(context: AppLoadContext): string | null {
+	const cfEnv = (
+		context as unknown as { cloudflare?: { env?: WorkerEnv }; env?: WorkerEnv }
+	).cloudflare?.env;
+	const fallbackEnv = (context as unknown as { env?: WorkerEnv }).env;
+	const pem =
+		cfEnv?.SUPABASE_JWT_PUBLIC_KEY ?? fallbackEnv?.SUPABASE_JWT_PUBLIC_KEY;
+	return pem && pem.length > 0 ? pem : null;
+}
+
+/**
+ * Pull `Authorization: Bearer <jwt>` from the request and verify it
+ * **locally** vía ECDSA P-256 (ES256) contra la clave pública
+ * `SUPABASE_JWT_PUBLIC_KEY` (PEM).
+ *
+ *   Por qué asimétrica local en lugar de `supabase.auth.getUser(token)`:
+ *     - `getUser` hace fetch a `<project>.supabase.co/auth/v1/user`.
+ *       En el runtime de Cloudflare Workers ese round-trip fallaba
+ *       de forma intermitente (cold-start, rate-limit, latencia) y
  *       producía el 401 misterioso que bloqueaba el JIT del perfil.
- *     - Cada operación en la BD reverifica el JWT internamente vía
- *       RLS / `auth.uid()`.  El service_role bypassa RLS pero los
- *       inserts viajan con `auth_user_id = payload.sub` — si el sub
- *       es ilegítimo, el perfil queda huérfano (sin fila en
- *       `auth.users`) pero no compromete a ningún usuario real.
- *
- *   ⚠️  TODO: SECURITY HARDENING (post-piloto): verificar la firma
- *   HS256 del JWT contra `SUPABASE_JWT_SECRET` antes de confiar en
- *   `payload.sub`.  Sin ese paso, cualquier atacante puede emitir
- *   un JWT no firmado y suplantar a otro usuario en lecturas/RPC
- *   service_role.  Para el piloto cerrado de hoy el riesgo es
- *   asumible; para producción multi-tenant abierto NO.
+ *     - El proyecto Supabase actual usa ECC P-256 como "Current Key"
+ *       (HS256 queda como Legacy), así que la firma de los JWT
+ *       nuevos es ES256.  La verificación con Web Crypto API es
+ *       criptográficamente equivalente a la que hace Supabase
+ *       internamente.
+ *     - La clave PÚBLICA puede vivir en el Worker sin riesgo: si se
+ *       filtra, NO permite emitir tokens (eso requiere la privada,
+ *       que sólo Supabase tiene).
  *
  *   Códigos de error (throw → React Router los propaga al cliente):
  *     · NO_TOKEN_HEADER              header ausente o no-Bearer
- *     · JWT_MALFORMED                token no tiene 3 partes / payload
- *                                    no decodifica
- *     · JWT_NO_SUB                   payload sin `sub` (no es de Supabase)
- *     · JWT_EXPIRED                  `exp` ya pasó
- *     · ENV_VARS_MISSING_IN_CLOUDFLARE getSupabase() throw
+ *     · JWT_PUBLIC_KEY_MISSING       `SUPABASE_JWT_PUBLIC_KEY` no provisionado
+ *     · JWT_INVALID_OR_EXPIRED       firma no verifica o `exp` pasó
+ *     · JWT_NO_SUB                   payload válido pero sin `sub`
+ *     · ENV_VARS_MISSING_IN_CLOUDFLARE getSupabase() throw por env vars
  */
 export async function verifyAuthToken(
 	request: Request,
@@ -179,7 +284,6 @@ export async function verifyAuthToken(
 			hasHeader: !!auth,
 			preview: auth?.slice(0, 16),
 		});
-		// TODO: CLEANUP AUTH VERIFY DEBUG
 		throw jsonResponse(
 			{ ok: false, error: "NO_TOKEN_HEADER" },
 			{ status: 401, request },
@@ -189,66 +293,49 @@ export async function verifyAuthToken(
 	if (!token) {
 		// TODO: CLEANUP AUTH VERIFY DEBUG
 		console.warn("[AUTH VERIFY] empty token after Bearer");
-		// TODO: CLEANUP AUTH VERIFY DEBUG
 		throw jsonResponse(
 			{ ok: false, error: "NO_TOKEN_HEADER", detail: "empty bearer" },
 			{ status: 401, request },
 		);
 	}
 
-	// ── Decode local del payload (base64url) ──────────────────────────
-	const parts = token.split(".");
-	if (parts.length !== 3) {
+	const jwtPublicKey = readJwtPublicKey(context);
+	if (!jwtPublicKey) {
 		// TODO: CLEANUP AUTH VERIFY DEBUG
-		console.error("[AUTH VERIFY] JWT no tiene 3 partes", {
-			partsLength: parts.length,
-		});
+		console.error(
+			"[AUTH VERIFY] SUPABASE_JWT_PUBLIC_KEY no provisionado en CF env",
+		);
 		throw jsonResponse(
-			{ ok: false, error: "JWT_MALFORMED", detail: "expected 3 segments" },
-			{ status: 401, request },
+			{
+				ok: false,
+				error: "JWT_PUBLIC_KEY_MISSING",
+				detail: "SUPABASE_JWT_PUBLIC_KEY missing in Cloudflare env",
+			},
+			{ status: 500, request },
 		);
 	}
 
-	let payload: { sub?: string; email?: string; exp?: number; aud?: string };
-	try {
-		const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-		// Pad a múltiplo de 4 para que `atob` no rechace.
-		const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-		const json = atob(padded);
-		payload = JSON.parse(json);
-	} catch (err) {
+	const payload = await verifySupabaseJwtLocally(token, jwtPublicKey);
+	if (!payload) {
 		// TODO: CLEANUP AUTH VERIFY DEBUG
-		console.error("[AUTH VERIFY] JWT payload no decodifica", {
-			thrown: String(err),
+		console.error("[AUTH VERIFY] JWT no verifica ES256 o está expirado", {
+			tokenPreview: token.slice(0, 12) + "…",
 		});
 		throw jsonResponse(
-			{ ok: false, error: "JWT_MALFORMED", detail: String(err) },
+			{ ok: false, error: "JWT_INVALID_OR_EXPIRED" },
 			{ status: 401, request },
 		);
 	}
 
 	if (!payload.sub) {
 		// TODO: CLEANUP AUTH VERIFY DEBUG
-		console.error("[AUTH VERIFY] JWT sin `sub`", { payload });
+		console.error("[AUTH VERIFY] JWT válido pero sin `sub`", { payload });
 		throw jsonResponse(
 			{ ok: false, error: "JWT_NO_SUB" },
 			{ status: 401, request },
 		);
 	}
 
-	if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
-		// TODO: CLEANUP AUTH VERIFY DEBUG
-		console.error("[AUTH VERIFY] JWT expirado", {
-			exp: payload.exp,
-			now: Math.floor(Date.now() / 1000),
-		});
-		throw jsonResponse(
-			{ ok: false, error: "JWT_EXPIRED", detail: `exp=${payload.exp}` },
-			{ status: 401, request },
-		);
-	}
-
-	// ── Instanciamos el cliente Supabase (sin red) para los callers ───
 	let supabase: SupabaseClient;
 	try {
 		supabase = getSupabase(context);
