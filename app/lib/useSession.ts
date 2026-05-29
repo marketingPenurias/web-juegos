@@ -77,6 +77,9 @@ export function useSession() {
 				});
 				const res = await fetch(ENDPOINT, {
 					method: "GET",
+					// `no-store`: evita que iOS Safari sirva un bundle de sesión
+					// cacheado (sin evento activo) tras volver a la app (bfcache).
+					cache: "no-store",
 					headers: {
 						Authorization: `Bearer ${token}`,
 						"X-Tenant-Slug": tenant.slug,

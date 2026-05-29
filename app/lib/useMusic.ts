@@ -80,6 +80,8 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	const headers = await buildHeaders();
 	const res = await fetch(url, {
 		...init,
+		// El deck del evento cambia en vivo; nunca servir copia cacheada.
+		cache: "no-store",
 		headers: { ...headers, ...(init?.headers ?? {}) },
 	});
 	const payload = (await res.json().catch(() => ({}))) as T & {
@@ -129,6 +131,7 @@ export function useMusic(eventId: string | null) {
 			track_id: string;
 			vote_type?: TrackVoteType;
 			tokens_spent?: number;
+			boost_context?: "jukebox" | "livebattle";
 		}) => {
 			if (!eventId) return { ok: false as const, error: "missing_event" };
 			try {
@@ -143,7 +146,10 @@ export function useMusic(eventId: string | null) {
 						event_id: eventId,
 						track_id: params.track_id,
 						vote_type: params.vote_type ?? "free",
+						// El server ignora este coste para boost (lo resuelve de
+						// la BD); se envía sólo por compatibilidad.
 						tokens_spent: params.tokens_spent ?? 0,
+						boost_context: params.boost_context ?? "livebattle",
 						tenant_slug: tenant.slug,
 					}),
 				});

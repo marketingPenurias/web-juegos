@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useMusic } from "../lib/useMusic";
+import { useClaim } from "../lib/useClaim";
 import { Toast } from "../components/Toast";
 import { LiveHeader } from "../components/live/LiveHeader";
 import { SongRow } from "../components/live/SongRow";
@@ -32,8 +33,10 @@ export function LiveBattle() {
 	const { t } = useTranslation();
 	const tokens = useGameState((s) => s.tokens);
 	const setBalance = useGameState((s) => s.setBalance);
+	const addTokens = useGameState((s) => s.addTokens);
 	const activeEventId = useGameState((s) => s.activeEventId);
 	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
+	const { claim } = useClaim();
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const aBarRef = useRef<HTMLDivElement>(null);
@@ -127,7 +130,8 @@ export function LiveBattle() {
 		const result = await castVote({
 			track_id: selected,
 			vote_type: action,
-			tokens_spent: cost,
+			tokens_spent: cost, // ignorado server-side; el coste real lo fija la BD
+			boost_context: "livebattle",
 		});
 		if (!result.ok) {
 			setTone("warning");
@@ -150,6 +154,11 @@ export function LiveBattle() {
 			setBalance(result.balance);
 		}
 		setVoted(selected);
+		// Premio por votar (Tabla 5: livebattle_vote = +10, 1/noche).
+		// OPTIMISTIC: sumamos +10 ya; el claim reconcilia con el ledger
+		// (si ya votó hoy, el RPC lo rechaza y el saldo se corrige solo).
+		addTokens(10, "history.tx_vote");
+		void claim("livebattle_vote", activeEventId);
 		if (action === "boost") {
 			setTone("success");
 			setToast(t("live.toastBoost"));

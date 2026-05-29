@@ -120,6 +120,14 @@ export function jsonResponse(
 	const origin = request?.headers.get("origin") ?? null;
 	const headers = new Headers(rest.headers ?? {});
 	headers.set("Content-Type", "application/json");
+	// Bug móvil "No hay eventos activos": las respuestas de /api/* son
+	// datos por-usuario y sensibles al tiempo (evento activo, balance,
+	// daily_activity).  Sin Cache-Control, iOS Safari / proxies aplican
+	// freshness heurística y sirven un /api/session OBSOLETO (cacheado
+	// ANTES de que el DJ abriera el evento) → activeEventId=null →
+	// Tinder/Jukebox muestran vacío.  Nunca deben cachearse.
+	headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+	headers.set("Pragma", "no-cache");
 	for (const [k, v] of Object.entries(corsHeaders(origin))) {
 		headers.set(k, v);
 	}

@@ -4,6 +4,7 @@ import { Heart, X, Music2, ArrowLeft, Sparkles } from "lucide-react";
 import { Draggable, gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useMusic, type MusicTrack } from "../lib/useMusic";
+import { useClaim } from "../lib/useClaim";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { trackEvent } from "../lib/analytics";
@@ -31,7 +32,7 @@ import { cn } from "../lib/utils";
  */
 
 const SWIPE_THRESHOLD = 100;
-const REWARD = 20;
+const REWARD = 25; // Tabla 5: tinder_completion. El importe real lo fija el RPC.
 const REQUIRED = 5;
 
 export function TinderMusical() {
@@ -41,6 +42,7 @@ export function TinderMusical() {
 	const activeEventId = useGameState((s) => s.activeEventId);
 
 	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
+	const { claim } = useClaim();
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -163,7 +165,12 @@ export function TinderMusical() {
 
 				if (next >= REQUIRED) {
 					setDone(true);
+					// OPTIMISTIC: sumamos +25 y animamos el modal YA.  El claim
+					// real corre en background; el RPC `tinder_completion`
+					// valida 1/noche y el ledger reconcilia el balance (si ya
+					// se completó hoy, useClaim corrige el saldo sin drama).
 					addTokens(REWARD, "history.tx_tinder");
+					void claim("tinder_completion", activeEventId);
 					gsap.fromTo(
 						successRef.current,
 						{ opacity: 0, scale: 0.6 },

@@ -11,6 +11,7 @@ import {
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useMusic, type MusicTrack } from "../lib/useMusic";
+import { useClaim } from "../lib/useClaim";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { cn } from "../lib/utils";
@@ -39,6 +40,8 @@ export function Jukebox() {
 	const activeEventId = useGameState((s) => s.activeEventId);
 
 	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
+	const addTokens = useGameState((s) => s.addTokens);
+	const { claim } = useClaim();
 
 	const [query, setQuery] = useState("");
 	const [requested, setRequested] = useState<Set<string>>(new Set());
@@ -163,6 +166,10 @@ export function Jukebox() {
 		setTone("success");
 		setToast(t("jukebox.toastRequested"));
 		flashRow(id, "cyan");
+		// Premio por pedir (Tabla 5: jukebox_request = +20, 1/noche).
+		// OPTIMISTIC: sumamos +20 ya; el claim reconcilia con el ledger.
+		addTokens(20, "history.tx_jukebox_request");
+		void claim("jukebox_request", activeEventId);
 	};
 
 	const handleBoost = async (id: string) => {
@@ -181,7 +188,8 @@ export function Jukebox() {
 		const res = await castVote({
 			track_id: id,
 			vote_type: "boost",
-			tokens_spent: BOOST_COST,
+			tokens_spent: BOOST_COST, // ignorado server-side; coste real desde la BD
+			boost_context: "jukebox",
 		});
 		setBusy(null);
 		if (!res.ok) {

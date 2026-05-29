@@ -34,6 +34,11 @@ type WalletRequest = {
 	amount?: number;
 	reason?: string;
 	metadata?: Record<string, unknown> | null;
+	// Modo CLAIM (server-authoritative): cuando viene `event_code`, el
+	// amount lo decide el RPC `claim_gamification_reward` leyendo
+	// `tenant_token_rewards` + límite diario.  El cliente NO manda amount.
+	event_code?: string;
+	event_id?: string;
 };
 
 function pickWalletSlug(
@@ -77,31 +82,38 @@ export async function action({ request, context }: Route.ActionArgs) {
 		);
 	}
 
+	const eventCode = String(body.event_code ?? "").trim().slice(0, 64);
+	const isClaim = eventCode.length > 0;
+
 	const amount = Number.isFinite(body.amount) ? Math.trunc(body.amount!) : NaN;
 	const reason = String(body.reason ?? "").trim().slice(0, 64);
 
-	if (!Number.isInteger(amount) || amount === 0) {
-		return jsonResponse(
-			{ ok: false, error: "invalid_amount" },
-			{ status: 400, request },
-		);
-	}
-	if (amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
-		return jsonResponse(
-			{
-				ok: false,
-				error: "amount_out_of_range",
-				min: MIN_AMOUNT,
-				max: MAX_AMOUNT,
-			},
-			{ status: 400, request },
-		);
-	}
-	if (!reason) {
-		return jsonResponse(
-			{ ok: false, error: "reason_required" },
-			{ status: 400, request },
-		);
+	// La validación de amount/reason sólo aplica al modo legacy (earn/spend
+	// directo).  En modo CLAIM el amount lo resuelve el RPC server-side.
+	if (!isClaim) {
+		if (!Number.isInteger(amount) || amount === 0) {
+			return jsonResponse(
+				{ ok: false, error: "invalid_amount" },
+				{ status: 400, request },
+			);
+		}
+		if (amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
+			return jsonResponse(
+				{
+					ok: false,
+					error: "amount_out_of_range",
+					min: MIN_AMOUNT,
+					max: MAX_AMOUNT,
+				},
+				{ status: 400, request },
+			);
+		}
+		if (!reason) {
+			return jsonResponse(
+				{ ok: false, error: "reason_required" },
+				{ status: 400, request },
+			);
+		}
 	}
 
 	// Strict multi-tenant resolution — no defaults.
@@ -175,6 +187,61 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 	const userProfileId = profile.id as string;
 	const currentBalance = Number(profile.token_balance ?? 0);
+
+	// ── CLAIM PATH (server-authoritative) ─────────────────────────────
+	// El RPC lee el premio de `tenant_token_rewards`, valida el límite
+	// diario por `business_night` e inserta el ingreso de forma atómica.
+	// Devuelve SIEMPRE el balance autoritativo para que la UI optimista
+	// pueda reconciliarse (éxito) o corregirse (límite alcanzado).
+	if (isClaim) {
+		const { data: claim, error: claimErr } = await supabase.rpc(
+			"claim_gamification_reward",
+			{
+				p_user_id: userProfileId,
+				p_event_code: eventCode,
+				p_event_id: typeof body.event_id === "string" ? body.event_id : null,
+			},
+		);
+		if (claimErr) {
+			console.warn("[api.wallet] claim rpc failed", claimErr.message);
+			return jsonResponse(
+				{ ok: false, error: "rpc_failed", detail: claimErr.message },
+				{ status: 500, request },
+			);
+		}
+		const payload = (claim ?? {}) as {
+			ok?: boolean;
+			error?: string;
+			amount?: number;
+			balance?: number;
+			lifetime_earned?: number;
+		};
+		if (payload.ok === false) {
+			// 409 para límite diario (la UI lo trata como "ya reclamado hoy").
+			const status =
+				payload.error === "daily_limit_reached" ? 409 : 400;
+			return jsonResponse(
+				{
+					ok: false,
+					error: payload.error ?? "claim_failed",
+					balance: Number(payload.balance ?? currentBalance),
+				},
+				{ status, request },
+			);
+		}
+		return jsonResponse(
+			{
+				ok: true,
+				event_code: eventCode,
+				amount: Number(payload.amount ?? 0),
+				balance: Number(payload.balance ?? currentBalance),
+				lifetime_earned: Number(
+					payload.lifetime_earned ?? profile.lifetime_earned ?? 0,
+				),
+			},
+			{ request },
+		);
+	}
 
 	const metadata = {
 		...(body.metadata ?? {}),

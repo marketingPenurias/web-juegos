@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowLeft, Sparkles } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
-import { useEarn } from "../lib/useEarn";
+import { useClaim } from "../lib/useClaim";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { PlayersPanel } from "../components/ruleta/PlayersPanel";
@@ -52,7 +52,9 @@ export function RuletaRondas() {
 	const setScreen = useGameState((s) => s.setScreen);
 	const friends = useGameState((s) => s.friends);
 	const setFriends = useGameState((s) => s.setFriends);
-	const { earn, pending } = useEarn();
+	const addTokens = useGameState((s) => s.addTokens);
+	const activeEventId = useGameState((s) => s.activeEventId);
+	const { claim } = useClaim();
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const wheelRef = useRef<SVGSVGElement>(null);
@@ -96,10 +98,12 @@ export function RuletaRondas() {
 		setLoserIndex(null);
 	};
 
-	const translateEarnError = (code: string): string => {
+	const translateClaimError = (code: string): string => {
 		switch (code) {
 			case "unauthorized":
 				return t("ruleta.errAuth", "Inicia sesión para ganar tokens");
+			case "daily_limit_reached":
+				return t("ruleta.errDaily", "Ya giraste hoy · vuelve mañana");
 			case "network_error":
 				return t("ruleta.errNetwork", "Sin conexión · no se conceden tokens");
 			default:
@@ -108,17 +112,23 @@ export function RuletaRondas() {
 	};
 
 	const handleSpin = async () => {
-		if (spinning || pending || !wheelRef.current) return;
+		if (spinning || !wheelRef.current) return;
 		const validFriends = friends.filter((f) => f.trim().length > 0);
 		if (validFriends.length < MIN_PLAYERS) return;
 
-		// 1) Persistir primero — sólo si el servidor confirma seguimos.
-		const result = await earn(SPIN_REWARD, "ruleta_spin");
-		if (!result.ok) {
-			setTone("warning");
-			setToast(translateEarnError(result.error));
-			return;
-		}
+		// ── OPTIMISTIC UI ──────────────────────────────────────────────
+		// Sumamos los tokens y giramos YA (60fps, sin bloquear en la red).
+		// El claim corre en background; el RPC valida el límite diario y
+		// el ledger es la autoridad final: si falla (ya giró hoy / sin
+		// red), `useClaim` reconcilia el balance via setBalance y aquí
+		// avisamos con un toast.  Cero "tokens fantasma" tras reconciliar.
+		addTokens(SPIN_REWARD, "history.tx_ruleta");
+		void claim("ruleta_spin", activeEventId).then((result) => {
+			if (!result.ok) {
+				setTone("warning");
+				setToast(translateClaimError(result.error));
+			}
+		});
 
 		setSpinning(true);
 		setLoserIndex(null);
@@ -170,7 +180,7 @@ export function RuletaRondas() {
 			? friends[loserIndex] || t("ruleta.friend", { n: loserIndex + 1 })
 			: "";
 
-	const buttonBusy = spinning || pending;
+	const buttonBusy = spinning;
 
 	return (
 		<div
@@ -301,11 +311,7 @@ export function RuletaRondas() {
 					)}
 				>
 					<Sparkles className="w-5 h-5 fill-black" aria-hidden="true" />
-					{pending
-						? t("ruleta.confirming", "Confirmando…")
-						: spinning
-							? t("ruleta.spinning")
-							: t("ruleta.spin")}
+					{spinning ? t("ruleta.spinning") : t("ruleta.spin")}
 				</button>
 			</footer>
 

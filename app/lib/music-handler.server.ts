@@ -23,9 +23,18 @@ type VoteBody = {
 	event_id?: string;
 	track_id?: string;
 	vote_type?: TrackVoteType;
-	tokens_spent?: number;
+	tokens_spent?: number; // IGNORADO server-side para boost (compat)
 	tenant_slug?: string;
+	// Qué boost es, para resolver el coste real desde tenant_token_rewards.
+	boost_context?: "jukebox" | "livebattle";
 };
+
+// El coste del boost NUNCA lo decide el cliente.  Mapeamos el contexto
+// de UI al `event_code` de `tenant_token_rewards`; el RPC `vote_track`
+// resuelve el importe desde la BD.
+function boostCodeFromContext(ctx: unknown): string {
+	return ctx === "jukebox" ? "jukebox_boost" : "livebattle_boost";
+}
 
 function isValidVoteType(v: unknown): v is TrackVoteType {
 	return v === "free" || v === "boost";
@@ -276,7 +285,11 @@ export async function handleMusicAction(
 		p_event_id: body.event_id,
 		p_track_id: body.track_id,
 		p_vote_type: vote_type,
+		// p_tokens_spent se conserva por compat pero el RPC lo IGNORA para
+		// boost: el coste real se resuelve de tenant_token_rewards vía
+		// p_boost_code.  Cierra la fuga "boost a 0 tokens".
 		p_tokens_spent: tokens_spent,
+		p_boost_code: boostCodeFromContext(body.boost_context),
 	});
 
 	if (error) {
