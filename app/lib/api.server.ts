@@ -157,21 +157,31 @@ function decodeB64Url(b64url: string): string {
 }
 
 /**
- * Importa una clave pública PEM (curva P-256) al formato SPKI que
- * espera Web Crypto API.  Acepta tanto el formato con cabeceras
- * `-----BEGIN PUBLIC KEY-----` como un cuerpo base64 plano (por si
- * la variable de entorno se inyecta sin saltos de línea).
+ * Importa una clave pública en formato JWK (curva P-256) directamente
+ * a Web Crypto API.  Acepta dos formas válidas en `SUPABASE_JWT_PUBLIC_KEY`:
+ *
+ *   - JWK plano:    `{ "kty": "EC", "crv": "P-256", "x": "...", "y": "..." }`
+ *   - JWKS wrapper: `{ "keys": [ { ... }, ... ] }`  → tomamos `keys[0]`
+ *
+ *   El nombre de la función se conserva por compatibilidad con el
+ *   cleanup tracker; el parámetro pasa de PEM a string JSON.
  */
-async function importPublicKey(pem: string): Promise<CryptoKey> {
-	const b64 = pem.replace(/(-----(BEGIN|END) PUBLIC KEY-----|\n|\r)/g, "");
-	const binaryDerString = atob(b64);
-	const binaryDer = new Uint8Array(binaryDerString.length);
-	for (let i = 0; i < binaryDerString.length; i++) {
-		binaryDer[i] = binaryDerString.charCodeAt(i);
+async function importPublicKey(jwkJsonString: string): Promise<CryptoKey> {
+	let jwkData: unknown;
+	try {
+		jwkData = JSON.parse(jwkJsonString);
+	} catch {
+		throw new Error("Invalid JWK JSON format");
 	}
+
+	const keyToImport =
+		jwkData && typeof jwkData === "object" && "keys" in jwkData
+			? (jwkData as { keys: JsonWebKey[] }).keys[0]
+			: (jwkData as JsonWebKey);
+
 	return crypto.subtle.importKey(
-		"spki",
-		binaryDer,
+		"jwk",
+		keyToImport,
 		{ name: "ECDSA", namedCurve: "P-256" },
 		false,
 		["verify"],
@@ -191,6 +201,10 @@ async function importPublicKey(pem: string): Promise<CryptoKey> {
  *       para P-256), que es exactamente lo que espera
  *       `crypto.subtle.verify` con algoritmo ECDSA.
  *
+ *   Formato de la clave pública: JWK / JWKS JSON string (Supabase
+ *   exporta así desde Dashboard → API → JWT Settings → Signing Keys
+ *   → Current Key → Show public key → "Show as JWK").
+ *
  *   Returns the decoded payload on success, `null` on:
  *     - JWT no tiene 3 segmentos
  *     - firma no verifica contra la clave pública
@@ -199,13 +213,13 @@ async function importPublicKey(pem: string): Promise<CryptoKey> {
  */
 async function verifySupabaseJwtLocally(
 	token: string,
-	publicKeyPem: string,
+	jwkJsonString: string,
 ): Promise<JwtPayload | null> {
 	const parts = token.split(".");
 	if (parts.length !== 3) return null;
 
 	try {
-		const key = await importPublicKey(publicKeyPem);
+		const key = await importPublicKey(jwkJsonString);
 
 		const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
 		const signatureStr = decodeB64Url(parts[2]);

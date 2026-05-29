@@ -15,14 +15,18 @@
 ## ✅ Estado actual de la seguridad
 
 **Verificación ES256 (ECDSA P-256) ACTIVA** vía Web Crypto API
-(`crypto.subtle.verify`) contra la clave pública PEM en
-`SUPABASE_JWT_PUBLIC_KEY`.  El proyecto Supabase está en modo
+(`crypto.subtle.verify`) contra la clave pública en formato **JWK**
+en `SUPABASE_JWT_PUBLIC_KEY`.  El proyecto Supabase está en modo
 "ECC P-256 Current Key, HS256 Legacy" — la firma de los nuevos
-tokens es ES256.  La validación criptográfica es equivalente a la
-que hace Supabase internamente; cero suplantación posible aunque
-el atacante conozca un `sub` legítimo.  La clave PÚBLICA puede
-vivir en el Worker sin riesgo (sólo la privada permite emitir
-tokens, y vive en Supabase).
+tokens es ES256 y la clave se exporta como JWK / JWKS JSON.  La
+validación criptográfica es equivalente a la que hace Supabase
+internamente; cero suplantación posible aunque el atacante conozca
+un `sub` legítimo.  La clave PÚBLICA puede vivir en el Worker sin
+riesgo (sólo la privada permite emitir tokens, y vive en Supabase).
+
+El importador acepta dos formas:
+- JWK plano: `{ "kty": "EC", "crv": "P-256", "x": "…", "y": "…" }`
+- JWKS wrapper: `{ "keys": [ { … }, … ] }` (toma `keys[0]`)
 
 La deuda anterior (`TODO: SECURITY HARDENING`) queda **cerrada** con este
 cambio.
@@ -76,16 +80,16 @@ cambio.
 **Pages → Settings → Environment variables** (Production + Preview):
 
 ```
-SUPABASE_JWT_PUBLIC_KEY = -----BEGIN PUBLIC KEY-----
-<base64 PEM body>
------END PUBLIC KEY-----
+SUPABASE_JWT_PUBLIC_KEY = {"keys":[{"kty":"EC","crv":"P-256","x":"...","y":"...","kid":"...","alg":"ES256"}]}
 ```
 
+(o bien una sola entrada sin wrapper `keys`).
+
 Copiar desde Supabase Dashboard → Project Settings → API → JWT Settings
-→ "Signing Keys" → entrada "Current Key" (P-256) → "Show public key" →
-copiar el PEM completo.  La clave PÚBLICA puede vivir en el Worker sin
-riesgo de seguridad.  El parser tolera saltos de línea, los strippea
-antes del `atob`.
+→ "Signing Keys" → entrada **Current Key (P-256)** → "Show public key"
+→ pestaña **JWK** → copiar el JSON completo de una sola línea.  La
+clave PÚBLICA puede vivir en el Worker sin riesgo de seguridad
+(emitir tokens requiere la privada, que vive en Supabase).
 
 ## Procedimiento de limpieza (cuando cerremos el rastreo)
 
@@ -105,4 +109,4 @@ antes del `atob`.
 
 ## Fecha
 
-Creado: 2026-05-29 · Última actualización: 2026-05-29 (ES256 / ECDSA P-256 verification active)
+Creado: 2026-05-29 · Última actualización: 2026-05-29 (ES256 / ECDSA P-256 con JWK)
