@@ -17,7 +17,7 @@
 
 | Fichero | Qué hay marcado |
 |---|---|
-| [app/lib/api.server.ts](app/lib/api.server.ts) | 3 `console.warn/error` en `verifyAuthToken`: (a) header Authorization ausente o no-Bearer, (b) `getSupabase()` throw por env vars faltantes, (c) `supabase.auth.getUser(token)` rechaza el JWT. |
+| [app/lib/api.server.ts](app/lib/api.server.ts) | (a) 3 `console.warn/error` en `verifyAuthToken` para cada rama de fallo.  (b) **Cambio de contrato temporal:** la función ahora `throw jsonResponse(...)` con códigos `NO_TOKEN_HEADER` / `ENV_VARS_MISSING_IN_CLOUDFLARE` / `GET_USER_REJECTED` en lugar de `return null`.  La firma pasa de `Promise<VerifiedUser \| null>` a `Promise<VerifiedUser>`.  Restaurar a `return null` al cerrar el rastreo. |
 | [app/lib/useSession.ts](app/lib/useSession.ts) | 1 `console.log` antes del fetch a `/api/session` confirmando que se envía el Bearer y con qué prefijo de token. |
 | [app/routes/api.session.ts](app/routes/api.session.ts) | 1 `console.error` cuando `getServiceSupabase()` throw — significa que falta `SUPABASE_SECRET_KEY` en producción (causa raíz típica del 401 + JIT que no se ejecuta). |
 

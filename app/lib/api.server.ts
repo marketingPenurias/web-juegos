@@ -139,19 +139,25 @@ export type VerifiedUser = {
 
 /**
  * Pull `Authorization: Bearer <jwt>` from the request and verify it via
- * Supabase.  Returns the user (with the bound Supabase client) or null.
+ * Supabase.
  *
- * Cost: a single round-trip to Supabase auth — keep it for any route
- * that mutates state.  Read-only / anon routes can skip this.
+ *   Modo rastreo (activo durante el debug del 401 misterioso): en
+ *   lugar de devolver `null` para cualquier fallo, lanzamos un
+ *   `Response` con el código de error concreto.  React Router
+ *   propaga el throw tal cual al cliente — esto le permite al
+ *   navegador leer la causa raíz exacta (`NO_TOKEN_HEADER`,
+ *   `ENV_VARS_MISSING_IN_CLOUDFLARE`, `GET_USER_REJECTED`) en lugar
+ *   de un genérico "unauthorized".
  *
- * Header parsing: `request.headers.get("authorization")` (lowercase
- * canónico HTTP) cubre tanto `Authorization` como `authorization` —
- * los Headers de Fetch hacen case-insensitive lookup.
+ *   Cuando cerremos el rastreo, revertir a `return null` y restaurar
+ *   `Promise<VerifiedUser | null>` (los callers ya tienen el branch
+ *   `if (!verified) return jsonResponse({ error: 'unauthorized' }, …)`
+ *   listo).  Procedimiento documentado en AUTH_VERIFY_DEBUG.md.
  */
 export async function verifyAuthToken(
 	request: Request,
 	context: AppLoadContext,
-): Promise<VerifiedUser | null> {
+): Promise<VerifiedUser> {
 	const auth = request.headers.get("authorization");
 	if (!auth || !auth.toLowerCase().startsWith("bearer ")) {
 		// TODO: CLEANUP AUTH VERIFY DEBUG
@@ -159,13 +165,21 @@ export async function verifyAuthToken(
 			hasHeader: !!auth,
 			preview: auth?.slice(0, 16),
 		});
-		return null;
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		throw jsonResponse(
+			{ ok: false, error: "NO_TOKEN_HEADER" },
+			{ status: 401, request },
+		);
 	}
 	const token = auth.slice("bearer ".length).trim();
 	if (!token) {
 		// TODO: CLEANUP AUTH VERIFY DEBUG
 		console.warn("[AUTH VERIFY] empty token after Bearer");
-		return null;
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		throw jsonResponse(
+			{ ok: false, error: "NO_TOKEN_HEADER", detail: "empty bearer" },
+			{ status: 401, request },
+		);
 	}
 
 	let supabase: SupabaseClient;
@@ -173,13 +187,21 @@ export async function verifyAuthToken(
 		supabase = getSupabase(context);
 	} catch (err) {
 		// `getSupabase` throws Response(503) cuando falta SUPABASE_URL o
-		// las dos keys (PUBLISHABLE/SECRET).  Eso es lo que produce un
-		// 401 misterioso en producción si las env vars no se cargaron.
+		// las dos keys (PUBLISHABLE/SECRET).  Esa rama era el enmascarador
+		// del 401 misterioso en producción.
 		// TODO: CLEANUP AUTH VERIFY DEBUG
 		console.error("[AUTH VERIFY] getSupabase threw — check env vars", {
 			thrown: err instanceof Response ? `Response(${err.status})` : String(err),
 		});
-		return null;
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		throw jsonResponse(
+			{
+				ok: false,
+				error: "ENV_VARS_MISSING_IN_CLOUDFLARE",
+				detail: String(err),
+			},
+			{ status: 401, request },
+		);
 	}
 
 	const { data, error } = await supabase.auth.getUser(token);
@@ -191,7 +213,15 @@ export async function verifyAuthToken(
 			hasUser: !!data?.user,
 			tokenPreview: token.slice(0, 12) + "…",
 		});
-		return null;
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		throw jsonResponse(
+			{
+				ok: false,
+				error: "GET_USER_REJECTED",
+				detail: error?.message ?? "no user in response",
+			},
+			{ status: 401, request },
+		);
 	}
 	return {
 		id: data.user.id,
