@@ -1,34 +1,18 @@
 {
-	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "web-juegos",
-	"main": "./workers/app.ts",
-	"compatibility_date": "2025-10-08",
-	"compatibility_flags": ["nodejs_compat"],
-	"observability": {
-		"enabled": true
-	},
-	"upload_source_maps": true,
-	"vars": {
-    "VITE_SUPABASE_URL": "https://cfxpwsexxwcxogwuykue.supabase.co",
-    "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_c-vtNNGaW7IATIjegGk5zg_rC4hVZXI",
-	"SUPABASE_URL": "https://cfxpwsexxwcxogwuykue.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_c-vtNNGaW7IATIjegGk5zg_rC4hVZXI",
-	"SUPABASE_JWT_PUBLIC_KEY": {
-		"keys": [
-			{
-			"x": "nmsXGJZdtd7Loy2yOqtjQ-p3nlv40xxfu5ovWydjXGw",
-			"y": "p-9F2iU28U15tz3qSOpWH1ID-cJVTItmlddWQpmSxw0",
-			"alg": "ES256",
-			"crv": "P-256",
-			"ext": true,
-			"kid": "cc8dddc4-7584-495f-ac34-6fafe772055c",
-			"kty": "EC",
-			"key_ops": [
-				"verify"
-			]
-			}
-		]
-	},
-  }
+    "$schema": "./node_modules/wrangler/config-schema.json",
+    "name": "web-juegos",
+    "main": "./workers/app.ts",
+    "compatibility_date": "2025-10-08",
+    "compatibility_flags": ["nodejs_compat"],
+    "observability": {
+        "enabled": true
+    },
+    "upload_source_maps": true,
+    "vars": {
+        "VITE_SUPABASE_URL": "https://cfxpwsexxwcxogwuykue.supabase.co",
+        "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_c-vtNNGaW7IATIjegGk5zg_rC4hVZXI",
+        "SUPABASE_URL": "https://cfxpwsexxwcxogwuykue.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_c-vtNNGaW7IATIjegGk5zg_rC4hVZXI",
+        "SUPABASE_JWT_PUBLIC_KEY": "{\"keys\":[{\"x\":\"nmsXGJZdtd7Loy2yOqtjQ-p3nlv40xxfu5ovWydjXGw\",\"y\":\"p-9F2iU28U15tz3qSOpWH1ID-cJVTItmlddWQpmSxw0\",\"alg\":\"ES256\",\"crv\":\"P-256\",\"ext\":true,\"kid\":\"cc8dddc4-7584-495f-ac34-6fafe772055c\",\"kty\":\"EC\",\"key_ops\":[\"verify\"]}]}"
+    }
 }
-
