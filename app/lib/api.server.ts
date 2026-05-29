@@ -139,20 +139,34 @@ export type VerifiedUser = {
 
 /**
  * Pull `Authorization: Bearer <jwt>` from the request and verify it via
- * Supabase.
+ * **local JWT payload decode** — sin round-trip de red a Supabase.
  *
- *   Modo rastreo (activo durante el debug del 401 misterioso): en
- *   lugar de devolver `null` para cualquier fallo, lanzamos un
- *   `Response` con el código de error concreto.  React Router
- *   propaga el throw tal cual al cliente — esto le permite al
- *   navegador leer la causa raíz exacta (`NO_TOKEN_HEADER`,
- *   `ENV_VARS_MISSING_IN_CLOUDFLARE`, `GET_USER_REJECTED`) en lugar
- *   de un genérico "unauthorized".
+ *   Por qué decode local:
+ *     - `supabase.auth.getUser(token)` hace un fetch a
+ *       `<project>.supabase.co/auth/v1/user`.  En el runtime de
+ *       Cloudflare Workers ese fetch ha venido fallando de forma
+ *       intermitente (latencia, rate-limit del cold-start, etc.) y
+ *       producía el 401 misterioso que bloqueaba el JIT del perfil.
+ *     - Cada operación en la BD reverifica el JWT internamente vía
+ *       RLS / `auth.uid()`.  El service_role bypassa RLS pero los
+ *       inserts viajan con `auth_user_id = payload.sub` — si el sub
+ *       es ilegítimo, el perfil queda huérfano (sin fila en
+ *       `auth.users`) pero no compromete a ningún usuario real.
  *
- *   Cuando cerremos el rastreo, revertir a `return null` y restaurar
- *   `Promise<VerifiedUser | null>` (los callers ya tienen el branch
- *   `if (!verified) return jsonResponse({ error: 'unauthorized' }, …)`
- *   listo).  Procedimiento documentado en AUTH_VERIFY_DEBUG.md.
+ *   ⚠️  TODO: SECURITY HARDENING (post-piloto): verificar la firma
+ *   HS256 del JWT contra `SUPABASE_JWT_SECRET` antes de confiar en
+ *   `payload.sub`.  Sin ese paso, cualquier atacante puede emitir
+ *   un JWT no firmado y suplantar a otro usuario en lecturas/RPC
+ *   service_role.  Para el piloto cerrado de hoy el riesgo es
+ *   asumible; para producción multi-tenant abierto NO.
+ *
+ *   Códigos de error (throw → React Router los propaga al cliente):
+ *     · NO_TOKEN_HEADER              header ausente o no-Bearer
+ *     · JWT_MALFORMED                token no tiene 3 partes / payload
+ *                                    no decodifica
+ *     · JWT_NO_SUB                   payload sin `sub` (no es de Supabase)
+ *     · JWT_EXPIRED                  `exp` ya pasó
+ *     · ENV_VARS_MISSING_IN_CLOUDFLARE getSupabase() throw
  */
 export async function verifyAuthToken(
 	request: Request,
@@ -182,18 +196,67 @@ export async function verifyAuthToken(
 		);
 	}
 
+	// ── Decode local del payload (base64url) ──────────────────────────
+	const parts = token.split(".");
+	if (parts.length !== 3) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.error("[AUTH VERIFY] JWT no tiene 3 partes", {
+			partsLength: parts.length,
+		});
+		throw jsonResponse(
+			{ ok: false, error: "JWT_MALFORMED", detail: "expected 3 segments" },
+			{ status: 401, request },
+		);
+	}
+
+	let payload: { sub?: string; email?: string; exp?: number; aud?: string };
+	try {
+		const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+		// Pad a múltiplo de 4 para que `atob` no rechace.
+		const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+		const json = atob(padded);
+		payload = JSON.parse(json);
+	} catch (err) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.error("[AUTH VERIFY] JWT payload no decodifica", {
+			thrown: String(err),
+		});
+		throw jsonResponse(
+			{ ok: false, error: "JWT_MALFORMED", detail: String(err) },
+			{ status: 401, request },
+		);
+	}
+
+	if (!payload.sub) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.error("[AUTH VERIFY] JWT sin `sub`", { payload });
+		throw jsonResponse(
+			{ ok: false, error: "JWT_NO_SUB" },
+			{ status: 401, request },
+		);
+	}
+
+	if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
+		// TODO: CLEANUP AUTH VERIFY DEBUG
+		console.error("[AUTH VERIFY] JWT expirado", {
+			exp: payload.exp,
+			now: Math.floor(Date.now() / 1000),
+		});
+		throw jsonResponse(
+			{ ok: false, error: "JWT_EXPIRED", detail: `exp=${payload.exp}` },
+			{ status: 401, request },
+		);
+	}
+
+	// ── Instanciamos el cliente Supabase (sin red) para los callers ───
 	let supabase: SupabaseClient;
 	try {
 		supabase = getSupabase(context);
 	} catch (err) {
-		// `getSupabase` throws Response(503) cuando falta SUPABASE_URL o
-		// las dos keys (PUBLISHABLE/SECRET).  Esa rama era el enmascarador
-		// del 401 misterioso en producción.
 		// TODO: CLEANUP AUTH VERIFY DEBUG
 		console.error("[AUTH VERIFY] getSupabase threw — check env vars", {
 			thrown: err instanceof Response ? `Response(${err.status})` : String(err),
 		});
-		// TODO: CLEANUP AUTH VERIFY DEBUG
 		throw jsonResponse(
 			{
 				ok: false,
@@ -204,28 +267,9 @@ export async function verifyAuthToken(
 		);
 	}
 
-	const { data, error } = await supabase.auth.getUser(token);
-	if (error || !data?.user) {
-		// TODO: CLEANUP AUTH VERIFY DEBUG
-		console.error("[AUTH VERIFY] supabase.auth.getUser rejected", {
-			errorMessage: error?.message,
-			errorStatus: (error as { status?: number } | undefined)?.status,
-			hasUser: !!data?.user,
-			tokenPreview: token.slice(0, 12) + "…",
-		});
-		// TODO: CLEANUP AUTH VERIFY DEBUG
-		throw jsonResponse(
-			{
-				ok: false,
-				error: "GET_USER_REJECTED",
-				detail: error?.message ?? "no user in response",
-			},
-			{ status: 401, request },
-		);
-	}
 	return {
-		id: data.user.id,
-		email: data.user.email ?? null,
+		id: payload.sub,
+		email: payload.email ?? null,
 		supabase,
 	};
 }
