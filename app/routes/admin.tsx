@@ -1,0 +1,559 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
+import {
+	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
+	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
+} from "lucide-react";
+import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
+
+/**
+ * /admin — Consola del DJ / Staff (Bloque 4).
+ *
+ *   Gating: sólo `tenant_staff` (el endpoint /api/admin lo revalida).
+ *   - "Abrir Fiesta de Hoy": crea/activa el tenant_event.
+ *   - Editar evento (nombre, hora inicio/fin) sin fricción.
+ *   - Carga masiva a global_tracks (textarea tolerante).
+ *   - Biblioteca → Pista (botón + con dedupe "Añadida").
+ *   - "Sonando Ahora" (exclusión mutua en BD → Now Playing en móviles).
+ *   - Batalla: iniciar (semi-auto) + forzar cierre (plan B).
+ *   - Métricas en vivo por polling silencioso (10s).
+ */
+
+type EventRow = { id: string; name: string; start_time: string; end_time: string | null; status: string };
+type GlobalTrack = { id: string; spotify_id: string; title: string; artist: string; cover_image_url: string | null };
+type EventTrack = GlobalTrack & { total_votes: number; is_played: boolean };
+type Battle = { id: string; status: string; ends_at: string } | null;
+type Metrics = { total_votes: number; tokens_spent_today: number; checkins_today: number; active_players: number };
+
+type Boot =
+	| { phase: "loading" }
+	| { phase: "need_login" }
+	| { phase: "restricted" }
+	| {
+			phase: "ready";
+			tenantId: string;
+			event: EventRow | null;
+			globalTracks: GlobalTrack[];
+			eventTracks: EventTrack[];
+			battle: Battle;
+	  };
+
+function tenantSlugFromHost(): string {
+	if (typeof window === "undefined") return "lapocha";
+	const host = window.location.hostname;
+	const sub = host.split(".")[0];
+	if (!sub || sub === "localhost" || sub === "www" || host.includes("pages.dev")) return "lapocha";
+	return sub;
+}
+
+// ── Timezone: SIEMPRE Europe/Madrid (no el reloj del dispositivo del DJ) ──
+const VENUE_TZ = "Europe/Madrid";
+
+/** Offset (ms) que Madrid lleva sobre UTC en el instante `utcMs` (maneja DST). */
+function madridOffsetMs(utcMs: number): number {
+	const dtf = new Intl.DateTimeFormat("en-US", {
+		timeZone: VENUE_TZ, year: "numeric", month: "2-digit", day: "2-digit",
+		hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+	});
+	const p: Record<string, string> = {};
+	for (const part of dtf.formatToParts(new Date(utcMs))) p[part.type] = part.value;
+	const asUtcFromMadridWall = Date.UTC(
+		Number(p.year), Number(p.month) - 1, Number(p.day),
+		Number(p.hour === "24" ? "0" : p.hour), Number(p.minute), Number(p.second),
+	);
+	return asUtcFromMadridWall - utcMs;
+}
+
+/** ISO (UTC) almacenado → valor `datetime-local` mostrado en hora de Madrid. */
+function toLocalInput(iso?: string | null): string {
+	if (!iso) return "";
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return "";
+	// sv-SE da formato ISO "YYYY-MM-DD HH:mm" ya en la TZ pedida.
+	const s = new Intl.DateTimeFormat("sv-SE", {
+		timeZone: VENUE_TZ, year: "numeric", month: "2-digit", day: "2-digit",
+		hour: "2-digit", minute: "2-digit", hour12: false,
+	}).format(d);
+	return s.replace(" ", "T");
+}
+
+/** Valor `datetime-local` (hora-pared de Madrid) → ISO UTC correcto. */
+function fromLocalInput(local: string): string | undefined {
+	if (!local) return undefined;
+	const m = local.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+	if (!m) return undefined;
+	const [, y, mo, d, h, mi] = m.map(Number);
+	// Interpretamos la hora-pared como UTC y restamos el offset de Madrid
+	// para obtener el instante real (DST incluido).
+	const wallAsUtc = Date.UTC(y, mo - 1, d, h, mi);
+	const offset = madridOffsetMs(wallAsUtc);
+	return new Date(wallAsUtc - offset).toISOString();
+}
+
+export default function Admin() {
+	const [boot, setBoot] = useState<Boot>({ phase: "loading" });
+	const [metrics, setMetrics] = useState<Metrics | null>(null);
+	const [toast, setToast] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+
+	const call = useCallback(async (op: string, payload: Record<string, unknown> = {}) => {
+		// NUNCA cacheamos el JWT: supabase-js refresca el token por debajo.
+		// Un token cacheado caducaría a la hora y bloquearía al DJ con 401s.
+		const token = await getAccessToken();
+		if (!token) return { ok: false, error: "unauthorized" } as Record<string, unknown>;
+		const res = await fetch("/api/admin", {
+			method: "POST",
+			cache: "no-store",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${token}`,
+				"X-Tenant-Slug": tenantSlugFromHost(),
+			},
+			body: JSON.stringify({ op, tenant_slug: tenantSlugFromHost(), ...payload }),
+		});
+		return (await res.json().catch(() => ({ ok: false, error: "network_error" }))) as Record<string, unknown>;
+	}, []);
+
+	const refresh = useCallback(async () => {
+		const token = await getAccessToken();
+		if (!token) { setBoot({ phase: "need_login" }); return; }
+		const data = await call("bootstrap");
+		if (data.ok !== true) { setBoot({ phase: "need_login" }); return; }
+		if (data.is_staff !== true) { setBoot({ phase: "restricted" }); return; }
+		setBoot({
+			phase: "ready",
+			tenantId: String(data.tenant_id ?? ""),
+			event: (data.event as EventRow) ?? null,
+			globalTracks: (data.global_tracks as GlobalTrack[]) ?? [],
+			eventTracks: (data.event_tracks as EventTrack[]) ?? [],
+			battle: (data.battle as Battle) ?? null,
+		});
+	}, [call]);
+
+	useEffect(() => { void refresh(); }, [refresh]);
+
+	// Valores estables para los efectos Realtime: sólo cambian al abrir/cambiar
+	// de fiesta o de batalla — así el canal NO se re-suscribe en cada voto.
+	const ready = boot.phase === "ready" ? boot : null;
+	const eventId = ready?.event?.id ?? null;
+	const tenantId = ready?.tenantId ?? null;
+	const liveBattleId = ready?.battle?.status === "live" ? ready.battle.id : null;
+	const liveBattleEndsAt = ready?.battle?.status === "live" ? ready.battle.ends_at : null;
+
+	// Muta la playlist EN VIVO desde el payload de event_tracks (votos suben,
+	// is_played cambia) sin recargar — el DJ ve la pista moverse al instante.
+	const applyTrackChange = useCallback((payload: {
+		eventType?: string;
+		new?: Record<string, unknown>;
+		old?: Record<string, unknown>;
+	}) => {
+		setBoot((prev) => {
+			if (prev.phase !== "ready") return prev;
+			if (payload.eventType === "DELETE") {
+				const oldId = String(payload.old?.id ?? "");
+				return oldId
+					? { ...prev, eventTracks: prev.eventTracks.filter((t) => t.id !== oldId) }
+					: prev;
+			}
+			const row = payload.new ?? {};
+			const id = String(row.id ?? "");
+			if (!id) return prev;
+			let found = false;
+			let next = prev.eventTracks.map((t) => {
+				if (t.id !== id) return t;
+				found = true;
+				return {
+					...t,
+					total_votes: Number(row.total_votes ?? t.total_votes),
+					is_played: typeof row.is_played === "boolean" ? row.is_played : t.is_played,
+					title: String(row.title ?? t.title),
+					artist: String(row.artist ?? t.artist),
+					cover_image_url: (row.cover_image_url as string | null) ?? t.cover_image_url,
+				};
+			});
+			if (!found) {
+				next = [...next, {
+					id,
+					spotify_id: String(row.spotify_id ?? ""),
+					title: String(row.title ?? ""),
+					artist: String(row.artist ?? ""),
+					cover_image_url: (row.cover_image_url as string | null) ?? null,
+					total_votes: Number(row.total_votes ?? 0),
+					is_played: row.is_played === true,
+				}];
+			}
+			next = next.slice().sort((a, b) => b.total_votes - a.total_votes || a.title.localeCompare(b.title));
+			return { ...prev, eventTracks: next };
+		});
+	}, []);
+
+	// Métricas EN VIVO vía WebSockets (asimetría de conexión: sólo el panel
+	// del staff se suscribe; los móviles siguen con HTTP).  Escuchamos los
+	// INSERT en `behavior_events` (pulso de la sala) y los cambios en
+	// `event_tracks` (votos) — ambos en la publicación supabase_realtime y
+	// protegidos por RLS de tenant/staff.  Un micro-debounce coalesce las
+	// ráfagas para no martillear el RPC de agregados.  Cero polling.
+	useEffect(() => {
+		if (!eventId || !tenantId) return;
+		const tid = tenantId;
+		let active = true;
+		let debounce: number | null = null;
+
+		const fetchMetrics = async () => {
+			const m = await call("metrics", { event_id: eventId });
+			if (active && m.ok === true) {
+				setMetrics({
+					total_votes: Number(m.total_votes ?? 0),
+					tokens_spent_today: Number(m.tokens_spent_today ?? 0),
+					checkins_today: Number(m.checkins_today ?? 0),
+					active_players: Number(m.active_players ?? 0),
+				});
+			}
+		};
+		const onChange = () => {
+			if (debounce) window.clearTimeout(debounce);
+			debounce = window.setTimeout(() => void fetchMetrics(), 250);
+		};
+
+		void fetchMetrics(); // primer valor inmediato
+
+		const supabase = getBrowserSupabase();
+		if (!supabase) return () => { active = false; };
+		// Escuchamos TODAS las tablas que alimentan get_admin_metrics, no sólo
+		// el pulso de behavior_events: wallet_ledger (tokens gastados),
+		// venue_visits (check-ins/entrada), track_votes (jugadores) y
+		// event_tracks (votos totales).  Así el debounce salta cuando la
+		// gente gasta en barra o entra por la puerta — métricas 100% vivas.
+		// event_tracks: además de refrescar métricas, MUTAMOS la playlist en
+		// vivo (votos / is_played) para que la lista del DJ no quede congelada.
+		const onTrack = (payload: { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+			applyTrackChange(payload);
+			onChange();
+		};
+
+		const channel = supabase
+			.channel(`admin-metrics-${eventId}`)
+			.on("postgres_changes", { event: "INSERT", schema: "public", table: "behavior_events", filter: `tenant_id=eq.${tid}` }, onChange)
+			.on("postgres_changes", { event: "*", schema: "public", table: "event_tracks", filter: `tenant_id=eq.${tid}` }, onTrack)
+			.on("postgres_changes", { event: "INSERT", schema: "public", table: "wallet_ledger", filter: `tenant_id=eq.${tid}` }, onChange)
+			.on("postgres_changes", { event: "INSERT", schema: "public", table: "venue_visits", filter: `tenant_id=eq.${tid}` }, onChange)
+			.on("postgres_changes", { event: "INSERT", schema: "public", table: "track_votes", filter: `tenant_id=eq.${tid}` }, onChange)
+			.subscribe();
+
+		return () => {
+			active = false;
+			if (debounce) window.clearTimeout(debounce);
+			void supabase.removeChannel(channel);
+		};
+	}, [eventId, tenantId, call, applyTrackChange]);
+
+	// Autocierre de la BATALLA (sustituye al viejo polling): timer hasta
+	// `ends_at` (+500ms) que dispara el cierre quirúrgico en backend.  El
+	// UPDATE de live_battles emite por Realtime el ganador a móviles y TV.
+	useEffect(() => {
+		if (!liveBattleId || !liveBattleEndsAt || !eventId) return;
+		const ms = new Date(liveBattleEndsAt).getTime() - Date.now();
+		const id = window.setTimeout(async () => {
+			await call("resolve_battles", { event_id: eventId });
+			await refresh();
+		}, Math.max(0, ms) + 500);
+		return () => window.clearTimeout(id);
+	}, [liveBattleId, liveBattleEndsAt, eventId, call, refresh]);
+
+	const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2600); };
+	const run = async (op: string, payload: Record<string, unknown>, okMsg?: string) => {
+		setBusy(true);
+		const r = await call(op, payload);
+		setBusy(false);
+		if (r.ok === true) { if (okMsg) flash(okMsg); await refresh(); }
+		else flash(`⚠️ ${String(r.error ?? "error")}`);
+		return r;
+	};
+
+	// ── Render por fases ──────────────────────────────────────────────
+	if (boot.phase === "loading") {
+		return <Center><Loader2 className="w-10 h-10 animate-spin text-cyan-400" /><p className="text-zinc-300 font-bold mt-3">Cargando panel…</p></Center>;
+	}
+	if (boot.phase === "need_login") {
+		return <Center><Lock className="w-12 h-12 text-zinc-600" /><h1 className="text-2xl font-black italic text-white mt-3">Inicia sesión</h1><p className="text-zinc-400 mt-1">Entra con tu cuenta de staff para acceder al panel del DJ.</p><Link to="/" className="mt-4 h-12 px-6 rounded-2xl bg-white text-black font-black flex items-center">Ir a la app</Link></Center>;
+	}
+	if (boot.phase === "restricted") {
+		return <Center><Lock className="w-12 h-12 text-rose-500" /><h1 className="text-2xl font-black italic text-white mt-3">Acceso restringido</h1><p className="text-zinc-400 mt-1">Tu cuenta no tiene rol de staff en este local.</p></Center>;
+	}
+
+	const { event, globalTracks, eventTracks, battle } = boot;
+	const eventSpotifyIds = new Set(eventTracks.map((t) => t.spotify_id));
+
+	return (
+		<div className="min-h-dvh w-full bg-zinc-950 text-white">
+			<div className="max-w-5xl mx-auto px-4 py-6 flex flex-col gap-5">
+				<header className="flex items-center gap-3">
+					<Radio className="w-7 h-7 text-cyan-400" />
+					<div>
+						<h1 className="text-2xl font-black italic tracking-tight">Panel DJ · La Pocha</h1>
+						<p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Consola de Staff</p>
+					</div>
+				</header>
+
+				{!event ? (
+					<OpenPartyButton busy={busy} onOpen={() => run("open_party", {}, "¡Fiesta abierta!")} />
+				) : (
+					<>
+						<EventCard event={event} busy={busy} onSave={(patch) => run("update_event", { event_id: event.id, ...patch }, "Evento actualizado")} />
+						<MetricsRow metrics={metrics} />
+						<BattlePanel
+							battle={battle}
+							busy={busy}
+							onStart={(minutes) => run("start_battle", { event_id: event.id, minutes }, "¡Batalla iniciada!")}
+							onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
+						/>
+						<div className="grid md:grid-cols-2 gap-5">
+							<LibraryPanel
+								tracks={globalTracks}
+								eventSpotifyIds={eventSpotifyIds}
+								busy={busy}
+								onBulk={(raw) => run("bulk_global", { raw }, "Biblioteca actualizada")}
+								onAdd={(id) => run("add_track", { event_id: event.id, global_id: id }, "Añadida a la noche")}
+							/>
+							<PlaylistPanel
+								tracks={eventTracks}
+								busy={busy}
+								onNowPlaying={(id) => run("now_playing", { event_id: event.id, track_id: id }, "Sonando ahora ▶")}
+								onUpdate={(id, patch) => run("update_track", { track_id: id, ...patch }, "Canción actualizada")}
+								onRemove={(id) => run("remove_track", { track_id: id }, "Canción quitada")}
+							/>
+						</div>
+					</>
+				)}
+			</div>
+
+			{toast && (
+				<div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-100 px-5 py-3 rounded-2xl bg-zinc-900 border border-zinc-700 text-sm font-bold shadow-xl">
+					{toast}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// ── Subcomponentes ──────────────────────────────────────────────────
+
+function Center({ children }: { children: React.ReactNode }) {
+	return <div className="min-h-dvh w-full bg-zinc-950 flex flex-col items-center justify-center text-center px-6">{children}</div>;
+}
+
+function OpenPartyButton({ busy, onOpen }: { busy: boolean; onOpen: () => void }) {
+	return (
+		<button
+			type="button"
+			disabled={busy}
+			onClick={onOpen}
+			className="w-full rounded-3xl bg-linear-to-br from-lime-400 to-emerald-500 text-black p-10 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform shadow-[0_0_50px_rgba(57,255,20,0.4)] disabled:opacity-60"
+		>
+			<PartyPopper className="w-16 h-16" />
+			<span className="text-3xl font-black italic tracking-tight">Abrir Fiesta de Hoy</span>
+			<span className="text-sm font-bold opacity-80">Crea y activa el evento para empezar a trabajar</span>
+		</button>
+	);
+}
+
+function EventCard({ event, busy, onSave }: { event: EventRow; busy: boolean; onSave: (p: Record<string, unknown>) => void }) {
+	const [name, setName] = useState(event.name);
+	const [start, setStart] = useState(toLocalInput(event.start_time));
+	const [end, setEnd] = useState(toLocalInput(event.end_time));
+	useEffect(() => { setName(event.name); setStart(toLocalInput(event.start_time)); setEnd(toLocalInput(event.end_time)); }, [event]);
+
+	const dirty = name !== event.name || start !== toLocalInput(event.start_time) || end !== toLocalInput(event.end_time);
+
+	return (
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5">
+			<div className="flex items-center justify-between mb-3">
+				<span className="inline-flex items-center gap-2 text-lime-300 font-black text-xs uppercase tracking-widest">
+					<span className="w-2 h-2 rounded-full bg-lime-400 animate-pulse" /> Fiesta activa
+				</span>
+				<button
+					type="button"
+					disabled={!dirty || busy}
+					onClick={() => onSave({ name, start_time: fromLocalInput(start), end_time: fromLocalInput(end) })}
+					className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-cyan-500 text-black font-black text-sm active:scale-95 disabled:opacity-40"
+				>
+					<Save className="w-4 h-4" /> Guardar
+				</button>
+			</div>
+			<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Nombre del evento</label>
+			<input value={name} onChange={(e) => setName(e.target.value)} className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 font-bold text-white mb-3" />
+			<div className="grid grid-cols-2 gap-3">
+				<div>
+					<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Empieza</label>
+					<input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-white text-sm" />
+				</div>
+				<div>
+					<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Termina</label>
+					<input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-white text-sm" />
+				</div>
+			</div>
+		</section>
+	);
+}
+
+function MetricsRow({ metrics }: { metrics: Metrics | null }) {
+	const items = [
+		{ icon: BarChart3, label: "Votos", value: metrics?.total_votes ?? "—", color: "text-cyan-300" },
+		{ icon: Coins, label: "Tokens gastados", value: metrics?.tokens_spent_today ?? "—", color: "text-amber-300" },
+		{ icon: Flame, label: "Check-ins hoy", value: metrics?.checkins_today ?? "—", color: "text-orange-300" },
+		{ icon: Users, label: "Jugadores", value: metrics?.active_players ?? "—", color: "text-lime-300" },
+	];
+	return (
+		<div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+			{items.map(({ icon: Icon, label, value, color }) => (
+				<div key={label} className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4 flex flex-col gap-1">
+					<Icon className={`w-5 h-5 ${color}`} />
+					<span className="text-2xl font-black tabular-nums">{value}</span>
+					<span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{label}</span>
+				</div>
+			))}
+		</div>
+	);
+}
+
+function BattlePanel({ battle, busy, onStart, onForceClose }: { battle: Battle; busy: boolean; onStart: (m: number) => void; onForceClose: () => void }) {
+	const [minutes, setMinutes] = useState(3);
+	const live = battle && battle.status === "live";
+	return (
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-wrap items-center gap-3">
+			<div className="flex items-center gap-2 mr-auto">
+				<Trophy className="w-5 h-5 text-amber-400" />
+				<span className="font-black">Batalla de Temas</span>
+				{live && <span className="text-[10px] uppercase tracking-widest text-rose-300 font-black bg-rose-950/50 border border-rose-500/40 px-2 py-0.5 rounded-full">EN VIVO</span>}
+			</div>
+			{!live ? (
+				<>
+					<div className="flex items-center gap-2">
+						<label className="text-xs text-zinc-400 font-bold">Minutos</label>
+						<input type="number" min={1} max={15} value={minutes} onChange={(e) => setMinutes(Math.max(1, Number(e.target.value) || 3))} className="w-16 h-10 rounded-xl bg-zinc-950 border border-zinc-800 px-2 text-center font-bold" />
+					</div>
+					<button type="button" disabled={busy} onClick={() => onStart(minutes)} className="h-10 px-5 rounded-xl bg-amber-400 text-black font-black active:scale-95 disabled:opacity-50">Iniciar Batalla</button>
+				</>
+			) : (
+				<button type="button" disabled={busy} onClick={onForceClose} className="h-10 px-5 rounded-xl bg-rose-500 text-black font-black active:scale-95 disabled:opacity-50">Forzar Cierre de Batalla</button>
+			)}
+		</section>
+	);
+}
+
+function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
+	tracks: GlobalTrack[]; eventSpotifyIds: Set<string>; busy: boolean;
+	onBulk: (raw: string) => void; onAdd: (id: string) => void;
+}) {
+	const [raw, setRaw] = useState("");
+	return (
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0">
+			<h2 className="font-black flex items-center gap-2"><Music2 className="w-5 h-5 text-cyan-400" /> Biblioteca Global</h2>
+			<textarea
+				value={raw}
+				onChange={(e) => setRaw(e.target.value)}
+				placeholder={"Pega las canciones en este formato (admite varias):\n('0TJYJrUDKQ1btt4g0Xwklw', 'LA GRACIOSA', 'Quevedo, Elvis Crespo', 'https://i.scdn.co/image/...')"}
+				className="w-full h-28 rounded-xl bg-zinc-950 border border-zinc-800 p-3 text-xs font-mono text-zinc-200 resize-none"
+			/>
+			<button type="button" disabled={busy || !raw.trim()} onClick={() => { onBulk(raw); setRaw(""); }} className="h-10 rounded-xl bg-cyan-500 text-black font-black active:scale-95 disabled:opacity-40">Cargar a biblioteca</button>
+
+			<div className="flex flex-col gap-2 overflow-y-auto max-h-[420px] no-scrollbar">
+				{tracks.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Biblioteca vacía. Pega canciones arriba.</p>}
+				{tracks.map((tk) => {
+					const added = eventSpotifyIds.has(tk.spotify_id);
+					return (
+						<div key={tk.id} className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-2.5">
+							<div className="flex-1 min-w-0">
+								<p className="text-sm font-bold truncate">{tk.title}</p>
+								<p className="text-[11px] text-zinc-500 truncate">{tk.artist}</p>
+							</div>
+							<button
+								type="button"
+								disabled={busy || added}
+								onClick={() => onAdd(tk.id)}
+								className={`shrink-0 h-9 px-3 rounded-lg font-black text-xs inline-flex items-center gap-1 active:scale-95 ${added ? "bg-lime-500/15 text-lime-300 border border-lime-500/40 cursor-default" : "bg-cyan-500 text-black"}`}
+							>
+								{added ? <><Check className="w-4 h-4" /> Añadida</> : <><Plus className="w-4 h-4" /> Añadir</>}
+							</button>
+						</div>
+					);
+				})}
+			</div>
+		</section>
+	);
+}
+
+function PlaylistPanel({ tracks, busy, onNowPlaying, onUpdate, onRemove }: {
+	tracks: EventTrack[]; busy: boolean;
+	onNowPlaying: (id: string) => void;
+	onUpdate: (id: string, patch: Record<string, unknown>) => void;
+	onRemove: (id: string) => void;
+}) {
+	const [editing, setEditing] = useState<string | null>(null);
+	return (
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0">
+			<h2 className="font-black flex items-center gap-2"><Radio className="w-5 h-5 text-lime-400" /> Control de Pista (esta noche)</h2>
+			<div className="flex flex-col gap-2 overflow-y-auto max-h-[520px] no-scrollbar">
+				{tracks.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Aún no hay canciones en la fiesta. Añádelas desde la biblioteca.</p>}
+				{tracks.map((tk) => (
+					<PlaylistRow
+						key={tk.id}
+						track={tk}
+						busy={busy}
+						editing={editing === tk.id}
+						onEdit={() => setEditing(tk.id)}
+						onCancel={() => setEditing(null)}
+						onNowPlaying={() => onNowPlaying(tk.id)}
+						onSave={(patch) => { onUpdate(tk.id, patch); setEditing(null); }}
+						onRemove={() => onRemove(tk.id)}
+					/>
+				))}
+			</div>
+		</section>
+	);
+}
+
+function PlaylistRow({ track, busy, editing, onEdit, onCancel, onNowPlaying, onSave, onRemove }: {
+	track: EventTrack; busy: boolean; editing: boolean;
+	onEdit: () => void; onCancel: () => void; onNowPlaying: () => void;
+	onSave: (patch: Record<string, unknown>) => void; onRemove: () => void;
+}) {
+	const [title, setTitle] = useState(track.title);
+	const [artist, setArtist] = useState(track.artist);
+	const [cover, setCover] = useState(track.cover_image_url ?? "");
+	useEffect(() => { setTitle(track.title); setArtist(track.artist); setCover(track.cover_image_url ?? ""); }, [track, editing]);
+
+	if (editing) {
+		return (
+			<div className="rounded-xl bg-zinc-950/80 border border-cyan-500/40 p-3 flex flex-col gap-2">
+				<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título" className="h-10 rounded-lg bg-zinc-900 border border-zinc-800 px-3 font-bold text-sm" />
+				<input value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="Artista" className="h-10 rounded-lg bg-zinc-900 border border-zinc-800 px-3 text-sm" />
+				<input value={cover} onChange={(e) => setCover(e.target.value)} placeholder="URL portada" className="h-10 rounded-lg bg-zinc-900 border border-zinc-800 px-3 text-xs font-mono" />
+				<div className="flex gap-2">
+					<button type="button" disabled={busy} onClick={() => onSave({ title, artist, cover_image_url: cover })} className="flex-1 h-9 rounded-lg bg-cyan-500 text-black font-black text-sm inline-flex items-center justify-center gap-1"><Save className="w-4 h-4" /> Guardar</button>
+					<button type="button" onClick={onCancel} className="h-9 px-3 rounded-lg bg-zinc-800 text-zinc-300 font-bold text-sm inline-flex items-center gap-1"><X className="w-4 h-4" /></button>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className={`flex items-center gap-3 rounded-xl border p-2.5 ${track.is_played ? "bg-lime-500/10 border-lime-500/50" : "bg-zinc-950/60 border-zinc-800"}`}>
+			<div className="w-9 text-center shrink-0">
+				<span className="text-sm font-black tabular-nums text-zinc-400">{track.total_votes}</span>
+			</div>
+			<div className="flex-1 min-w-0">
+				<p className="text-sm font-bold truncate flex items-center gap-1.5">
+					{track.is_played && <span className="text-[9px] uppercase tracking-widest text-lime-300 bg-lime-500/20 px-1.5 py-0.5 rounded-full">▶ Sonando</span>}
+					{track.title}
+				</p>
+				<p className="text-[11px] text-zinc-500 truncate">{track.artist}</p>
+			</div>
+			<button type="button" disabled={busy || track.is_played} onClick={onNowPlaying} title="Sonando ahora" className={`shrink-0 h-9 px-3 rounded-lg font-black text-xs active:scale-95 ${track.is_played ? "bg-lime-500/15 text-lime-300 border border-lime-500/40" : "bg-lime-400 text-black"}`}>
+				{track.is_played ? "▶" : "Sonando"}
+			</button>
+			<button type="button" onClick={onEdit} className="shrink-0 w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 flex items-center justify-center active:scale-95"><Pencil className="w-4 h-4" /></button>
+			<button type="button" disabled={busy} onClick={onRemove} className="shrink-0 w-9 h-9 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center justify-center active:scale-95"><Trash2 className="w-4 h-4" /></button>
+		</div>
+	);
+}

@@ -1,8 +1,11 @@
 import { useGameState, type Screen } from "../store/useGameState";
 import { useSession } from "../lib/useSession";
+import { usePendingCheckin } from "../lib/usePendingCheckin";
 import { AppFrame } from "./AppFrame";
 import { BottomNav } from "./BottomNav";
 import { RedemptionScreen } from "./RedemptionScreen";
+import { CheckinResultModal } from "./CheckinResultModal";
+import { NowPlaying } from "./NowPlaying";
 import { Onboarding } from "../screens/Onboarding";
 import { Hub } from "../screens/Hub";
 import { LiveBattle } from "../screens/LiveBattle";
@@ -18,6 +21,7 @@ const SCREENS_WITH_NAV = new Set<Screen>(["hub", "live", "menu", "ticket"]);
 
 export default function LaPochaApp() {
 	useSession();
+	usePendingCheckin();
 	const currentScreen = useGameState((s) => s.currentScreen);
 	const activeRedemption = useGameState((s) => s.activeRedemption);
 	const closeRedemption = useGameState((s) => s.closeRedemption);
@@ -31,6 +35,7 @@ export default function LaPochaApp() {
 
 			<AppFrame>
 				<ScreenRouter screen={currentScreen} />
+				{showNav && <NowPlaying />}
 				{showNav && <BottomNav />}
 			</AppFrame>
 
@@ -44,6 +49,8 @@ export default function LaPochaApp() {
 					onClose={closeRedemption}
 				/>
 			)}
+
+			<CheckinResultModal />
 		</div>
 	);
 }

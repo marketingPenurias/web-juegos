@@ -7,6 +7,7 @@ import { StreakCard } from "../components/hub/StreakCard";
 import { MissionsCard } from "../components/hub/MissionsCard";
 import { GameLauncherCard } from "../components/hub/GameLauncherCard";
 import { HistoryDrawer } from "../components/HistoryDrawer";
+import { WelcomeModal } from "../components/WelcomeModal";
 
 /**
  * Hub — composición del piloto.
@@ -60,6 +61,7 @@ export function Hub() {
 			</main>
 
 			<HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
+			<WelcomeModal />
 		</div>
 	);
 }

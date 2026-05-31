@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	ArrowLeft,
@@ -18,6 +18,7 @@ import { useAuthUser } from "../lib/useAuthUser";
 import { TIERS, tierFromLifetime, tierProgressFraction } from "../lib/tier";
 import { getBrowserSupabase } from "../lib/supabase.client";
 import { LanguageSwitch } from "../components/LanguageSwitch";
+import { Toast } from "../components/Toast";
 
 /**
  * Profile — versión REAL.
@@ -39,6 +40,10 @@ export function Profile() {
 	const setScreen = useGameState((s) => s.setScreen);
 	const logoutStore = useGameState((s) => s.logout);
 	const authUser = useAuthUser();
+
+	const [toast, setToast] = useState<string | null>(null);
+	const comingSoon = () =>
+		setToast(t("common.comingSoon", "🚀 Próximamente"));
 
 	const containerRef = useRef<HTMLDivElement>(null);
 
@@ -204,8 +209,8 @@ export function Profile() {
 						</span>
 						<LanguageSwitch />
 					</div>
-					<SettingRow icon={<Bell className="w-5 h-5" />} label={t("profile.notifications")} />
-					<SettingRow icon={<Shield className="w-5 h-5" />} label={t("profile.privacy")} />
+					<SettingRow icon={<Bell className="w-5 h-5" />} label={t("profile.notifications")} onClick={comingSoon} />
+					<SettingRow icon={<Shield className="w-5 h-5" />} label={t("profile.privacy")} onClick={comingSoon} />
 				</div>
 			</section>
 
@@ -219,6 +224,8 @@ export function Profile() {
 					{t("hub.logout")}
 				</button>
 			</section>
+
+			<Toast message={toast} onDone={() => setToast(null)} />
 		</div>
 	);
 }
@@ -226,13 +233,16 @@ export function Profile() {
 function SettingRow({
 	icon,
 	label,
+	onClick,
 }: {
 	icon: React.ReactNode;
 	label: string;
+	onClick?: () => void;
 }) {
 	return (
 		<button
 			type="button"
+			onClick={onClick}
 			className="w-full px-4 py-3 flex items-center gap-3 text-left active:bg-zinc-800/40 transition-colors focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:rounded-2xl"
 		>
 			<span className="text-zinc-400" aria-hidden="true">

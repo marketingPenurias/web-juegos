@@ -38,6 +38,9 @@ type Props = {
 	expiresAt: string;
 	onExpire: () => void;
 	onClose?: () => void;
+	// Se llama cuando el usuario "quema" el ticket (hold-to-burn completo).
+	// Por defecto reutiliza onExpire (cerrar/limpiar el canje).
+	onBurn?: () => void;
 };
 
 const SHORT_CODE_RE = /[^A-Z0-9]/g;
@@ -58,6 +61,7 @@ export function RedemptionScreen({
 	expiresAt,
 	onExpire,
 	onClose,
+	onBurn,
 }: Props) {
 	const { t } = useTranslation();
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -66,6 +70,8 @@ export function RedemptionScreen({
 	const cardRef = useRef<HTMLDivElement>(null);
 	const ringRef = useRef<HTMLDivElement>(null);
 	const priceRef = useRef<HTMLDivElement>(null);
+	const burnFillRef = useRef<HTMLDivElement>(null);
+	const burnTweenRef = useRef<ReturnType<typeof gsap.to> | null>(null);
 
 	const code = useMemo(() => shortCodeFor(rewardId), [rewardId]);
 	const expiresAtMs = useMemo(() => new Date(expiresAt).getTime(), [expiresAt]);
@@ -74,6 +80,43 @@ export function RedemptionScreen({
 	const [remaining, setRemaining] = useState(() =>
 		Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000)),
 	);
+	const [burning, setBurning] = useState(false);
+	const [burned, setBurned] = useState(false);
+
+	// ── Hold-to-burn (anti-fraude) ──────────────────────────────────────
+	// Mantener pulsado 2s rellena la barra GSAP.  Si suelta antes del 100%,
+	// la barra vuelve a 0 INMEDIATAMENTE (reverse) y NO se consume.  Sólo
+	// al llegar al 100% se "quema" el ticket de verdad.
+	const startBurn = () => {
+		if (burned || remaining === 0 || !burnFillRef.current) return;
+		setBurning(true);
+		burnTweenRef.current = gsap.to(burnFillRef.current, {
+			scaleX: 1,
+			duration: 2,
+			ease: "none",
+			onComplete: () => {
+				setBurned(true);
+				setBurning(false);
+				// Pequeño respiro para que se vea el estado "QUEMADO" antes de
+				// que el padre limpie el canje.
+				window.setTimeout(() => (onBurn ?? onExpire)(), 900);
+			},
+		});
+	};
+
+	const cancelBurn = () => {
+		if (burned) return;
+		setBurning(false);
+		burnTweenRef.current?.kill();
+		burnTweenRef.current = null;
+		if (burnFillRef.current) {
+			gsap.to(burnFillRef.current, {
+				scaleX: 0,
+				duration: 0.18,
+				ease: "power2.out",
+			});
+		}
+	};
 
 	useEffect(() => {
 		const tick = () => {
@@ -306,6 +349,41 @@ export function RedemptionScreen({
 					<p className="text-[10px] text-zinc-500 leading-relaxed px-2">
 						{t("redemption.screenshotWarning")}
 					</p>
+
+					{/* ── HOLD-TO-BURN (anti-fraude) ── */}
+					{!expired && !burned && (
+						<button
+							type="button"
+							onPointerDown={startBurn}
+							onPointerUp={cancelBurn}
+							onPointerLeave={cancelBurn}
+							onPointerCancel={cancelBurn}
+							className="relative mt-1 h-14 w-full rounded-2xl overflow-hidden border-2 border-rose-500/60 bg-rose-950/40 active:scale-[0.99] touch-none select-none focus-visible:ring-2 focus-visible:ring-rose-400"
+							aria-label={t("redemption.holdToBurn", "Mantén pulsado para quemar el ticket")}
+						>
+							<div
+								ref={burnFillRef}
+								className="absolute inset-0 origin-left bg-linear-to-r from-rose-600 to-orange-500"
+								style={{ transform: "scaleX(0)" }}
+								aria-hidden="true"
+							/>
+							<span className="relative z-10 flex items-center justify-center gap-2 font-black uppercase tracking-widest text-sm text-white">
+								<Flame className="w-5 h-5" aria-hidden="true" />
+								{burning
+									? t("redemption.burning", "Sigue pulsando…")
+									: t("redemption.holdToBurn", "Mantén pulsado para quemar")}
+							</span>
+						</button>
+					)}
+
+					{burned && (
+						<div className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-rose-600/25 border border-rose-500/60 mx-auto">
+							<Flame className="w-5 h-5 text-rose-300" aria-hidden="true" />
+							<span className="text-sm font-black tracking-widest text-rose-100 uppercase">
+								{t("redemption.burned", "¡Ticket quemado!")}
+							</span>
+						</div>
+					)}
 
 					{expired && (
 						<div className="mt-1 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-rose-500/15 border border-rose-500/40 mx-auto">

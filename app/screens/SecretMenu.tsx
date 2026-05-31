@@ -70,6 +70,8 @@ export function SecretMenu() {
 	const setBalance = useGameState((s) => s.setBalance);
 	const openRedemption = useGameState((s) => s.openRedemption);
 	const setScreen = useGameState((s) => s.setScreen);
+	const redeemTutorialSeen = useGameState((s) => s.redeemTutorialSeen);
+	const markRedeemTutorialSeen = useGameState((s) => s.markRedeemTutorialSeen);
 
 	const { products, loading, error, reload } = useCatalog();
 	const { purchase, redeem, pending } = useRewards();
@@ -79,6 +81,10 @@ export function SecretMenu() {
 		"default",
 	);
 	const [purchasing, setPurchasing] = useState<string | null>(null);
+	// Gate del tutorial anti-fraude de primer canje.
+	const [pendingProduct, setPendingProduct] = useState<CatalogProduct | null>(
+		null,
+	);
 
 	const containerRef = useRef<HTMLDivElement>(null);
 
@@ -158,7 +164,26 @@ export function SecretMenu() {
 		{ scope: containerRef, dependencies: [products.length] },
 	);
 
-	const handleBuy = async (product: CatalogProduct) => {
+	// Gate: la PRIMERA vez que el usuario pulsa canjear/activar, mostramos
+	// el tutorial anti-fraude antes de tocar el ledger.  Las siguientes
+	// veces (redeemTutorialSeen) va directo.
+	const handleBuy = (product: CatalogProduct) => {
+		if (purchasing) return;
+		if (!redeemTutorialSeen) {
+			setPendingProduct(product);
+			return;
+		}
+		void doPurchase(product);
+	};
+
+	const confirmTutorial = () => {
+		markRedeemTutorialSeen();
+		const product = pendingProduct;
+		setPendingProduct(null);
+		if (product) void doPurchase(product);
+	};
+
+	const doPurchase = async (product: CatalogProduct) => {
 		if (purchasing) return;
 		if (tokens < product.price_tokens) {
 			setTone("warning");
@@ -365,6 +390,49 @@ export function SecretMenu() {
 				</button>
 			</div>
 
+			{pendingProduct && (
+				<div
+					role="dialog"
+					aria-modal="true"
+					className="fixed inset-0 z-100 bg-black/85 backdrop-blur-md transform-gpu translate-z-0 flex items-center justify-center px-8"
+				>
+					<div className="w-full max-w-[340px] rounded-4xl bg-linear-to-br from-zinc-900 to-zinc-950 border border-amber-400/50 p-7 text-center shadow-[0_0_60px_rgba(245,158,11,0.35)]">
+						<div className="w-16 h-16 rounded-full bg-amber-500/15 border border-amber-400/50 mx-auto flex items-center justify-center mb-4 text-3xl">
+							⚠️
+						</div>
+						<h2 className="text-xl font-black italic tracking-tight text-white mb-2">
+							{t("menu.burnTutorialTitle", "¡Ojo con el ticket!")}
+						</h2>
+						<p className="text-sm text-zinc-300 mb-1">
+							{t(
+								"menu.burnTutorialBody",
+								"No quemes el ticket hasta que estés DELANTE del camarero.",
+							)}
+						</p>
+						<p className="text-[11px] text-zinc-500 mb-6">
+							{t(
+								"menu.burnTutorialHint",
+								"Una vez consumido, el premio se gasta. Enséñalo en barra y manténlo pulsado allí.",
+							)}
+						</p>
+						<button
+							type="button"
+							onClick={confirmTutorial}
+							className="w-full h-12 rounded-2xl bg-linear-to-r from-amber-300 via-amber-500 to-amber-600 text-black font-black tracking-tight active:scale-95 transition-transform focus-visible:ring-2 focus-visible:ring-amber-300 mb-2"
+						>
+							{t("menu.burnTutorialOk", "Entendido, canjear")}
+						</button>
+						<button
+							type="button"
+							onClick={() => setPendingProduct(null)}
+							className="w-full h-10 rounded-2xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-bold text-sm active:scale-95"
+						>
+							{t("common.cancel", "Aún no")}
+						</button>
+					</div>
+				</div>
+			)}
+
 			<Toast message={toast} onDone={() => setToast(null)} tone={tone} />
 		</div>
 	);
@@ -479,8 +547,8 @@ function LockedDayCard({
 			>
 				🕘
 			</div>
-			<div className="flex-1 min-w-0">
-				<h3 className="text-sm font-bold text-zinc-200 truncate">
+			<div className="flex-1 min-w-0 pr-20">
+				<h3 className="text-sm font-bold text-zinc-200 leading-tight line-clamp-2">
 					{product.name}
 				</h3>
 				<p className="text-[11px] text-cyan-300/80 mt-0.5">
@@ -500,7 +568,7 @@ function LockedDayCard({
 					)}
 				</div>
 			</div>
-			<span className="shrink-0 px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border text-cyan-300 border-cyan-500/40 bg-cyan-950/30">
+			<span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider border text-cyan-300 border-cyan-500/40 bg-cyan-950/70 backdrop-blur-sm">
 				{t("menu.comeBack", "Vuelve otro día")}
 			</span>
 		</article>
@@ -529,12 +597,12 @@ function LockedCard({ product }: { product: CatalogProduct }) {
 			>
 				{meta.emoji}
 			</div>
-			<div className="flex-1 min-w-0">
+			<div className="flex-1 min-w-0 pr-20">
 				<div className="flex items-center gap-2">
-					<h3 className="text-sm font-bold text-zinc-300 truncate">
+					<h3 className="text-sm font-bold text-zinc-300 leading-tight line-clamp-2">
 						{product.name}
 					</h3>
-					<Icon className="w-3.5 h-3.5 text-zinc-500" aria-hidden="true" />
+					<Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
 				</div>
 				<p className="text-[11px] text-zinc-500 mt-0.5">
 					{t("menu.unlockAt", { tier: meta.displayName })}
@@ -554,14 +622,14 @@ function LockedCard({ product }: { product: CatalogProduct }) {
 				</div>
 			</div>
 			<span
-				className="shrink-0 px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border"
+				className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider border backdrop-blur-sm"
 				style={{
 					color: meta.colorPrimary,
 					borderColor: `${meta.colorPrimary}66`,
-					backgroundColor: `${meta.colorPrimary}14`,
+					backgroundColor: `${meta.colorPrimary}22`,
 				}}
 			>
-				<BadgePercent className="w-3 h-3 inline mr-1" aria-hidden="true" />
+				<BadgePercent className="w-2.5 h-2.5 inline mr-0.5" aria-hidden="true" />
 				{t("menu.comingSoon")}
 			</span>
 		</article>

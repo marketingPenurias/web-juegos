@@ -50,6 +50,8 @@ type SessionPayload = {
 	tier: "bronce" | "plata" | "oro" | "platino";
 	daily_activity?: DailyActivity;
 	reward_rules?: RewardRule[];
+	streak?: number;
+	is_new_user?: boolean;
 };
 
 export function useSession() {
@@ -108,6 +110,8 @@ export function useSession() {
 					activeEventName: data.active_event?.name ?? null,
 					dailyActivity: data.daily_activity,
 					rewardRules: data.reward_rules,
+					streak: data.streak,
+					isNewUser: data.is_new_user,
 				});
 			} catch (err) {
 				// TODO: CLEANUP SESSION DEBUG

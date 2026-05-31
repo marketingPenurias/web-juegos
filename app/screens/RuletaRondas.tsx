@@ -53,6 +53,7 @@ export function RuletaRondas() {
 	const friends = useGameState((s) => s.friends);
 	const setFriends = useGameState((s) => s.setFriends);
 	const addTokens = useGameState((s) => s.addTokens);
+	const markDaily = useGameState((s) => s.markDaily);
 	const activeEventId = useGameState((s) => s.activeEventId);
 	const { claim } = useClaim();
 
@@ -123,6 +124,7 @@ export function RuletaRondas() {
 		// red), `useClaim` reconcilia el balance via setBalance y aquí
 		// avisamos con un toast.  Cero "tokens fantasma" tras reconciliar.
 		addTokens(SPIN_REWARD, "history.tx_ruleta");
+		markDaily("ruleta_spin"); // misión reactiva: check verde al instante
 		void claim("ruleta_spin", activeEventId).then((result) => {
 			if (!result.ok) {
 				setTone("warning");

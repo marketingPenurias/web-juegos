@@ -1,5 +1,5 @@
 import type { AppLoadContext } from "react-router";
-import { getSupabase } from "./supabase.server";
+import { getServiceSupabase } from "./supabase.server";
 import {
 	corsHeaders,
 	jsonResponse,
@@ -94,15 +94,27 @@ export async function handleAnalyticsAction(
 		);
 	}
 
-	const verified = await verifyAuthToken(request, context);
-	const verifiedUserId = verified?.id ?? null;
+	// Analítica acepta eventos ANÓNIMOS (funnel pre-login).  `verifyAuthToken`
+	// LANZA una Response cuando no hay/!válido el JWT — por eso antes TODOS
+	// los eventos anónimos morían con 401 y `behavior_events` quedaba vacía.
+	// Lo envolvemos: sin token válido → anónimo (user_id = NULL), no 401.
+	let verifiedUserId: string | null = null;
+	try {
+		const verified = await verifyAuthToken(request, context);
+		verifiedUserId = verified?.id ?? null;
+	} catch {
+		verifiedUserId = null;
+	}
 
 	const headerSlug = request.headers.get("x-tenant-slug");
 	const hostSlug = hostnameToSlug(request);
 
-	let supabase: ReturnType<typeof getSupabase>;
+	// Escritura SIEMPRE con service-role: los inserts antes iban por la
+	// anon-key y la RLS de `behavior_events` (current_tenant_id() desde el
+	// JWT) los bloqueaba silenciosamente.  El service client es la vía fiable.
+	let supabase: ReturnType<typeof getServiceSupabase>;
 	try {
-		supabase = verified?.supabase ?? getSupabase(context);
+		supabase = getServiceSupabase(context);
 	} catch {
 		console.warn("[analytics] supabase not configured; dropping events");
 		return jsonResponse(

@@ -39,6 +39,7 @@ export function TinderMusical() {
 	const { t } = useTranslation();
 	const setScreen = useGameState((s) => s.setScreen);
 	const addTokens = useGameState((s) => s.addTokens);
+	const markDaily = useGameState((s) => s.markDaily);
 	const activeEventId = useGameState((s) => s.activeEventId);
 
 	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
@@ -57,12 +58,17 @@ export function TinderMusical() {
 	);
 	const animatingRef = useRef(false);
 
-	// Cuando llega un deck fresco, resetamos índice (otra noche, otro evento).
+	// Firma estable del deck: cambia cuando el server trae otras canciones
+	// (otra noche, otro evento, o un reload).  La usamos para resetear el
+	// índice Y limpiar el array de refs — evita que refs posicionales de un
+	// deck anterior se filtren al nuevo (causa raíz de "cartas a ciegas").
+	const deckKey = deck.map((d) => d.id).join(",");
 	useEffect(() => {
+		cardRefs.current = [];
 		setIndex(0);
 		setStats({ likes: 0, dislikes: 0 });
 		setDone(false);
-	}, [activeEventId]);
+	}, [deckKey]);
 
 	const ready = activeEventId !== null && deck.length > 0 && !done;
 
@@ -143,6 +149,7 @@ export function TinderMusical() {
 				// es la fuente de verdad; los dislikes no escriben (ahorro de
 				// índice + privacidad del usuario).
 				if (dir === "like") {
+					markDaily("tinder_swipe"); // misión reactiva inmediata
 					const res = await castVote({
 						track_id: song.id,
 						vote_type: "free",
@@ -170,6 +177,7 @@ export function TinderMusical() {
 					// valida 1/noche y el ledger reconcilia el balance (si ya
 					// se completó hoy, useClaim corrige el saldo sin drama).
 					addTokens(REWARD, "history.tx_tinder");
+					markDaily("tinder_completion");
 					void claim("tinder_completion", activeEventId);
 					gsap.fromTo(
 						successRef.current,
@@ -186,6 +194,11 @@ export function TinderMusical() {
 						},
 					);
 				} else {
+					// Limpieza GSAP de la carta DESCARTADA: matamos sus tweens y
+					// la sacamos del flujo (pointer-events off + oculta) para que
+					// no capture el drag ni "congele" la siguiente carta.
+					gsap.killTweensOf(card);
+					gsap.set(card, { pointerEvents: "none", opacity: 0 });
 					setIndex(next);
 					restackBelow(next - 1);
 					animatingRef.current = false;

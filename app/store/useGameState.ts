@@ -121,6 +121,18 @@ export type RewardRule = {
 	description: string;
 };
 
+// Resultado de un check-in procesado (incl. el "flujo frío": QR escaneado
+// sin sesión → se procesa tras el login).  Lo muestra `CheckinResultModal`.
+export type CheckinResult = {
+	ok: boolean;
+	qrLabel?: string;
+	reward?: number;
+	streak?: number;
+	milestoneWeek?: number;
+	milestoneAmount?: number;
+	error?: string;
+};
+
 const EMPTY_DAILY_ACTIVITY: DailyActivity = {
 	ruleta_spin: false,
 	tinder_swipe: false,
@@ -157,6 +169,17 @@ type GameState = {
 	dailyActivity: DailyActivity;
 	rewardRules: RewardRule[];
 
+	// ── Onboarding / fidelidad ──────────────────────────────────────────
+	// `isNewUser`: lo marca /api/session SOLO la primera vez (cuando el JIT
+	// crea el perfil y concede los +100).  `welcomeSeen`: flag persistido
+	// que garantiza que el modal de bienvenida es ONE-SHOT aunque recargue.
+	isNewUser: boolean;
+	welcomeSeen: boolean;
+	// Tutorial de primer canje (anti-fraude): one-shot persistido.
+	redeemTutorialSeen: boolean;
+	// Resultado de un check-in para celebrar (incl. flujo frío post-login).
+	checkinResult: CheckinResult | null;
+
 	setScreen: (s: Screen) => void;
 	addTokens: (n: number, labelKey?: string) => void;
 	spendTokens: (n: number, labelKey?: string) => boolean;
@@ -179,9 +202,15 @@ type GameState = {
 		activeEventName: string | null;
 		dailyActivity?: DailyActivity;
 		rewardRules?: RewardRule[];
+		streak?: number;
+		isNewUser?: boolean;
 	}) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
+	setStreak: (streak: number) => void;
 	markDaily: (key: keyof DailyActivity) => void;
+	dismissWelcome: () => void;
+	markRedeemTutorialSeen: () => void;
+	setCheckinResult: (r: CheckinResult | null) => void;
 	openRedemption: (r: ActiveRedemption) => void;
 	closeRedemption: () => void;
 	rewardAmount: (code: string, fallback?: number) => number;
@@ -224,6 +253,10 @@ export const useGameState = create<GameState>()(
 			activeRedemption: null,
 			dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 			rewardRules: [],
+			isNewUser: false,
+			welcomeSeen: false,
+			redeemTutorialSeen: false,
+			checkinResult: null,
 
 			setScreen: (s) => set({ currentScreen: s }),
 
@@ -329,6 +362,11 @@ export const useGameState = create<GameState>()(
 					activeRedemption: null,
 					dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 					rewardRules: [],
+					// Reset para que el SIGUIENTE usuario en este móvil (otro JIT)
+					// sí vea su propia bienvenida.
+					isNewUser: false,
+					welcomeSeen: false,
+					checkinResult: null,
 				}),
 
 			// ── Sync server ────────────────────────────────────────────
@@ -340,6 +378,8 @@ export const useGameState = create<GameState>()(
 				activeEventName,
 				dailyActivity,
 				rewardRules,
+				streak,
+				isNewUser,
 			}) =>
 				set((state) => ({
 					userProfileId,
@@ -349,6 +389,10 @@ export const useGameState = create<GameState>()(
 					activeEventName,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
+					streak: typeof streak === "number" ? streak : state.streak,
+					// Sólo marcamos new-user si el server lo dice Y aún no se vio
+					// la bienvenida (one-shot, sobrevive a recargas vía persist).
+					isNewUser: isNewUser === true && !state.welcomeSeen,
 				})),
 
 			setBalance: (tokenBalance, lifetimeEarned) =>
@@ -360,6 +404,8 @@ export const useGameState = create<GameState>()(
 							: state.lifetimeEarned,
 				})),
 
+			setStreak: (streak) => set({ streak: Math.max(0, streak) }),
+
 			markDaily: (key) =>
 				set((state) => {
 					if (state.dailyActivity[key]) return state;
@@ -367,6 +413,12 @@ export const useGameState = create<GameState>()(
 						dailyActivity: { ...state.dailyActivity, [key]: true },
 					};
 				}),
+
+			dismissWelcome: () => set({ isNewUser: false, welcomeSeen: true }),
+
+			markRedeemTutorialSeen: () => set({ redeemTutorialSeen: true }),
+
+			setCheckinResult: (r) => set({ checkinResult: r }),
 
 			openRedemption: (r) => set({ activeRedemption: r }),
 			closeRedemption: () => set({ activeRedemption: null }),
@@ -400,6 +452,9 @@ export const useGameState = create<GameState>()(
 				activeEventId: state.activeEventId,
 				activeEventName: state.activeEventName,
 				activeRedemption: state.activeRedemption,
+				// One-shot bienvenida: si ya se vio, no reaparece tras recargar.
+				welcomeSeen: state.welcomeSeen,
+				redeemTutorialSeen: state.redeemTutorialSeen,
 				// dailyActivity y rewardRules NO se persisten — son
 				// always-fresh-from-server (la verdad de hoy puede ser
 				// distinta a la de ayer, no queremos arrastrar checks

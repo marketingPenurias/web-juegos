@@ -69,6 +69,19 @@ export function BottomNav() {
 					);
 				})}
 			</div>
+
+			{/* Branding corporativo sutil — "Powered by Nightgraph" */}
+			<div className="flex items-center justify-center gap-1.5 pt-1 pb-0.5 opacity-40">
+				<img
+					src="/logo-nightgraph.jpg"
+					alt=""
+					aria-hidden="true"
+					className="w-3 h-3 rounded-full object-cover"
+				/>
+				<span className="text-[8px] font-bold tracking-[0.2em] uppercase text-zinc-500">
+					Powered by Nightgraph
+				</span>
+			</div>
 		</div>
 	);
 }

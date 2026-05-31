@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Timer } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
+import { getBrowserSupabase } from "../lib/supabase.client";
 import { useGameState } from "../store/useGameState";
 import { useMusic } from "../lib/useMusic";
 import { useClaim } from "../lib/useClaim";
@@ -11,31 +13,36 @@ import { BoostBurst } from "../components/live/BoostBurst";
 import { VoteFooter, type VoteAction } from "../components/live/VoteFooter";
 
 /**
- * LiveBattle — REAL.
+ * LiveBattle — DUELO GLOBAL SINCRONIZADO.
  *
- *   Toma las dos canciones más votadas del evento activo y monta el
- *   "duelo" en directo.  Cada acción persiste via `vote_track`:
+ *   Ya no es un top-2 que cada usuario calcula por su cuenta: la batalla
+ *   es un evento server-managed (`live_battles`, lanzado por el DJ desde
+ *   /admin).  TODOS los usuarios ven el MISMO duelo a la vez:
  *
- *     · "free"  → +1 voto, 0 tokens
- *     · "boost" → +5 votos, -30 tokens (BOOST_COST)
+ *     · Suscripción Realtime a `live_battles` (filtro event_id): cuando el
+ *       DJ inicia una batalla `live`, cargamos las dos canciones; cuando se
+ *       cierra (autocierre por timer o forzado), volvemos al empty-state.
+ *     · Suscripción a `event_tracks` para que los porcentajes suban en vivo
+ *       según votan los demás.
+ *     · Voto/boost vía `vote_track` (coste server-authoritative).  Premio
+ *       +10 (1/noche) vía claim, con Optimistic UI.
  *
- *   Si el evento aún no tiene 2 tracks, mostramos empty-state.  Si el
- *   usuario ya votó las dos top, también — la unicidad
- *   `(track_id, user_id)` la fuerza el server.
- *
- *   Sin polling — para el piloto refrescamos al confirmar voto.  La
- *   suscripción Realtime queda para el Jumbotron.
+ *   Asimetría respetada: el móvil sólo escucha `live_battles` + `event_tracks`.
  */
 
 const BOOST_COST = 30;
+
+type BTrack = { id: string; title: string; artist: string; total_votes: number };
+type Battle = { id: string; endsAt: string; a: BTrack; b: BTrack };
 
 export function LiveBattle() {
 	const { t } = useTranslation();
 	const tokens = useGameState((s) => s.tokens);
 	const setBalance = useGameState((s) => s.setBalance);
 	const addTokens = useGameState((s) => s.addTokens);
+	const markDaily = useGameState((s) => s.markDaily);
 	const activeEventId = useGameState((s) => s.activeEventId);
-	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
+	const { castVote } = useMusic(activeEventId);
 	const { claim } = useClaim();
 
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -45,33 +52,119 @@ export function LiveBattle() {
 	const bPctRef = useRef<HTMLSpanElement>(null);
 	const burstRef = useRef<HTMLDivElement>(null);
 
+	const [battle, setBattle] = useState<Battle | null>(null);
+	const [loading, setLoading] = useState(true);
 	const [voted, setVoted] = useState<string | null>(null);
 	const [selected, setSelected] = useState<string | null>(null);
+	const [remaining, setRemaining] = useState(0);
 	const [toast, setToast] = useState<string | null>(null);
-	const [tone, setTone] = useState<"default" | "success" | "warning">(
-		"default",
-	);
+	const [tone, setTone] = useState<"default" | "success" | "warning">("default");
 
-	const [a, b] = useMemo(() => deck.slice(0, 2), [deck]);
+	// ── Carga del duelo activo (las dos canciones enfrentadas) ──────────
+	const loadBattle = useCallback(async () => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !activeEventId) {
+			setBattle(null);
+			setLoading(false);
+			return;
+		}
+		const { data: b } = await supabase
+			.from("live_battles")
+			.select("id, track_a, track_b, status, ends_at")
+			.eq("event_id", activeEventId)
+			.eq("status", "live")
+			.order("started_at", { ascending: false })
+			.limit(1)
+			.maybeSingle();
+		if (!b?.id) {
+			setBattle(null);
+			setLoading(false);
+			return;
+		}
+		const { data: rows } = await supabase
+			.from("event_tracks")
+			.select("id, title, artist, total_votes")
+			.in("id", [b.track_a as string, b.track_b as string]);
+		const list = (rows ?? []) as BTrack[];
+		const a = list.find((r) => r.id === b.track_a);
+		const bb = list.find((r) => r.id === b.track_b);
+		setBattle(a && bb ? { id: b.id as string, endsAt: b.ends_at as string, a, b: bb } : null);
+		setLoading(false);
+	}, [activeEventId]);
 
+	// ── Realtime: live_battles (sincronización del duelo global) ────────
+	useEffect(() => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !activeEventId) {
+			setBattle(null);
+			setLoading(false);
+			return;
+		}
+		setLoading(true);
+		void loadBattle();
+		const channel = supabase
+			.channel(`live:battle:${activeEventId}`)
+			.on(
+				"postgres_changes",
+				{ event: "*", schema: "public", table: "live_battles", filter: `event_id=eq.${activeEventId}` },
+				(payload) => {
+					if (payload.eventType === "DELETE") { setBattle(null); return; }
+					const row = payload.new as { status?: string };
+					if (row.status === "live") void loadBattle();
+					else setBattle(null); // closed → fin del duelo
+				},
+			)
+			.subscribe();
+		return () => { void supabase.removeChannel(channel); };
+	}, [activeEventId, loadBattle]);
+
+	// ── Realtime: event_tracks (porcentajes en vivo de las dos canciones) ─
+	useEffect(() => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !activeEventId) return;
+		const channel = supabase
+			.channel(`live:tracks:${activeEventId}`)
+			.on(
+				"postgres_changes",
+				{ event: "*", schema: "public", table: "event_tracks", filter: `event_id=eq.${activeEventId}` },
+				(payload) => {
+					if (payload.eventType === "DELETE") return;
+					const row = payload.new as { id?: string; total_votes?: number };
+					if (!row?.id) return;
+					setBattle((cur) => {
+						if (!cur) return cur;
+						if (row.id === cur.a.id) return { ...cur, a: { ...cur.a, total_votes: Number(row.total_votes ?? cur.a.total_votes) } };
+						if (row.id === cur.b.id) return { ...cur, b: { ...cur.b, total_votes: Number(row.total_votes ?? cur.b.total_votes) } };
+						return cur;
+					});
+				},
+			)
+			.subscribe();
+		return () => { void supabase.removeChannel(channel); };
+	}, [activeEventId]);
+
+	// ── Cuenta atrás del duelo ──────────────────────────────────────────
+	useEffect(() => {
+		if (!battle) return;
+		const tick = () => setRemaining(Math.max(0, Math.floor((new Date(battle.endsAt).getTime() - Date.now()) / 1000)));
+		tick();
+		const id = window.setInterval(tick, 250);
+		return () => window.clearInterval(id);
+	}, [battle]);
+
+	// Reset selección/voto al cambiar de batalla.
+	useEffect(() => { setVoted(null); setSelected(null); }, [battle?.id]);
+
+	const a = battle?.a;
+	const b = battle?.b;
 	const totalVotes = (a?.total_votes ?? 0) + (b?.total_votes ?? 0);
-	const aPct =
-		totalVotes > 0
-			? Math.round(((a?.total_votes ?? 0) / totalVotes) * 100)
-			: 50;
+	const aPct = totalVotes > 0 ? Math.round(((a?.total_votes ?? 0) / totalVotes) * 100) : 50;
 	const bPct = 100 - aPct;
+	const ended = remaining === 0 && !!battle;
 
 	useGSAP(
-		() => {
-			gsap.from(".live-fade", {
-				y: 16,
-				opacity: 0,
-				stagger: 0.07,
-				duration: 0.5,
-				ease: "power3.out",
-			});
-		},
-		{ scope: containerRef },
+		() => { gsap.from(".live-fade", { y: 16, opacity: 0, stagger: 0.07, duration: 0.5, ease: "power3.out" }); },
+		{ scope: containerRef, dependencies: [battle?.id] },
 	);
 
 	useGSAP(
@@ -81,52 +174,26 @@ export function LiveBattle() {
 			animateCount(aPctRef.current, aPct);
 			animateCount(bPctRef.current, bPct);
 		},
-		{ dependencies: [aPct, bPct] },
+		{ dependencies: [aPct, bPct, battle?.id] },
 	);
 
 	const triggerBoostBurst = () => {
 		if (!burstRef.current) return;
 		gsap.set(burstRef.current, { display: "flex", opacity: 1 });
-		const tl = gsap.timeline({
-			onComplete: () => {
-				if (burstRef.current) gsap.set(burstRef.current, { display: "none" });
-			},
-		});
-		tl.fromTo(
-			".burst-glow",
-			{ scale: 0.4, opacity: 0 },
-			{ scale: 3, opacity: 0, duration: 1, ease: "power3.out", force3D: true },
-		)
-			.fromTo(
-				".burst-text",
-				{ y: 40, opacity: 0 },
-				{
-					y: -30,
-					opacity: 1,
-					duration: 0.5,
-					ease: "back.out(2)",
-					force3D: true,
-				},
-				"<",
-			)
-			.to(".burst-text", {
-				opacity: 0,
-				duration: 0.5,
-				delay: 0.4,
-				ease: "power2.in",
-				force3D: true,
-			});
+		const tl = gsap.timeline({ onComplete: () => { if (burstRef.current) gsap.set(burstRef.current, { display: "none" }); } });
+		tl.fromTo(".burst-glow", { scale: 0.4, opacity: 0 }, { scale: 3, opacity: 0, duration: 1, ease: "power3.out", force3D: true })
+			.fromTo(".burst-text", { y: 40, opacity: 0 }, { y: -30, opacity: 1, duration: 0.5, ease: "back.out(2)", force3D: true }, "<")
+			.to(".burst-text", { opacity: 0, duration: 0.5, delay: 0.4, ease: "power2.in", force3D: true });
 	};
 
 	const handleConfirm = async (action: VoteAction) => {
-		if (!selected || voted) return;
+		if (!selected || voted || ended) return;
 		const cost = action === "boost" ? BOOST_COST : 0;
 		if (action === "boost" && tokens < cost) {
 			setTone("warning");
 			setToast(t("live.toastNoTokens"));
 			return;
 		}
-
 		const result = await castVote({
 			track_id: selected,
 			vote_type: action,
@@ -134,30 +201,39 @@ export function LiveBattle() {
 			boost_context: "livebattle",
 		});
 		if (!result.ok) {
+			// `already_voted` NO es un error severo: es la BD recordándonos algo
+			// que el estado local olvidó (recarga / cambio de pestaña).  Lo
+			// tratamos como info y RECONCILIAMOS la UI bloqueando la botonera.
+			if (result.error === "already_voted") {
+				setTone("default");
+				setToast(t("live.toastAlreadyVoted", "Ya has votado en este duelo"));
+				setVoted(selected);
+				return;
+			}
 			setTone("warning");
 			setToast(
 				result.error === "insufficient_funds"
 					? t("live.toastNoTokens")
-					: result.error === "already_voted"
-						? t("live.toastAlreadyVoted", "Ya votaste esta noche")
-						// Modo diagnóstico piloto: propaga `detail` del RPC
-						// directamente al toast para cazar FK / unique /
-						// constraint violations sin wrangler tail.
-						: result.detail
-							? `${result.error}: ${result.detail}`
-							: t("live.toastError", "No se pudo registrar el voto"),
+					: result.detail
+						? `${result.error}: ${result.detail}`
+						: t("live.toastError", "No se pudo registrar el voto"),
 			);
 			return;
 		}
-
-		if (typeof result.balance === "number") {
-			setBalance(result.balance);
+		if (typeof result.balance === "number") setBalance(result.balance);
+		// Reflejo inmediato del voto en la barra (además del Realtime).
+		if (typeof result.total_votes === "number") {
+			setBattle((cur) => {
+				if (!cur) return cur;
+				if (selected === cur.a.id) return { ...cur, a: { ...cur.a, total_votes: result.total_votes as number } };
+				if (selected === cur.b.id) return { ...cur, b: { ...cur.b, total_votes: result.total_votes as number } };
+				return cur;
+			});
 		}
 		setVoted(selected);
-		// Premio por votar (Tabla 5: livebattle_vote = +10, 1/noche).
-		// OPTIMISTIC: sumamos +10 ya; el claim reconcilia con el ledger
-		// (si ya votó hoy, el RPC lo rechaza y el saldo se corrige solo).
+		// Premio por votar (Tabla 5: livebattle_vote = +10, 1/noche), Optimistic.
 		addTokens(10, "history.tx_vote");
+		markDaily("vote_track");
 		void claim("livebattle_vote", activeEventId);
 		if (action === "boost") {
 			setTone("success");
@@ -169,34 +245,28 @@ export function LiveBattle() {
 		}
 	};
 
-	useEffect(() => {
-		setVoted(null);
-		setSelected(null);
-	}, [activeEventId]);
-
-	const empty = !loading && (!a || !b);
+	const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+	const ss = String(remaining % 60).padStart(2, "0");
 
 	return (
-		<div
-			ref={containerRef}
-			className="flex-1 flex flex-col relative z-20 min-h-0 overflow-hidden"
-		>
+		<div ref={containerRef} className="flex-1 flex flex-col relative z-20 min-h-0 overflow-hidden">
 			<LiveHeader />
 
 			<main className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-6 flex flex-col justify-center relative z-10 -mt-2 pb-2">
 				<div className="live-fade flex flex-col items-center mb-6">
 					<div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/40 border border-red-500/30 backdrop-blur-sm transform-gpu translate-z-0 mb-4">
 						<span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,1)] animate-pulse" />
-						<span className="text-[10px] font-black tracking-[0.15em] text-red-400 uppercase">
-							{t("live.liveBadge")}
-						</span>
+						<span className="text-[10px] font-black tracking-[0.15em] text-red-400 uppercase">{t("live.liveBadge")}</span>
 					</div>
 					<h2 className="text-3xl font-black italic tracking-tighter text-transparent bg-clip-text bg-linear-to-r from-cyan-300 via-blue-500 to-cyan-400 drop-shadow-[0_0_20px_rgba(0,240,255,0.4)] leading-tight text-center">
 						{t("live.battleTitle")}
 					</h2>
-					<p className="text-zinc-400 text-sm font-medium mt-1">
-						{t("live.nextIn")}
-					</p>
+					{battle && (
+						<div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-950/50 border border-rose-500/40">
+							<Timer className="w-4 h-4 text-rose-300" aria-hidden="true" />
+							<span className="text-xl font-black tabular-nums text-rose-200">{mm}:{ss}</span>
+						</div>
+					)}
 				</div>
 
 				{!activeEventId && (
@@ -206,30 +276,18 @@ export function LiveBattle() {
 				)}
 
 				{activeEventId && loading && (
-					<p className="text-center text-zinc-500 text-sm py-8">
-						{t("live.loading", "Cargando duelo…")}
-					</p>
+					<p className="text-center text-zinc-500 text-sm py-8">{t("live.loading", "Cargando duelo…")}</p>
 				)}
 
-				{activeEventId && empty && (
+				{activeEventId && !loading && !battle && (
 					<div className="text-center py-8 flex flex-col gap-3 items-center">
 						<p className="text-zinc-400 text-sm max-w-xs">
-							{t(
-								"live.empty",
-								"Aún no hay duelo activo — vuelve cuando el DJ haya cargado canciones.",
-							)}
+							{t("live.noBattle", "El DJ aún no ha lanzado ninguna batalla. ¡Atento a la pantalla, empieza en breve!")}
 						</p>
-						<button
-							type="button"
-							onClick={() => void reload()}
-							className="h-10 px-4 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs font-black uppercase tracking-widest active:scale-95"
-						>
-							{t("menu.retry")}
-						</button>
 					</div>
 				)}
 
-				{activeEventId && !empty && a && b && (
+				{activeEventId && battle && a && b && (
 					<div className="space-y-6">
 						<SongRow
 							name={a.title}
@@ -240,14 +298,12 @@ export function LiveBattle() {
 							selected={selected === a.id}
 							confirmed={voted === a.id}
 							onSelect={() => setSelected(a.id)}
-							disabled={voted !== null}
+							disabled={voted !== null || ended}
 						/>
 
 						<div className="relative flex justify-center -my-3 z-10 pointer-events-none">
 							<div className="w-8 h-8 rounded-full bg-zinc-950 border border-zinc-800 flex items-center justify-center shadow-lg">
-								<span className="text-[10px] font-black italic text-zinc-500">
-									{t("live.vs")}
-								</span>
+								<span className="text-[10px] font-black italic text-zinc-500">{t("live.vs")}</span>
 							</div>
 						</div>
 
@@ -260,20 +316,20 @@ export function LiveBattle() {
 							selected={selected === b.id}
 							confirmed={voted === b.id}
 							onSelect={() => setSelected(b.id)}
-							disabled={voted !== null}
+							disabled={voted !== null || ended}
 						/>
-					</div>
-				)}
 
-				{activeEventId && error && (
-					<p className="text-rose-300 text-center text-xs mt-4">
-						{t("live.errLoad", "Error cargando el duelo")}
-					</p>
+						{ended && (
+							<p className="text-center text-amber-300 text-sm font-black uppercase tracking-widest">
+								{t("live.battleEnded", "¡Duelo cerrado! Mira el ganador en pantalla")}
+							</p>
+						)}
+					</div>
 				)}
 			</main>
 
 			<VoteFooter
-				disabled={voted !== null}
+				disabled={voted !== null || ended || !battle}
 				hasSelection={selected !== null}
 				tokens={tokens}
 				boostCost={BOOST_COST}
@@ -289,24 +345,14 @@ export function LiveBattle() {
 
 function animateBar(node: HTMLDivElement | null, target: number) {
 	if (!node) return;
-	gsap.to(node, {
-		scaleX: target / 100,
-		duration: 0.9,
-		ease: "power3.out",
-		force3D: true,
-	});
+	gsap.to(node, { scaleX: target / 100, duration: 0.9, ease: "power3.out", force3D: true });
 }
 
 function animateCount(node: HTMLSpanElement | null, target: number) {
 	if (!node) return;
 	const obj = { val: parseInt(node.textContent ?? "0", 10) || 0 };
 	gsap.to(obj, {
-		val: target,
-		duration: 0.9,
-		snap: { val: 1 },
-		ease: "power2.out",
-		onUpdate: () => {
-			node.textContent = `${Math.round(obj.val)}%`;
-		},
+		val: target, duration: 0.9, snap: { val: 1 }, ease: "power2.out",
+		onUpdate: () => { node.textContent = `${Math.round(obj.val)}%`; },
 	});
 }

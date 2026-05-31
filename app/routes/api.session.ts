@@ -121,6 +121,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		lifetime_earned: number;
 	};
 	let profile: ProfileRow | null = null;
+	// is_new_user: true SOLO cuando el JIT crea el perfil en esta llamada
+	// (primer login de la vida).  El cliente lo usa para el modal one-shot
+	// de bienvenida + los +100.  En llamadas posteriores el perfil ya existe
+	// → false, así que el modal es naturalmente one-shot.
+	let is_new_user = false;
 
 	const { data: existing, error: profileErr } = await supabase
 		.from("user_profiles")
@@ -213,6 +218,18 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			token_balance: Number(finalProfile.token_balance ?? 0),
 			lifetime_earned: Number(finalProfile.lifetime_earned ?? 0),
 		};
+		is_new_user = true;
+	}
+
+	// ── Streak (semanas consecutivas, server-truth) ───────────────────
+	let streak = 0;
+	try {
+		const { data: streakData } = await supabase.rpc("get_user_streak", {
+			p_user_id: profile.id,
+		});
+		streak = Number(streakData ?? 0);
+	} catch {
+		streak = 0;
 	}
 
 	// ── Tier ──────────────────────────────────────────────────────────
@@ -339,6 +356,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			tier,
 			daily_activity: dailyActivity,
 			reward_rules,
+			streak,
+			is_new_user,
 		},
 		{ request },
 	);

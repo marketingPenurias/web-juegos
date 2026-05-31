@@ -41,6 +41,7 @@ export function Jukebox() {
 
 	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
 	const addTokens = useGameState((s) => s.addTokens);
+	const markDaily = useGameState((s) => s.markDaily);
 	const { claim } = useClaim();
 
 	const [query, setQuery] = useState("");
@@ -198,6 +199,7 @@ export function Jukebox() {
 			return;
 		}
 		if (typeof res.balance === "number") setBalance(res.balance);
+		markDaily("jukebox_boost"); // misión reactiva inmediata
 		setBoosted((prev) => new Set(prev).add(id));
 		setRequested((prev) => new Set(prev).add(id));
 		setTone("success");
