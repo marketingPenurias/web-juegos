@@ -219,7 +219,7 @@ async function importPublicKey(jwkJsonString: string): Promise<CryptoKey> {
  *     - `exp` ya pasó
  *     - cualquier excepción durante decode / import / verify
  */
-async function verifySupabaseJwtLocally(
+export async function verifySupabaseJwtLocally(
 	token: string,
 	jwkJsonString: string,
 ): Promise<JwtPayload | null> {

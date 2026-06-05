@@ -156,6 +156,25 @@
 	position: absolute;
 }
 
+/* NightGraph analytics dashboard — violet theme scoped */
+.ng-dashboard-root {
+	--primary: oklch(0.62 0.22 280);
+	--primary-foreground: oklch(0.97 0.006 280);
+	--background: oklch(0.07 0.012 280);
+	--foreground: oklch(0.97 0.006 280);
+	--card: oklch(0.09 0.01 280);
+	--card-foreground: oklch(0.97 0.006 280);
+	--muted: oklch(0.14 0.018 280);
+	--muted-foreground: oklch(0.55 0.04 280);
+	--accent: oklch(0.14 0.018 280);
+	--accent-foreground: oklch(0.97 0.006 280);
+	--border: oklch(0.18 0.025 280);
+	--ring: oklch(0.55 0.18 280);
+	background-color: oklch(0.07 0.012 280);
+	color: oklch(0.97 0.006 280);
+	min-height: 100dvh;
+}
+
 /* Fallback animations (kept for non-motion components) */
 @keyframes flicker {
 	0%, 100% { opacity: 1; }

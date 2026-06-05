@@ -2,6 +2,13 @@ import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
 	index("routes/home.tsx"),
+	route("dashboard", "routes/dashboard.tsx", [
+		index("routes/dashboard.index.tsx"),
+		route("live-vibe", "routes/dashboard.live-vibe.tsx"),
+		route("graph", "routes/dashboard.graph.tsx"),
+		route("retention", "routes/dashboard.retention.tsx"),
+	]),
+	route("api/auth/dashboard", "routes/api.auth-dashboard.ts"),
 	route("api/analytics", "routes/api.analytics.ts"),
 	route("api/track", "routes/api.track.ts"),
 	route("api/wallet", "routes/api.wallet.ts"),
