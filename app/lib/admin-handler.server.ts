@@ -14,9 +14,9 @@ import { pickTenantSlug } from "./tenant-resolver.server";
  *       antes de tocar la tabla con el service client.
  *
  *   Operaciones (`op`):
- *     bootstrap · open_party · update_event · bulk_global · add_track ·
- *     update_track · remove_track · now_playing · start_battle ·
- *     force_close_battle · metrics
+ *     bootstrap · open_party · create_event · activate_event · update_event ·
+ *     bulk_global · add_track · update_track · remove_track · now_playing ·
+ *     stop_now_playing · start_battle · force_close_battle · metrics
  */
 
 type AdminBody = {
@@ -30,6 +30,8 @@ type AdminBody = {
 	raw?: string;
 	global_id?: string;
 	track_id?: string;
+	track_a?: string;
+	track_b?: string;
 	title?: string;
 	artist?: string;
 	cover_image_url?: string;
@@ -250,10 +252,93 @@ export async function handleAdminAction(
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
 		}
 
+		// "⏹ Parar todo" — apaga la pista que suene (is_played=false en TODAS
+		// las del evento).  Now Playing vacío → NowPlaying.tsx oculta la barra
+		// en los móviles vía Realtime.  Escritura directa (staff ya validado).
+		case "stop_now_playing": {
+			const eventId = String(body.event_id ?? "");
+			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+			const { error } = await supabase
+				.from("event_tracks")
+				.update({ is_played: false, played_at: null })
+				.eq("tenant_id", tenant_id)
+				.eq("event_id", eventId)
+				.eq("is_played", true);
+			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "stop_now_playing",
+				table_name: "event_tracks", record_id: eventId,
+			});
+			return jsonResponse({ ok: true }, { request });
+		}
+
+		// Programar un evento futuro (status='scheduled').  No lo activa: el DJ
+		// lo arranca luego con `activate_event`.
+		case "create_event": {
+			const name = String(body.name ?? "").trim();
+			if (!name) return jsonResponse({ ok: false, error: "name_required" }, { status: 400, request });
+			if (!body.start_time) return jsonResponse({ ok: false, error: "start_time_required" }, { status: 400, request });
+			const insert: Record<string, unknown> = {
+				tenant_id,
+				name: name.slice(0, 120),
+				start_time: body.start_time,
+				end_time: body.end_time ?? null,
+				status: "scheduled",
+			};
+			const { data, error } = await supabase
+				.from("tenant_events")
+				.insert(insert)
+				.select("id")
+				.maybeSingle();
+			if (error) return jsonResponse({ ok: false, error: "create_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "create_event",
+				table_name: "tenant_events", record_id: data?.id ?? null, new_data: insert,
+			});
+			return jsonResponse({ ok: true, event_id: data?.id ?? null }, { request });
+		}
+
+		// Activar un evento programado: lo pone 'active' y cierra cualquier otro
+		// evento activo del tenant (un único evento vivo a la vez → bootstrap
+		// determinista).
+		case "activate_event": {
+			const eventId = String(body.event_id ?? "");
+			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+			// Cerrar otros activos.
+			await supabase
+				.from("tenant_events")
+				.update({ status: "closed" })
+				.eq("tenant_id", tenant_id)
+				.eq("status", "active")
+				.neq("id", eventId);
+			// Activar el elegido.
+			const { error } = await supabase
+				.from("tenant_events")
+				.update({ status: "active" })
+				.eq("id", eventId)
+				.eq("tenant_id", tenant_id);
+			if (error) return jsonResponse({ ok: false, error: "activate_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "activate_event",
+				table_name: "tenant_events", record_id: eventId,
+			});
+			return jsonResponse({ ok: true }, { request });
+		}
+
 		case "start_battle": {
+			// El DJ ELIGE las dos pistas (control creativo, V1.6 B6).
+			const trackA = String(body.track_a ?? "");
+			const trackB = String(body.track_b ?? "");
+			if (!trackA || !trackB) {
+				return jsonResponse({ ok: false, error: "tracks_required" }, { status: 400, request });
+			}
+			if (trackA === trackB) {
+				return jsonResponse({ ok: false, error: "tracks_must_differ" }, { status: 400, request });
+			}
 			const { data } = await supabase.rpc("admin_start_battle", {
 				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
 				p_event_id: String(body.event_id ?? ""),
+				p_track_a: trackA, p_track_b: trackB,
 				p_minutes: Number.isInteger(body.minutes) ? Number(body.minutes) : 3,
 			});
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
@@ -301,6 +386,15 @@ async function bootstrap(
 		.limit(1)
 		.maybeSingle();
 
+	// Histórico de eventos (cualquier estado, recientes primero) — para el
+	// manager: ver fiestas pasadas + programadas y activarlas.
+	const { data: eventsHistory } = await supabase
+		.from("tenant_events")
+		.select("id, name, start_time, end_time, status")
+		.eq("tenant_id", tenant_id)
+		.order("start_time", { ascending: false })
+		.limit(50);
+
 	// Biblioteca global
 	const { data: globalTracks } = await supabase
 		.from("global_tracks")
@@ -338,6 +432,7 @@ async function bootstrap(
 		is_staff: true,
 		tenant_id, // lo usa el cliente para filtrar la suscripción Realtime
 		event: event ?? null,
+		events_history: eventsHistory ?? [],
 		global_tracks: globalTracks ?? [],
 		event_tracks: eventTracks,
 		battle,

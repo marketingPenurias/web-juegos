@@ -257,6 +257,25 @@ export function Jumbotron({
 
 	return (
 		<div ref={containerRef} style={containerStyle} className="min-h-dvh w-full bg-(--jumbo-bg) text-white relative overflow-hidden flex flex-col">
+			{/* Fondo PREMIUM: vídeo en loop del local (bucket tenant-assets).
+			    Si no hay vídeo configurado, se mantiene el fondo sólido
+			    (--jumbo-bg) + blobs como fallback. */}
+			{tenant.bgVideoUrl && (
+				<>
+					<video
+						key={tenant.bgVideoUrl}
+						src={tenant.bgVideoUrl}
+						autoPlay
+						loop
+						muted
+						playsInline
+						aria-hidden="true"
+						className="absolute inset-0 w-full h-full object-cover"
+					/>
+					{/* Capa oscura por DELANTE del vídeo: legibilidad del leaderboard. */}
+					<div className="absolute inset-0 bg-black/65 pointer-events-none" />
+				</>
+			)}
 			<div className="absolute inset-0 pointer-events-none">
 				<div className="absolute -top-32 -left-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-primary)/20 blur-[120px]" />
 				<div className="absolute -bottom-32 -right-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-accent)/15 blur-[140px]" />
@@ -356,7 +375,7 @@ export function Jumbotron({
 						)}
 					</div>
 
-					{showQr && <QrBlock url={venueUrl} />}
+					{showQr && <QrBlock url={venueUrl} fgColor={tenant.theme.primary ?? "#ffffff"} />}
 				</main>
 			)}
 
@@ -401,21 +420,27 @@ function DuelSide({ track, pct, side, origin, barRef, leading }: {
 	);
 }
 
-function QrBlock({ url }: { url: string }) {
+function QrBlock({ url, fgColor }: { url: string; fgColor: string }) {
 	// QR generado 100% en el CLIENTE (qrcode.react) → SVG vectorial, offline,
 	// sin llamadas de red ni rate-limits.  Siempre escaneable.
+	//
+	// Branding (V1.6 Premium): los módulos se pintan con el color primario del
+	// local (`fgColor`) y el fondo es TRANSPARENTE para fundirse con el panel.
+	// Para mantener la legibilidad/escaneabilidad con colores claros, el panel
+	// que lo contiene es oscuro translúcido (alto contraste vs. el fg claro)
+	// en vez del antiguo recuadro blanco.
 	return (
 		<aside className="w-[26rem] shrink-0 flex flex-col items-center justify-center gap-6 rounded-3xl border border-(--jumbo-primary)/40 bg-zinc-900/50 backdrop-blur-md p-8 text-center">
 			<div className="inline-flex items-center gap-2 text-(--jumbo-primary) font-black uppercase tracking-[0.3em] text-sm">
 				<QrCode className="w-5 h-5" aria-hidden="true" /> Pide tu canción
 			</div>
-			<div className="w-72 h-72 rounded-2xl bg-white p-4 flex items-center justify-center">
+			<div className="w-72 h-72 rounded-2xl bg-black/40 border border-white/10 p-4 flex items-center justify-center">
 				<QRCodeSVG
 					value={url}
 					level="M"
 					marginSize={0}
-					fgColor="#0a0a0a"
-					bgColor="#ffffff"
+					fgColor={fgColor || "#ffffff"}
+					bgColor="transparent"
 					className="w-full h-full"
 					aria-label={`QR para ${url}`}
 				/>

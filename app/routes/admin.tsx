@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
 	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
+	Square, Search, CalendarClock, CalendarPlus, Play,
 } from "lucide-react";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 
@@ -33,6 +34,7 @@ type Boot =
 			phase: "ready";
 			tenantId: string;
 			event: EventRow | null;
+			eventsHistory: EventRow[];
 			globalTracks: GlobalTrack[];
 			eventTracks: EventTrack[];
 			battle: Battle;
@@ -124,6 +126,7 @@ export default function Admin() {
 			phase: "ready",
 			tenantId: String(data.tenant_id ?? ""),
 			event: (data.event as EventRow) ?? null,
+			eventsHistory: (data.events_history as EventRow[]) ?? [],
 			globalTracks: (data.global_tracks as GlobalTrack[]) ?? [],
 			eventTracks: (data.event_tracks as EventTrack[]) ?? [],
 			battle: (data.battle as Battle) ?? null,
@@ -281,7 +284,7 @@ export default function Admin() {
 		return <Center><Lock className="w-12 h-12 text-rose-500" /><h1 className="text-2xl font-black italic text-white mt-3">Acceso restringido</h1><p className="text-zinc-400 mt-1">Tu cuenta no tiene rol de staff en este local.</p></Center>;
 	}
 
-	const { event, globalTracks, eventTracks, battle } = boot;
+	const { event, eventsHistory, globalTracks, eventTracks, battle } = boot;
 	const eventSpotifyIds = new Set(eventTracks.map((t) => t.spotify_id));
 
 	return (
@@ -303,8 +306,9 @@ export default function Admin() {
 						<MetricsRow metrics={metrics} />
 						<BattlePanel
 							battle={battle}
+							tracks={eventTracks}
 							busy={busy}
-							onStart={(minutes) => run("start_battle", { event_id: event.id, minutes }, "¡Batalla iniciada!")}
+							onStart={(trackA, trackB, minutes) => run("start_battle", { event_id: event.id, track_a: trackA, track_b: trackB, minutes }, "¡Batalla iniciada!")}
 							onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
 						/>
 						<div className="grid md:grid-cols-2 gap-5">
@@ -319,12 +323,21 @@ export default function Admin() {
 								tracks={eventTracks}
 								busy={busy}
 								onNowPlaying={(id) => run("now_playing", { event_id: event.id, track_id: id }, "Sonando ahora ▶")}
+								onStopAll={() => run("stop_now_playing", { event_id: event.id }, "⏹ Nada sonando")}
 								onUpdate={(id, patch) => run("update_track", { track_id: id, ...patch }, "Canción actualizada")}
 								onRemove={(id) => run("remove_track", { track_id: id }, "Canción quitada")}
 							/>
 						</div>
 					</>
 				)}
+
+				<EventsManager
+					events={eventsHistory}
+					activeId={event?.id ?? null}
+					busy={busy}
+					onCreate={(payload) => run("create_event", payload, "Evento programado")}
+					onActivate={(id) => run("activate_event", { event_id: id }, "Evento activado")}
+				/>
 			</div>
 
 			{toast && (
@@ -416,28 +429,81 @@ function MetricsRow({ metrics }: { metrics: Metrics | null }) {
 	);
 }
 
-function BattlePanel({ battle, busy, onStart, onForceClose }: { battle: Battle; busy: boolean; onStart: (m: number) => void; onForceClose: () => void }) {
+function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
+	battle: Battle; tracks: EventTrack[]; busy: boolean;
+	onStart: (trackA: string, trackB: string, minutes: number) => void;
+	onForceClose: () => void;
+}) {
 	const [minutes, setMinutes] = useState(3);
+	const [trackA, setTrackA] = useState("");
+	const [trackB, setTrackB] = useState("");
 	const live = battle && battle.status === "live";
+
+	// Sólo pistas elegibles: no sonadas (el RPC también lo valida server-side).
+	const eligible = tracks.filter((t) => !t.is_played);
+	const canStart = !!trackA && !!trackB && trackA !== trackB;
+
 	return (
-		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-wrap items-center gap-3">
-			<div className="flex items-center gap-2 mr-auto">
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-4">
+			<div className="flex items-center gap-2">
 				<Trophy className="w-5 h-5 text-amber-400" />
 				<span className="font-black">Batalla de Temas</span>
 				{live && <span className="text-[10px] uppercase tracking-widest text-rose-300 font-black bg-rose-950/50 border border-rose-500/40 px-2 py-0.5 rounded-full">EN VIVO</span>}
 			</div>
+
 			{!live ? (
 				<>
-					<div className="flex items-center gap-2">
-						<label className="text-xs text-zinc-400 font-bold">Minutos</label>
-						<input type="number" min={1} max={15} value={minutes} onChange={(e) => setMinutes(Math.max(1, Number(e.target.value) || 3))} className="w-16 h-10 rounded-xl bg-zinc-950 border border-zinc-800 px-2 text-center font-bold" />
+					<p className="text-xs text-zinc-500 font-bold">Elige las dos canciones que se enfrentan:</p>
+					<div className="grid sm:grid-cols-2 gap-3">
+						<BattleSelect label="Tema A" value={trackA} onChange={setTrackA} tracks={eligible} disabledId={trackB} accent="cyan" />
+						<BattleSelect label="Tema B" value={trackB} onChange={setTrackB} tracks={eligible} disabledId={trackA} accent="amber" />
 					</div>
-					<button type="button" disabled={busy} onClick={() => onStart(minutes)} className="h-10 px-5 rounded-xl bg-amber-400 text-black font-black active:scale-95 disabled:opacity-50">Iniciar Batalla</button>
+					<div className="flex flex-wrap items-center gap-3">
+						<div className="flex items-center gap-2">
+							<label className="text-xs text-zinc-400 font-bold">Minutos</label>
+							<input type="number" min={1} max={15} value={minutes} onChange={(e) => setMinutes(Math.max(1, Number(e.target.value) || 3))} className="w-16 h-10 rounded-xl bg-zinc-950 border border-zinc-800 px-2 text-center font-bold" />
+						</div>
+						<button
+							type="button"
+							disabled={busy || !canStart}
+							onClick={() => onStart(trackA, trackB, minutes)}
+							className="ml-auto h-10 px-5 rounded-xl bg-amber-400 text-black font-black active:scale-95 disabled:opacity-40"
+						>
+							⚔ Iniciar Batalla
+						</button>
+					</div>
+					{eligible.length < 2 && (
+						<p className="text-[11px] text-zinc-500">Necesitas al menos 2 canciones sin sonar en la fiesta para montar una batalla.</p>
+					)}
 				</>
 			) : (
-				<button type="button" disabled={busy} onClick={onForceClose} className="h-10 px-5 rounded-xl bg-rose-500 text-black font-black active:scale-95 disabled:opacity-50">Forzar Cierre de Batalla</button>
+				<button type="button" disabled={busy} onClick={onForceClose} className="h-10 px-5 rounded-xl bg-rose-500 text-black font-black active:scale-95 disabled:opacity-50 self-start">Forzar Cierre de Batalla</button>
 			)}
 		</section>
+	);
+}
+
+function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
+	label: string; value: string; onChange: (v: string) => void;
+	tracks: EventTrack[]; disabledId: string; accent: "cyan" | "amber";
+}) {
+	const ring = accent === "cyan" ? "border-cyan-500/40" : "border-amber-500/40";
+	return (
+		<div>
+			<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">{label}</label>
+			<select
+				value={value}
+				onChange={(e) => onChange(e.target.value)}
+				className={`w-full h-11 rounded-xl bg-zinc-950 border ${ring} px-3 font-bold text-sm text-white`}
+			>
+				<option value="">— Elegir canción —</option>
+				{tracks.map((t) => (
+					<option key={t.id} value={t.id} disabled={t.id === disabledId}>
+						{t.title} · {t.artist} ({t.total_votes})
+					</option>
+				))}
+			</select>
+		</div>
 	);
 }
 
@@ -446,6 +512,8 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 	onBulk: (raw: string) => void; onAdd: (id: string) => void;
 }) {
 	const [raw, setRaw] = useState("");
+	const [query, setQuery] = useState("");
+	const filtered = filterTracks(tracks, query);
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0">
 			<h2 className="font-black flex items-center gap-2"><Music2 className="w-5 h-5 text-cyan-400" /> Biblioteca Global</h2>
@@ -457,9 +525,12 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 			/>
 			<button type="button" disabled={busy || !raw.trim()} onClick={() => { onBulk(raw); setRaw(""); }} className="h-10 rounded-xl bg-cyan-500 text-black font-black active:scale-95 disabled:opacity-40">Cargar a biblioteca</button>
 
+			<SearchInput value={query} onChange={setQuery} placeholder="Buscar en la biblioteca…" />
+
 			<div className="flex flex-col gap-2 overflow-y-auto max-h-[420px] no-scrollbar">
 				{tracks.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Biblioteca vacía. Pega canciones arriba.</p>}
-				{tracks.map((tk) => {
+				{tracks.length > 0 && filtered.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Sin resultados para “{query}”.</p>}
+				{filtered.map((tk) => {
 					const added = eventSpotifyIds.has(tk.spotify_id);
 					return (
 						<div key={tk.id} className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-2.5">
@@ -483,19 +554,38 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 	);
 }
 
-function PlaylistPanel({ tracks, busy, onNowPlaying, onUpdate, onRemove }: {
+function PlaylistPanel({ tracks, busy, onNowPlaying, onStopAll, onUpdate, onRemove }: {
 	tracks: EventTrack[]; busy: boolean;
 	onNowPlaying: (id: string) => void;
+	onStopAll: () => void;
 	onUpdate: (id: string, patch: Record<string, unknown>) => void;
 	onRemove: (id: string) => void;
 }) {
 	const [editing, setEditing] = useState<string | null>(null);
+	const [query, setQuery] = useState("");
+	const filtered = filterTracks(tracks, query);
+	const somethingPlaying = tracks.some((t) => t.is_played);
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0">
-			<h2 className="font-black flex items-center gap-2"><Radio className="w-5 h-5 text-lime-400" /> Control de Pista (esta noche)</h2>
+			<div className="flex items-center justify-between gap-2">
+				<h2 className="font-black flex items-center gap-2"><Radio className="w-5 h-5 text-lime-400" /> Control de Pista (esta noche)</h2>
+				<button
+					type="button"
+					disabled={busy || !somethingPlaying}
+					onClick={onStopAll}
+					title="Dejar de marcar cualquier canción como sonando"
+					className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-rose-500/15 text-rose-300 border border-rose-500/40 font-black text-xs active:scale-95 disabled:opacity-40"
+				>
+					<Square className="w-3.5 h-3.5 fill-current" /> Parar todo
+				</button>
+			</div>
+
+			<SearchInput value={query} onChange={setQuery} placeholder="Buscar canción en la fiesta…" />
+
 			<div className="flex flex-col gap-2 overflow-y-auto max-h-[520px] no-scrollbar">
 				{tracks.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Aún no hay canciones en la fiesta. Añádelas desde la biblioteca.</p>}
-				{tracks.map((tk) => (
+				{tracks.length > 0 && filtered.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Sin resultados para “{query}”.</p>}
+				{filtered.map((tk) => (
 					<PlaylistRow
 						key={tk.id}
 						track={tk}
@@ -538,22 +628,163 @@ function PlaylistRow({ track, busy, editing, onEdit, onCancel, onNowPlaying, onS
 	}
 
 	return (
-		<div className={`flex items-center gap-3 rounded-xl border p-2.5 ${track.is_played ? "bg-lime-500/10 border-lime-500/50" : "bg-zinc-950/60 border-zinc-800"}`}>
+		<div className={`flex items-center gap-3 rounded-xl border p-2.5 ${track.is_played ? "bg-lime-500/10 border-2 border-lime-400 shadow-[0_0_18px_rgba(57,255,20,0.35)]" : "bg-zinc-950/60 border-zinc-800"}`}>
 			<div className="w-9 text-center shrink-0">
 				<span className="text-sm font-black tabular-nums text-zinc-400">{track.total_votes}</span>
 			</div>
 			<div className="flex-1 min-w-0">
-				<p className="text-sm font-bold truncate flex items-center gap-1.5">
-					{track.is_played && <span className="text-[9px] uppercase tracking-widest text-lime-300 bg-lime-500/20 px-1.5 py-0.5 rounded-full">▶ Sonando</span>}
-					{track.title}
-				</p>
+				<p className="text-sm font-bold truncate">{track.title}</p>
 				<p className="text-[11px] text-zinc-500 truncate">{track.artist}</p>
 			</div>
-			<button type="button" disabled={busy || track.is_played} onClick={onNowPlaying} title="Sonando ahora" className={`shrink-0 h-9 px-3 rounded-lg font-black text-xs active:scale-95 ${track.is_played ? "bg-lime-500/15 text-lime-300 border border-lime-500/40" : "bg-lime-400 text-black"}`}>
-				{track.is_played ? "▶" : "Sonando"}
-			</button>
+			{/* Semántica visual (V1.6 B5): la pista activa NO tiene botón de
+			    acción — se DESTACA con borde verde + estado.  El resto muestran
+			    la ACCIÓN "▶ Poner" en gris/azul (no verde) para no confundir
+			    estado con acción. */}
+			{track.is_played ? (
+				<span className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-lime-500/20 text-lime-300 border border-lime-500/50 font-black text-xs uppercase tracking-wide">
+					🎧 Sonando ahora
+				</span>
+			) : (
+				<button
+					type="button"
+					disabled={busy}
+					onClick={onNowPlaying}
+					title="Poner esta canción ahora"
+					className="shrink-0 inline-flex items-center gap-1 h-9 px-3 rounded-lg bg-sky-900/70 text-sky-200 border border-sky-700/60 hover:bg-sky-800/70 font-black text-xs active:scale-95 disabled:opacity-50"
+				>
+					▶ Poner
+				</button>
+			)}
 			<button type="button" onClick={onEdit} className="shrink-0 w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 flex items-center justify-center active:scale-95"><Pencil className="w-4 h-4" /></button>
 			<button type="button" disabled={busy} onClick={onRemove} className="shrink-0 w-9 h-9 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center justify-center active:scale-95"><Trash2 className="w-4 h-4" /></button>
 		</div>
+	);
+}
+
+// ── Helpers compartidos ──────────────────────────────────────────────
+
+/**
+ * Normaliza acentos/tildes para búsqueda en español: "Despechá" ≈ "despecha".
+ * NFD descompone la letra acentuada en base + diacrítico y borramos el rango
+ * de combining marks (U+0300–U+036F).
+ */
+const removeAccents = (str: string) =>
+	str.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** Filtro client-side instantáneo por título o artista (búsqueda B3/B4),
+ *  insensible a tildes en ambos lados (query y datos). */
+function filterTracks<T extends { title: string; artist: string }>(tracks: T[], query: string): T[] {
+	const q = removeAccents(query.trim());
+	if (!q) return tracks;
+	return tracks.filter(
+		(t) => removeAccents(t.title).includes(q) || removeAccents(t.artist).includes(q),
+	);
+}
+
+function SearchInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+	return (
+		<div className="relative">
+			<Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+			<input
+				type="search"
+				value={value}
+				onChange={(e) => onChange(e.target.value)}
+				placeholder={placeholder}
+				className="w-full h-10 rounded-xl bg-zinc-950 border border-zinc-800 pl-9 pr-3 text-sm text-white"
+			/>
+		</div>
+	);
+}
+
+/** Fecha/hora amigable en hora de Madrid. */
+function fmtMadrid(iso?: string | null): string {
+	if (!iso) return "—";
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return "—";
+	return new Intl.DateTimeFormat("es-ES", {
+		timeZone: VENUE_TZ, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+	}).format(d);
+}
+
+const EVENT_STATUS_META: Record<string, { label: string; cls: string }> = {
+	active: { label: "Activo", cls: "text-lime-300 bg-lime-500/15 border-lime-500/40" },
+	scheduled: { label: "Programado", cls: "text-cyan-300 bg-cyan-500/15 border-cyan-500/40" },
+	draft: { label: "Borrador", cls: "text-amber-300 bg-amber-500/15 border-amber-500/40" },
+	closed: { label: "Cerrado", cls: "text-zinc-400 bg-zinc-800/60 border-zinc-700" },
+	ended: { label: "Cerrado", cls: "text-zinc-400 bg-zinc-800/60 border-zinc-700" },
+};
+
+// ── Histórico + programación de eventos (V1.6 B1/B2) ─────────────────
+function EventsManager({ events, activeId, busy, onCreate, onActivate }: {
+	events: EventRow[]; activeId: string | null; busy: boolean;
+	onCreate: (payload: Record<string, unknown>) => void;
+	onActivate: (id: string) => void;
+}) {
+	const [name, setName] = useState("");
+	const [start, setStart] = useState("");
+	const [end, setEnd] = useState("");
+	const canCreate = !!name.trim() && !!start && !busy;
+
+	const submit = () => {
+		if (!canCreate) return;
+		onCreate({ name: name.trim(), start_time: fromLocalInput(start), end_time: fromLocalInput(end) });
+		setName(""); setStart(""); setEnd("");
+	};
+
+	return (
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-4">
+			<h2 className="font-black flex items-center gap-2"><CalendarClock className="w-5 h-5 text-cyan-400" /> Eventos</h2>
+
+			{/* Programar evento futuro */}
+			<div className="rounded-2xl bg-zinc-950/60 border border-zinc-800 p-4 flex flex-col gap-3">
+				<p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold flex items-center gap-1.5"><CalendarPlus className="w-3.5 h-3.5" /> Programar nuevo evento</p>
+				<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre de la fiesta" className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 font-bold text-white text-sm" />
+				<div className="grid grid-cols-2 gap-3">
+					<div>
+						<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Empieza</label>
+						<input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-white text-sm" />
+					</div>
+					<div>
+						<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Termina (opcional)</label>
+						<input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-white text-sm" />
+					</div>
+				</div>
+				<button type="button" disabled={!canCreate} onClick={submit} className="h-10 rounded-xl bg-cyan-500 text-black font-black active:scale-95 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+					<CalendarPlus className="w-4 h-4" /> Programar evento
+				</button>
+			</div>
+
+			{/* Histórico */}
+			<div className="flex flex-col gap-2">
+				{events.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Sin eventos todavía.</p>}
+				{events.map((ev) => {
+					const meta = EVENT_STATUS_META[ev.status] ?? { label: ev.status, cls: "text-zinc-400 bg-zinc-800/60 border-zinc-700" };
+					const isActive = ev.id === activeId || ev.status === "active";
+					const canActivate = !isActive && (ev.status === "scheduled" || ev.status === "draft" || ev.status === "closed" || ev.status === "ended");
+					return (
+						<div key={ev.id} className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
+							<div className="flex-1 min-w-0">
+								<p className="text-sm font-bold truncate flex items-center gap-2">
+									{ev.name}
+									<span className={`text-[9px] uppercase tracking-widest font-black px-1.5 py-0.5 rounded-full border ${meta.cls}`}>{meta.label}</span>
+								</p>
+								<p className="text-[11px] text-zinc-500 truncate">{fmtMadrid(ev.start_time)}{ev.end_time ? ` → ${fmtMadrid(ev.end_time)}` : ""}</p>
+							</div>
+							{canActivate && (
+								<button
+									type="button"
+									disabled={busy}
+									onClick={() => onActivate(ev.id)}
+									title="Activar este evento ahora"
+									className="shrink-0 inline-flex items-center gap-1 h-9 px-3 rounded-lg bg-lime-400 text-black font-black text-xs active:scale-95 disabled:opacity-50"
+								>
+									<Play className="w-3.5 h-3.5 fill-current" /> Activar
+								</button>
+							)}
+						</div>
+					);
+				})}
+			</div>
+		</section>
 	);
 }

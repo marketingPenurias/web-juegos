@@ -126,7 +126,7 @@ export function TinderMusical() {
 			duration: 0.55,
 			ease: "power3.in",
 			force3D: true,
-			onComplete: async () => {
+			onComplete: () => {
 				const next = index + 1;
 				const nextStats = {
 					likes: stats.likes + (dir === "like" ? 1 : 0),
@@ -148,26 +148,30 @@ export function TinderMusical() {
 				// Likes persisten como `vote_track` con tipo 'free' — el server
 				// es la fuente de verdad; los dislikes no escriben (ahorro de
 				// índice + privacidad del usuario).
+				//
+				// FIRE-AND-FORGET (optimista): NO esperamos a la red para avanzar
+				// la carta — antes el `await castVote` aquí dejaba el "like" lento
+				// y "roto" frente al "dislike" (que sólo avanza local).  Ahora el
+				// voto viaja en background y la carta avanza idéntico en ambos
+				// sentidos.  `already_voted` se trata como info silenciosa (no es
+				// un error real: la canción ya tenía tu voto); sólo avisamos si
+				// falla algo de verdad (red caída, FK, etc.).
 				if (dir === "like") {
 					markDaily("tinder_swipe"); // misión reactiva inmediata
-					const res = await castVote({
+					void castVote({
 						track_id: song.id,
 						vote_type: "free",
 						tokens_spent: 0,
+					}).then((res) => {
+						if (!res.ok && res.error !== "already_voted") {
+							setTone("warning");
+							setToast(
+								res.detail
+									? `${res.error}: ${res.detail}`
+									: t("tinder.errVote", "No se pudo registrar el voto"),
+							);
+						}
 					});
-					if (!res.ok) {
-						setTone("warning");
-						// Modo diagnóstico piloto: si el backend manda
-						// `detail` (mensaje raw del RPC) lo mostramos
-						// directamente — ayuda a cazar FK violations,
-						// unique violations o RAISE en vivo sin
-						// abrir wrangler tail.
-						setToast(
-							res.detail
-								? `${res.error}: ${res.detail}`
-								: t("tinder.errVote", "No se pudo registrar el voto"),
-						);
-					}
 				}
 
 				if (next >= REQUIRED) {

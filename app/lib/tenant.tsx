@@ -15,6 +15,8 @@ export type Tenant = {
 	name: string;
 	theme: TenantTheme;
 	status?: string;
+	/** URL del vídeo de fondo del Jumbotron (bucket tenant-assets). */
+	bgVideoUrl?: string | null;
 };
 
 export const DEFAULT_THEME: Required<TenantTheme> = {

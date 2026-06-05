@@ -112,7 +112,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 	const { data, error } = await supabase
 		.from("tenants")
-		.select("id, slug, name, theme, status")
+		.select("id, slug, name, theme, status, bg_video_url")
 		.eq("slug", slug)
 		.maybeSingle();
 
@@ -146,6 +146,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		slug: data.slug as string,
 		name: data.name as string,
 		status: (data.status as string) ?? undefined,
+		bgVideoUrl: (data.bg_video_url as string | null) ?? null,
 		theme: {
 			...DEFAULT_THEME,
 			...((data.theme as Record<string, string> | null) ?? {}),
