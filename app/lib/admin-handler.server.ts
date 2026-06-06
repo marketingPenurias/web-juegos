@@ -403,12 +403,9 @@ async function bootstrap(
 	supabase: ReturnType<typeof getServiceSupabase>,
 	tenant_id: string,
 ) {
-	// Cierre perezoso de eventos vencidos (end_time < now): evita que un
-	// evento quede 'active' para siempre.  El cron lo hace cada 15 min, esto
-	// lo hace YA al abrir el panel.
-	await supabase.rpc("close_due_events", { p_tenant_id: tenant_id });
-
-	// Evento activo (si lo hay)
+	// Evento activo (si lo hay).  El cierre de eventos vencidos lo gestiona
+	// EXCLUSIVAMENTE el job pg_cron (cada minuto) — los loaders se mantienen
+	// rápidos, sin RPCs de mantenimiento en el camino crítico.
 	const { data: event } = await supabase
 		.from("tenant_events")
 		.select("id, name, start_time, end_time, status")

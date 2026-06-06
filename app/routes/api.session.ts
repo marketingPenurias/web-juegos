@@ -252,10 +252,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	}
 
 	// ── Active event ──────────────────────────────────────────────────
-	// Cierre perezoso de eventos vencidos antes de leer el activo: si la
-	// fiesta de anoche no se cerró, no debe seguir saliendo como activa en
-	// la app móvil (Tinder/Jukebox).
-	await supabase.rpc("close_due_events", { p_tenant_id: tenant_id });
+	// El cierre de eventos vencidos lo gestiona el cron (cada minuto); aquí
+	// solo leemos el activo, sin RPC de mantenimiento en el camino crítico.
 	let active_event: { id: string; name: string } | null = null;
 	{
 		const { data, error } = await supabase

@@ -554,9 +554,18 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 								type="button"
 								disabled={busy || added}
 								onClick={() => onAdd(tk.id)}
-								className={`shrink-0 h-9 px-3 rounded-lg font-black text-xs inline-flex items-center gap-1 active:scale-95 ${added ? "bg-lime-500/15 text-lime-300 border border-lime-500/40 cursor-default" : "bg-cyan-500 text-black"}`}
+								title={added ? "Ya está en la fiesta de esta noche" : "Inyectar en la pista de esta noche"}
+								className={`shrink-0 h-10 rounded-xl font-black text-xs inline-flex items-center gap-1.5 active:scale-95 transition-colors ${
+									added
+										? "px-3 bg-lime-500/15 text-lime-300 border border-lime-500/40 cursor-default"
+										: "px-4 bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_18px_rgba(16,185,129,0.55)]"
+								}`}
 							>
-								{added ? <><Check className="w-4 h-4" /> En el evento</> : <><Plus className="w-4 h-4" /> Al evento</>}
+								{added ? (
+									<><Check className="w-4 h-4" /> En la pista</>
+								) : (
+									<><Plus className="w-5 h-5" strokeWidth={3} /> Al evento</>
+								)}
 							</button>
 						</div>
 					);
@@ -805,11 +814,27 @@ function EventsManager({ events, activeId, busy, onCreate, onActivate }: {
 function TemplatesPanel({ templates, hasTracks, busy, onSave, onApply, onDelete }: {
 	templates: Template[]; hasTracks: boolean; busy: boolean;
 	onSave: (name: string) => void;
-	onApply: (id: string) => void;
+	onApply: (id: string) => Promise<unknown>;
 	onDelete: (id: string) => void;
 }) {
 	const [name, setName] = useState("");
+	// Estado por-plantilla: bloquea el botón y muestra "Aplicando…" hasta que
+	// la promesa resuelve → evita misclicks y pulsaciones repetidas que
+	// saturarían la pista en directo.
+	const [applyingId, setApplyingId] = useState<string | null>(null);
 	const canSave = !!name.trim() && hasTracks && !busy;
+
+	const handleApply = async (id: string) => {
+		if (applyingId) return; // ya hay una aplicación en curso
+		// eslint-disable-next-line no-alert
+		if (!window.confirm("¿Seguro que quieres inyectar esta plantilla en la pista actual?")) return;
+		setApplyingId(id);
+		try {
+			await onApply(id);
+		} finally {
+			setApplyingId(null);
+		}
+	};
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-4">
 			<div>
@@ -845,16 +870,20 @@ function TemplatesPanel({ templates, hasTracks, busy, onSave, onApply, onDelete 
 						</div>
 						<button
 							type="button"
-							disabled={busy}
-							onClick={() => onApply(tpl.id)}
+							disabled={busy || applyingId !== null}
+							onClick={() => void handleApply(tpl.id)}
 							title="Añadir las canciones de esta plantilla al evento actual"
 							className="shrink-0 inline-flex items-center gap-1 h-9 px-3 rounded-lg bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/40 font-black text-xs active:scale-95 disabled:opacity-50"
 						>
-							<Copy className="w-3.5 h-3.5" /> Aplicar
+							{applyingId === tpl.id ? (
+								<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Aplicando…</>
+							) : (
+								<><Copy className="w-3.5 h-3.5" /> Aplicar</>
+							)}
 						</button>
 						<button
 							type="button"
-							disabled={busy}
+							disabled={busy || applyingId !== null}
 							onClick={() => onDelete(tpl.id)}
 							title="Borrar plantilla"
 							className="shrink-0 w-9 h-9 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center justify-center active:scale-95 disabled:opacity-50"

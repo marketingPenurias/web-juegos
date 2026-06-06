@@ -6,9 +6,10 @@
 --   1. AUTO-CIERRE de eventos vencidos.  Bug detectado: un evento quedaba
 --      'active' indefinidamente aunque su `end_time` ya hubiese pasado (no
 --      había NINGÚN mecanismo de cierre — sólo se autocerraban las batallas).
---      Solución: función `close_due_events()` + job pg_cron cada 15 min, y
---      llamadas perezosas desde el backend (bootstrap/session/tv) para que
---      el cierre sea inmediato al cargar, no sólo cada cuarto de hora.
+--      Solución: función `close_due_events()` + job pg_cron CADA MINUTO.
+--      El cierre vive exclusivamente en el cron (cierre casi en tiempo real)
+--      — los loaders de la API NO ejecutan RPCs de mantenimiento, para no
+--      añadir latencia al camino crítico ni "fiestas zombie".
 --
 --   2. PLANTILLAS de setlist: el DJ guarda el tracklist de una noche como
 --      plantilla con nombre y la aplica a cualquier evento futuro (repetir
@@ -39,14 +40,14 @@ $$;
 revoke execute on function public.close_due_events(uuid) from public, anon, authenticated;
 grant  execute on function public.close_due_events(uuid) to service_role;
 
--- Job pg_cron cada 15 min (red de seguridad global). Idempotente.
+-- Job pg_cron CADA MINUTO (cierre casi en tiempo real). Idempotente.
 do $$
 begin
 	perform cron.unschedule('close-due-events');
 exception when others then
 	null; -- el job aún no existía
 end $$;
-select cron.schedule('close-due-events', '*/15 * * * *', $$select public.close_due_events();$$);
+select cron.schedule('close-due-events', '* * * * *', $$select public.close_due_events();$$);
 
 
 -- ── 2. Plantillas de setlist ─────────────────────────────────────────────
