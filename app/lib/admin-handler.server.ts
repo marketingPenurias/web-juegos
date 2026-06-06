@@ -16,7 +16,8 @@ import { pickTenantSlug } from "./tenant-resolver.server";
  *   Operaciones (`op`):
  *     bootstrap · open_party · create_event · activate_event · update_event ·
  *     bulk_global · add_track · update_track · remove_track · now_playing ·
- *     stop_now_playing · start_battle · force_close_battle · metrics
+ *     stop_now_playing · start_battle · force_close_battle · metrics ·
+ *     save_template · apply_template · delete_template
  */
 
 type AdminBody = {
@@ -32,6 +33,7 @@ type AdminBody = {
 	track_id?: string;
 	track_a?: string;
 	track_b?: string;
+	template_id?: string;
 	title?: string;
 	artist?: string;
 	cover_image_url?: string;
@@ -367,6 +369,31 @@ export async function handleAdminAction(
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
 		}
 
+		// ── Plantillas de setlist ──────────────────────────────────────
+		case "save_template": {
+			const { data } = await supabase.rpc("admin_save_template", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: String(body.event_id ?? ""), p_name: String(body.name ?? ""),
+			});
+			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
+		}
+
+		case "apply_template": {
+			const { data } = await supabase.rpc("admin_apply_template", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: String(body.event_id ?? ""), p_template_id: String(body.template_id ?? ""),
+			});
+			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
+		}
+
+		case "delete_template": {
+			const { data } = await supabase.rpc("admin_delete_template", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_template_id: String(body.template_id ?? ""),
+			});
+			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
+		}
+
 		default:
 			return jsonResponse({ ok: false, error: "unknown_op" }, { status: 400, request });
 	}
@@ -376,6 +403,11 @@ async function bootstrap(
 	supabase: ReturnType<typeof getServiceSupabase>,
 	tenant_id: string,
 ) {
+	// Cierre perezoso de eventos vencidos (end_time < now): evita que un
+	// evento quede 'active' para siempre.  El cron lo hace cada 15 min, esto
+	// lo hace YA al abrir el panel.
+	await supabase.rpc("close_due_events", { p_tenant_id: tenant_id });
+
 	// Evento activo (si lo hay)
 	const { data: event } = await supabase
 		.from("tenant_events")
@@ -394,6 +426,23 @@ async function bootstrap(
 		.eq("tenant_id", tenant_id)
 		.order("start_time", { ascending: false })
 		.limit(50);
+
+	// Plantillas de setlist (con nº de temas vía conteo embebido).
+	const { data: templatesRaw } = await supabase
+		.from("event_templates")
+		.select("id, name, created_at, event_template_tracks(count)")
+		.eq("tenant_id", tenant_id)
+		.order("created_at", { ascending: false })
+		.limit(50);
+	const templates = (templatesRaw ?? []).map((t) => {
+		const row = t as { id: string; name: string; created_at: string; event_template_tracks?: { count: number }[] };
+		return {
+			id: row.id,
+			name: row.name,
+			created_at: row.created_at,
+			track_count: row.event_template_tracks?.[0]?.count ?? 0,
+		};
+	});
 
 	// Biblioteca global
 	const { data: globalTracks } = await supabase
@@ -433,6 +482,7 @@ async function bootstrap(
 		tenant_id, // lo usa el cliente para filtrar la suscripción Realtime
 		event: event ?? null,
 		events_history: eventsHistory ?? [],
+		templates,
 		global_tracks: globalTracks ?? [],
 		event_tracks: eventTracks,
 		battle,

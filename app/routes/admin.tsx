@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
 	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
-	Square, Search, CalendarClock, CalendarPlus, Play,
+	Square, Search, CalendarClock, CalendarPlus, Play, ListMusic, Copy,
 } from "lucide-react";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 
@@ -25,6 +25,7 @@ type GlobalTrack = { id: string; spotify_id: string; title: string; artist: stri
 type EventTrack = GlobalTrack & { total_votes: number; is_played: boolean };
 type Battle = { id: string; status: string; ends_at: string } | null;
 type Metrics = { total_votes: number; tokens_spent_today: number; checkins_today: number; active_players: number };
+type Template = { id: string; name: string; created_at: string; track_count: number };
 
 type Boot =
 	| { phase: "loading" }
@@ -35,6 +36,7 @@ type Boot =
 			tenantId: string;
 			event: EventRow | null;
 			eventsHistory: EventRow[];
+			templates: Template[];
 			globalTracks: GlobalTrack[];
 			eventTracks: EventTrack[];
 			battle: Battle;
@@ -127,6 +129,7 @@ export default function Admin() {
 			tenantId: String(data.tenant_id ?? ""),
 			event: (data.event as EventRow) ?? null,
 			eventsHistory: (data.events_history as EventRow[]) ?? [],
+			templates: (data.templates as Template[]) ?? [],
 			globalTracks: (data.global_tracks as GlobalTrack[]) ?? [],
 			eventTracks: (data.event_tracks as EventTrack[]) ?? [],
 			battle: (data.battle as Battle) ?? null,
@@ -284,7 +287,7 @@ export default function Admin() {
 		return <Center><Lock className="w-12 h-12 text-rose-500" /><h1 className="text-2xl font-black italic text-white mt-3">Acceso restringido</h1><p className="text-zinc-400 mt-1">Tu cuenta no tiene rol de staff en este local.</p></Center>;
 	}
 
-	const { event, eventsHistory, globalTracks, eventTracks, battle } = boot;
+	const { event, eventsHistory, templates, globalTracks, eventTracks, battle } = boot;
 	const eventSpotifyIds = new Set(eventTracks.map((t) => t.spotify_id));
 
 	return (
@@ -328,6 +331,14 @@ export default function Admin() {
 								onRemove={(id) => run("remove_track", { track_id: id }, "Canción quitada")}
 							/>
 						</div>
+						<TemplatesPanel
+							templates={templates}
+							hasTracks={eventTracks.length > 0}
+							busy={busy}
+							onSave={(name) => run("save_template", { event_id: event.id, name }, "Plantilla guardada")}
+							onApply={(id) => run("apply_template", { event_id: event.id, template_id: id }, "Plantilla aplicada")}
+							onDelete={(id) => run("delete_template", { template_id: id }, "Plantilla borrada")}
+						/>
 					</>
 				)}
 
@@ -517,6 +528,7 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0">
 			<h2 className="font-black flex items-center gap-2"><Music2 className="w-5 h-5 text-cyan-400" /> Biblioteca Global</h2>
+			<p className="text-[11px] text-zinc-500 -mt-1">Tu catálogo guardado. Pulsa <span className="text-cyan-300 font-bold">+ Al evento</span> en cada tema para meterlo en la fiesta de esta noche →</p>
 			<textarea
 				value={raw}
 				onChange={(e) => setRaw(e.target.value)}
@@ -544,7 +556,7 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 								onClick={() => onAdd(tk.id)}
 								className={`shrink-0 h-9 px-3 rounded-lg font-black text-xs inline-flex items-center gap-1 active:scale-95 ${added ? "bg-lime-500/15 text-lime-300 border border-lime-500/40 cursor-default" : "bg-cyan-500 text-black"}`}
 							>
-								{added ? <><Check className="w-4 h-4" /> Añadida</> : <><Plus className="w-4 h-4" /> Añadir</>}
+								{added ? <><Check className="w-4 h-4" /> En el evento</> : <><Plus className="w-4 h-4" /> Al evento</>}
 							</button>
 						</div>
 					);
@@ -784,6 +796,73 @@ function EventsManager({ events, activeId, busy, onCreate, onActivate }: {
 						</div>
 					);
 				})}
+			</div>
+		</section>
+	);
+}
+
+// ── Plantillas de setlist (V1.6.1) ───────────────────────────────────
+function TemplatesPanel({ templates, hasTracks, busy, onSave, onApply, onDelete }: {
+	templates: Template[]; hasTracks: boolean; busy: boolean;
+	onSave: (name: string) => void;
+	onApply: (id: string) => void;
+	onDelete: (id: string) => void;
+}) {
+	const [name, setName] = useState("");
+	const canSave = !!name.trim() && hasTracks && !busy;
+	return (
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-4">
+			<div>
+				<h2 className="font-black flex items-center gap-2"><ListMusic className="w-5 h-5 text-fuchsia-400" /> Plantillas de setlist</h2>
+				<p className="text-[11px] text-zinc-500 mt-1">Guarda el setlist de esta noche y reutilízalo en futuras fiestas con un clic.</p>
+			</div>
+
+			{/* Guardar la noche actual */}
+			<div className="rounded-2xl bg-zinc-950/60 border border-zinc-800 p-4 flex flex-col sm:flex-row gap-3 sm:items-end">
+				<div className="flex-1">
+					<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Nombre de la plantilla</label>
+					<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Reggaetón Viernes" className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 font-bold text-white text-sm" />
+				</div>
+				<button
+					type="button"
+					disabled={!canSave}
+					onClick={() => { onSave(name.trim()); setName(""); }}
+					title={hasTracks ? "Guardar el setlist actual como plantilla" : "Añade canciones al evento primero"}
+					className="shrink-0 h-11 px-4 rounded-xl bg-fuchsia-500 text-white font-black active:scale-95 disabled:opacity-40 inline-flex items-center justify-center gap-1.5"
+				>
+					<Save className="w-4 h-4" /> Guardar setlist
+				</button>
+			</div>
+
+			{/* Listado de plantillas */}
+			<div className="flex flex-col gap-2">
+				{templates.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Sin plantillas todavía. Guarda el setlist de esta noche para repetirlo.</p>}
+				{templates.map((tpl) => (
+					<div key={tpl.id} className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
+						<div className="flex-1 min-w-0">
+							<p className="text-sm font-bold truncate">{tpl.name}</p>
+							<p className="text-[11px] text-zinc-500">{tpl.track_count} {tpl.track_count === 1 ? "canción" : "canciones"} · {fmtMadrid(tpl.created_at)}</p>
+						</div>
+						<button
+							type="button"
+							disabled={busy}
+							onClick={() => onApply(tpl.id)}
+							title="Añadir las canciones de esta plantilla al evento actual"
+							className="shrink-0 inline-flex items-center gap-1 h-9 px-3 rounded-lg bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/40 font-black text-xs active:scale-95 disabled:opacity-50"
+						>
+							<Copy className="w-3.5 h-3.5" /> Aplicar
+						</button>
+						<button
+							type="button"
+							disabled={busy}
+							onClick={() => onDelete(tpl.id)}
+							title="Borrar plantilla"
+							className="shrink-0 w-9 h-9 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center justify-center active:scale-95 disabled:opacity-50"
+						>
+							<Trash2 className="w-4 h-4" />
+						</button>
+					</div>
+				))}
 			</div>
 		</section>
 	);

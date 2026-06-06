@@ -68,7 +68,12 @@ export function Jumbotron({
 	const tracksRef = useRef<Track[]>(tracks);
 	tracksRef.current = tracks;
 
-	const venueUrl = `https://${tenant.slug}.nightgraph.es`;
+	// Dominio real del local (.io).  El QR lleva `?ref=QR-TV` para atribuir
+	// los escaneos que entran por la pantalla — el root loader captura `ref`
+	// en cookie y lo consume el pipeline de atribución.
+	const venueHost = `${tenant.slug}.nightgraph.io`;
+	const venueUrl = `https://${venueHost}`;
+	const qrTarget = `${venueUrl}/?ref=QR-TV`;
 
 	const sorted = useMemo(
 		() => [...tracks].sort((a, b) => b.total_votes - a.total_votes).slice(0, MAX_ROWS),
@@ -375,13 +380,13 @@ export function Jumbotron({
 						)}
 					</div>
 
-					{showQr && <QrBlock url={venueUrl} fgColor={tenant.theme.primary ?? "#ffffff"} />}
+					{showQr && <QrBlock url={qrTarget} label={venueHost} fgColor={tenant.theme.primary ?? "#ffffff"} />}
 				</main>
 			)}
 
 			<footer className="relative z-10 px-12 pb-8 text-center">
 				<p className="text-xs uppercase tracking-[0.4em] text-zinc-600 font-bold">
-					Vota desde tu móvil · {tenant.slug}.nightgraph.es
+					Vota desde tu móvil · {venueHost}
 				</p>
 			</footer>
 		</div>
@@ -420,7 +425,7 @@ function DuelSide({ track, pct, side, origin, barRef, leading }: {
 	);
 }
 
-function QrBlock({ url, fgColor }: { url: string; fgColor: string }) {
+function QrBlock({ url, label, fgColor }: { url: string; label: string; fgColor: string }) {
 	// QR generado 100% en el CLIENTE (qrcode.react) → SVG vectorial, offline,
 	// sin llamadas de red ni rate-limits.  Siempre escaneable.
 	//
@@ -447,7 +452,7 @@ function QrBlock({ url, fgColor }: { url: string; fgColor: string }) {
 			</div>
 			<div>
 				<p className="text-2xl font-black italic tracking-tight text-white">Escanea para pedir tu canción</p>
-				<p className="text-base text-(--jumbo-primary) font-bold mt-1 break-all">{url.replace(/^https?:\/\//, "")}</p>
+				<p className="text-base text-(--jumbo-primary) font-bold mt-1 break-all">{label}</p>
 			</div>
 		</aside>
 	);

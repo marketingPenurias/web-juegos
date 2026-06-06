@@ -91,6 +91,10 @@ export async function handleTvAction(
 		return jsonResponse({ ok: false, error: "forbidden" }, { status: 403, request });
 	}
 
+	// Cierre perezoso de eventos vencidos (la TV no debe proyectar una
+	// fiesta que ya terminó).
+	await supabase.rpc("close_due_events", { p_tenant_id: tenant_id });
+
 	// Evento activo (acepta también 'draft', igual que el viejo loader).
 	const { data: activeEvent } = await supabase
 		.from("tenant_events")

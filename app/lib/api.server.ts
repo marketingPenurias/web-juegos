@@ -70,7 +70,7 @@ const ALLOWED_ORIGINS = new Set<string>([
 	"http://localhost:8788",
 	"http://127.0.0.1:5173",
 	"https://web-juegos.pages.dev",
-	"https://lapocha.nightgraph.es",
+	"https://lapocha.nightgraph.io",
 	"https://nightgraph.io",
 	"https://www.nightgraph.io",
 ]);
