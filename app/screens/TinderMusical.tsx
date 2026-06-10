@@ -32,7 +32,7 @@ import { cn } from "../lib/utils";
  */
 
 const SWIPE_THRESHOLD = 100;
-const REWARD = 25; // Tabla 5: tinder_completion. El importe real lo fija el RPC.
+const DEFAULT_REWARD = 25; // fallback; el importe real lo fija tenant_token_rewards.
 const REQUIRED = 5;
 
 export function TinderMusical() {
@@ -41,6 +41,10 @@ export function TinderMusical() {
 	const addTokens = useGameState((s) => s.addTokens);
 	const markDaily = useGameState((s) => s.markDaily);
 	const activeEventId = useGameState((s) => s.activeEventId);
+	const rewardAmount = useGameState((s) => s.rewardAmount);
+
+	// Economía centralizada (single source of truth = backend).
+	const REWARD = rewardAmount("tinder_completion", DEFAULT_REWARD);
 
 	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
 	const { claim } = useClaim();

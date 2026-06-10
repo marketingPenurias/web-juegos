@@ -30,7 +30,11 @@ import { cn } from "../lib/utils";
  *   verdad vive en `track_votes` server-side.
  */
 
-const BOOST_COST = 50;
+// Fallbacks: el coste/premio REAL los fija `tenant_token_rewards` (servido
+// en rewardRules).  Estas constantes sólo cubren el arranque antes de que
+// /api/session cargue las reglas.
+const DEFAULT_BOOST_COST = 50;
+const DEFAULT_REQUEST_REWARD = 20;
 
 export function Jukebox() {
 	const { t } = useTranslation();
@@ -38,6 +42,12 @@ export function Jukebox() {
 	const setBalance = useGameState((s) => s.setBalance);
 	const setScreen = useGameState((s) => s.setScreen);
 	const activeEventId = useGameState((s) => s.activeEventId);
+	const rewardAmount = useGameState((s) => s.rewardAmount);
+
+	// Economía centralizada (single source of truth = backend).  El boost se
+	// guarda como amount negativo, por eso tomamos su valor absoluto.
+	const BOOST_COST = Math.abs(rewardAmount("jukebox_boost", -DEFAULT_BOOST_COST));
+	const REQUEST_REWARD = rewardAmount("jukebox_request", DEFAULT_REQUEST_REWARD);
 
 	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
 	const addTokens = useGameState((s) => s.addTokens);
@@ -167,9 +177,9 @@ export function Jukebox() {
 		setTone("success");
 		setToast(t("jukebox.toastRequested"));
 		flashRow(id, "cyan");
-		// Premio por pedir (Tabla 5: jukebox_request = +20, 1/noche).
-		// OPTIMISTIC: sumamos +20 ya; el claim reconcilia con el ledger.
-		addTokens(20, "history.tx_jukebox_request");
+		// Premio por pedir (jukebox_request, 1/noche).  OPTIMISTIC: sumamos el
+		// importe de las reglas ya; el claim reconcilia con el ledger.
+		addTokens(REQUEST_REWARD, "history.tx_jukebox_request");
 		void claim("jukebox_request", activeEventId);
 	};
 
@@ -286,6 +296,7 @@ export function Jukebox() {
 							<JukeboxRow
 								key={song.id}
 								song={song}
+								boostCost={BOOST_COST}
 								rowRefSetter={(el) => {
 									if (el) rowRefs.current.set(song.id, el);
 									else rowRefs.current.delete(song.id);
@@ -308,6 +319,7 @@ export function Jukebox() {
 
 function JukeboxRow({
 	song,
+	boostCost,
 	rowRefSetter,
 	isRequested,
 	isBoosted,
@@ -316,6 +328,7 @@ function JukeboxRow({
 	onBoost,
 }: {
 	song: MusicTrack;
+	boostCost: number;
 	rowRefSetter: (el: HTMLLIElement | null) => void;
 	isRequested: boolean;
 	isBoosted: boolean;
@@ -395,7 +408,7 @@ function JukeboxRow({
 					type="button"
 					onClick={onBoost}
 					disabled={isBoosted || busy}
-					aria-label={t("jukebox.boostAria", { n: BOOST_COST })}
+					aria-label={t("jukebox.boostAria", { n: boostCost })}
 					className={cn(
 						"h-8 px-3 rounded-full text-[11px] font-black uppercase tracking-widest inline-flex items-center gap-1 transition-transform focus-visible:ring-2 focus-visible:ring-amber-300",
 						isBoosted || busy
@@ -404,7 +417,7 @@ function JukeboxRow({
 					)}
 				>
 					<Zap className="w-3 h-3 fill-current" aria-hidden="true" />
-					{t("jukebox.boost", { n: BOOST_COST })}
+					{t("jukebox.boost", { n: boostCost })}
 				</button>
 			</div>
 		</li>

@@ -42,6 +42,17 @@ export type RedeemSuccess = {
 	expires_at: string;
 };
 
+/** Una fila de "Mis Tickets" (reward comprado aún canjeable). */
+export type MyReward = {
+	id: string;
+	status: "available" | "redeeming";
+	expires_at: string | null;
+	created_at: string;
+	product_name: string;
+	price_eur: number;
+	price_tokens: number;
+};
+
 export type RewardResult<T> =
 	| (T & { ok: true })
 	| { ok: false; error: RewardError; detail?: string };
@@ -133,5 +144,33 @@ export function useRewards() {
 		[tenant.slug],
 	);
 
-	return { purchase, redeem, pending, lastError };
+	// GET /api/rewards — lista "Mis Tickets" (rewards aún canjeables).
+	const list = useCallback(async (): Promise<
+		{ ok: true; rows: MyReward[] } | { ok: false; error: RewardError }
+	> => {
+		try {
+			const headers = await buildHeaders();
+			const res = await fetch(ENDPOINT, {
+				method: "GET",
+				cache: "no-store",
+				headers: { ...headers, "X-Tenant-Slug": tenant.slug },
+			});
+			const payload = (await res.json().catch(() => ({}))) as {
+				ok?: boolean;
+				rows?: MyReward[];
+				error?: string;
+			};
+			if (!res.ok || payload.ok === false) {
+				return {
+					ok: false,
+					error: (payload.error as RewardError) ?? "rpc_failed",
+				};
+			}
+			return { ok: true, rows: payload.rows ?? [] };
+		} catch {
+			return { ok: false, error: "network_error" };
+		}
+	}, [tenant.slug]);
+
+	return { purchase, redeem, list, pending, lastError };
 }

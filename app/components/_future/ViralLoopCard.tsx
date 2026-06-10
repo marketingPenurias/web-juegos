@@ -1,6 +1,16 @@
 import { Trans, useTranslation } from "react-i18next";
 import { Copy, Gift, Share2 } from "lucide-react";
 
+/**
+ * ⏸️ PARKED (_future) — Bucle viral / referidos.
+ *
+ *   Movido aquí en la Operación Wiring & Clean House: NO hay backend de
+ *   referidos por-usuario todavía (falta RPC `redeem_referral` y un
+ *   código de invitación propio en `user_profiles`).  La pieza de
+ *   atribución existe (`ng_tracking_ref` + reward `friend_referral`),
+ *   así que esta tarjeta revive en cuanto el pipeline de referidos
+ *   genere el código del usuario y su contador.  UI lista para conectar.
+ */
 export function ViralLoopCard() {
 	const { t } = useTranslation();
 
