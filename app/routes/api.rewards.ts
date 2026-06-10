@@ -1,6 +1,5 @@
 import type { Route } from "./+types/api.rewards";
 import {
-	corsHeaders,
 	jsonResponse,
 	preflight,
 	verifyAuthToken,
@@ -274,17 +273,109 @@ export async function action({ request, context }: Route.ActionArgs) {
 	}
 }
 
-export function loader({ request }: Route.LoaderArgs) {
+/**
+ * GET /api/rewards  — "Mis Tickets".
+ *
+ *   Lista los rewards del usuario que aún puede enseñar en barra
+ *   (`status` en `available` | `redeeming`), con el snapshot del producto
+ *   para pintar nombre + precio €.  Sólo SELECT; el canje real sigue
+ *   yendo por el RPC `start_reward_redemption` (action `redeem`).
+ */
+export async function loader({ request, context }: Route.LoaderArgs) {
 	const cors = preflight(request);
 	if (cors) return cors;
-	return new Response(
-		JSON.stringify({ ok: false, error: "method_not_allowed" }),
-		{
-			status: 405,
-			headers: {
-				"Content-Type": "application/json",
-				...corsHeaders(request.headers.get("origin")),
-			},
-		},
+
+	if (request.method !== "GET") {
+		return jsonResponse(
+			{ ok: false, error: "method_not_allowed" },
+			{ status: 405, request },
+		);
+	}
+
+	const verified = await verifyAuthToken(request, context);
+	if (!verified) {
+		return jsonResponse(
+			{ ok: false, error: "unauthorized" },
+			{ status: 401, request },
+		);
+	}
+
+	const slugResult = pickTenantSlug(null, request);
+	if (!slugResult.ok) {
+		return jsonResponse(
+			{ ok: false, error: slugResult.error },
+			{ status: 400, request },
+		);
+	}
+
+	let supabase: ReturnType<typeof getServiceSupabase>;
+	try {
+		supabase = getServiceSupabase(context);
+	} catch (err) {
+		if (err instanceof Response) return err;
+		return jsonResponse(
+			{ ok: false, error: "service_unavailable" },
+			{ status: 503, request },
+		);
+	}
+
+	const profileResult = await resolveTenantProfile(
+		supabase,
+		slugResult.slug,
+		verified.id,
 	);
+	if (!profileResult.ok) {
+		return jsonResponse(
+			{ ok: false, error: profileResult.error },
+			{ status: 404, request },
+		);
+	}
+	const { tenant_id, user_profile_id } = profileResult.data;
+
+	const { data, error } = await supabase
+		.from("user_rewards")
+		.select(
+			"id, status, expires_at, created_at, " +
+				"product:tenant_products(name, reference_fiat, price_tokens)",
+		)
+		.eq("tenant_id", tenant_id)
+		.eq("user_id", user_profile_id)
+		.in("status", ["available", "redeeming"])
+		.order("created_at", { ascending: false })
+		.limit(50);
+
+	if (error) {
+		console.warn("[api.rewards] list lookup failed", error.message);
+		return jsonResponse(
+			{ ok: false, error: "lookup_failed" },
+			{ status: 500, request },
+		);
+	}
+
+	type Joined = {
+		id: string;
+		status: string;
+		expires_at: string | null;
+		created_at: string;
+		product:
+			| { name: string; reference_fiat: number | null; price_tokens: number }
+			| { name: string; reference_fiat: number | null; price_tokens: number }[]
+			| null;
+	};
+
+	const rows = ((data ?? []) as unknown as Joined[]).map((r) => {
+		// El embed to-one puede llegar como objeto o array de 1 según el cliente.
+		const p = Array.isArray(r.product) ? r.product[0] : r.product;
+		return {
+			id: r.id,
+			status: r.status,
+			expires_at: r.expires_at,
+			created_at: r.created_at,
+			product_name: p?.name ?? "Recompensa",
+			price_eur: Number(p?.reference_fiat ?? 0),
+			price_tokens: Number(p?.price_tokens ?? 0),
+		};
+	});
+
+	return jsonResponse({ ok: true, rows }, { request });
 }

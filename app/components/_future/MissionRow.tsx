@@ -1,6 +1,23 @@
 import { useTranslation } from "react-i18next";
 import { Coins, Heart, Music2, Share2, Trophy } from "lucide-react";
-import type { Mission } from "../../store/useGameState";
+
+/**
+ * ⏸️ PARKED (_future) — Fila de misión con barra de progreso N/M.
+ *
+ *   Movido aquí en la Operación Wiring & Clean House.  Hoy las misiones
+ *   reales (server-truth) las pinta `hub/MissionsCard.tsx` derivando de
+ *   `daily_activity`.  Esta fila con progreso acumulable revive cuando
+ *   exista una tabla `missions` con metas.  El tipo `Mission` se inlinea
+ *   aquí para que `_future` NO dependa del store y nunca rompa el build.
+ */
+export type Mission = {
+	id: string;
+	titleKey: string;
+	progress: number;
+	goal: number;
+	reward: number;
+	icon: "music" | "swipe" | "share" | "trophy";
+};
 
 const ICONS = {
 	swipe: Heart,

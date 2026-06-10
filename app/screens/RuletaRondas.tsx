@@ -24,7 +24,7 @@ const SECTOR_COLORS = [
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
 const SAFE_JITTER = 0.32;
-const SPIN_REWARD = 15;
+const DEFAULT_SPIN_REWARD = 15; // fallback; el importe real lo fija tenant_token_rewards.
 
 /**
  * RuletaRondas — versión REAL.
@@ -55,7 +55,11 @@ export function RuletaRondas() {
 	const addTokens = useGameState((s) => s.addTokens);
 	const markDaily = useGameState((s) => s.markDaily);
 	const activeEventId = useGameState((s) => s.activeEventId);
+	const rewardAmount = useGameState((s) => s.rewardAmount);
 	const { claim } = useClaim();
+
+	// Economía centralizada (single source of truth = backend).
+	const SPIN_REWARD = rewardAmount("ruleta_spin", DEFAULT_SPIN_REWARD);
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const wheelRef = useRef<SVGSVGElement>(null);

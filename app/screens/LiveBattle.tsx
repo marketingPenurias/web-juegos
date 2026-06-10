@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Timer } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
+import { useEventTracksChannel } from "../lib/useEventTracksChannel";
 import { useGameState } from "../store/useGameState";
 import { useMusic } from "../lib/useMusic";
 import { useClaim } from "../lib/useClaim";
@@ -30,7 +31,9 @@ import { VoteFooter, type VoteAction } from "../components/live/VoteFooter";
  *   Asimetría respetada: el móvil sólo escucha `live_battles` + `event_tracks`.
  */
 
-const BOOST_COST = 30;
+// Fallbacks: el coste/premio REAL los fija `tenant_token_rewards`.
+const DEFAULT_BOOST_COST = 30;
+const DEFAULT_VOTE_REWARD = 10;
 
 type BTrack = { id: string; title: string; artist: string; total_votes: number };
 type Battle = { id: string; endsAt: string; a: BTrack; b: BTrack };
@@ -42,8 +45,13 @@ export function LiveBattle() {
 	const addTokens = useGameState((s) => s.addTokens);
 	const markDaily = useGameState((s) => s.markDaily);
 	const activeEventId = useGameState((s) => s.activeEventId);
+	const rewardAmount = useGameState((s) => s.rewardAmount);
 	const { castVote } = useMusic(activeEventId);
 	const { claim } = useClaim();
+
+	// Economía centralizada (single source of truth = backend).
+	const BOOST_COST = Math.abs(rewardAmount("livebattle_boost", -DEFAULT_BOOST_COST));
+	const VOTE_REWARD = rewardAmount("livebattle_vote", DEFAULT_VOTE_REWARD);
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const aBarRef = useRef<HTMLDivElement>(null);
@@ -119,29 +127,19 @@ export function LiveBattle() {
 	}, [activeEventId, loadBattle]);
 
 	// ── Realtime: event_tracks (porcentajes en vivo de las dos canciones) ─
-	useEffect(() => {
-		const supabase = getBrowserSupabase();
-		if (!supabase || !activeEventId) return;
-		const channel = supabase
-			.channel(`live:tracks:${activeEventId}`)
-			.on(
-				"postgres_changes",
-				{ event: "*", schema: "public", table: "event_tracks", filter: `event_id=eq.${activeEventId}` },
-				(payload) => {
-					if (payload.eventType === "DELETE") return;
-					const row = payload.new as { id?: string; total_votes?: number };
-					if (!row?.id) return;
-					setBattle((cur) => {
-						if (!cur) return cur;
-						if (row.id === cur.a.id) return { ...cur, a: { ...cur.a, total_votes: Number(row.total_votes ?? cur.a.total_votes) } };
-						if (row.id === cur.b.id) return { ...cur, b: { ...cur.b, total_votes: Number(row.total_votes ?? cur.b.total_votes) } };
-						return cur;
-					});
-				},
-			)
-			.subscribe();
-		return () => { void supabase.removeChannel(channel); };
-	}, [activeEventId]);
+	// Canal COMPARTIDO con NowPlaying (un solo socket de event_tracks por
+	// evento) — antes LiveBattle abría su propio `live:tracks:*` duplicado.
+	useEventTracksChannel(activeEventId, (payload) => {
+		if (payload.eventType === "DELETE") return;
+		const row = payload.new as { id?: string; total_votes?: number } | undefined;
+		if (!row?.id) return;
+		setBattle((cur) => {
+			if (!cur) return cur;
+			if (row.id === cur.a.id) return { ...cur, a: { ...cur.a, total_votes: Number(row.total_votes ?? cur.a.total_votes) } };
+			if (row.id === cur.b.id) return { ...cur, b: { ...cur.b, total_votes: Number(row.total_votes ?? cur.b.total_votes) } };
+			return cur;
+		});
+	});
 
 	// ── Cuenta atrás del duelo ──────────────────────────────────────────
 	useEffect(() => {
@@ -231,8 +229,8 @@ export function LiveBattle() {
 			});
 		}
 		setVoted(selected);
-		// Premio por votar (Tabla 5: livebattle_vote = +10, 1/noche), Optimistic.
-		addTokens(10, "history.tx_vote");
+		// Premio por votar (livebattle_vote, 1/noche), Optimistic.
+		addTokens(VOTE_REWARD, "history.tx_vote");
 		markDaily("vote_track");
 		void claim("livebattle_vote", activeEventId);
 		if (action === "boost") {

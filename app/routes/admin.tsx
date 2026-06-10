@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { gsap, useGSAP } from "../lib/gsap";
 import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
 	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
@@ -99,6 +100,9 @@ export default function Admin() {
 	const [metrics, setMetrics] = useState<Metrics | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	// spotify_id de la última canción inyectada desde la Biblioteca → la fila
+	// correspondiente del PlaylistPanel hace un "flash" GSAP de confirmación.
+	const [flashSpotifyId, setFlashSpotifyId] = useState<string | null>(null);
 
 	const call = useCallback(async (op: string, payload: Record<string, unknown> = {}) => {
 		// NUNCA cacheamos el JWT: supabase-js refresca el token por debajo.
@@ -314,23 +318,8 @@ export default function Admin() {
 							onStart={(trackA, trackB, minutes) => run("start_battle", { event_id: event.id, track_a: trackA, track_b: trackB, minutes }, "¡Batalla iniciada!")}
 							onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
 						/>
-						<div className="grid md:grid-cols-2 gap-5">
-							<LibraryPanel
-								tracks={globalTracks}
-								eventSpotifyIds={eventSpotifyIds}
-								busy={busy}
-								onBulk={(raw) => run("bulk_global", { raw }, "Biblioteca actualizada")}
-								onAdd={(id) => run("add_track", { event_id: event.id, global_id: id }, "Añadida a la noche")}
-							/>
-							<PlaylistPanel
-								tracks={eventTracks}
-								busy={busy}
-								onNowPlaying={(id) => run("now_playing", { event_id: event.id, track_id: id }, "Sonando ahora ▶")}
-								onStopAll={() => run("stop_now_playing", { event_id: event.id }, "⏹ Nada sonando")}
-								onUpdate={(id, patch) => run("update_track", { track_id: id, ...patch }, "Canción actualizada")}
-								onRemove={(id) => run("remove_track", { track_id: id }, "Canción quitada")}
-							/>
-						</div>
+						{/* Plantillas ARRIBA (por encima del pliegue): el DJ las ve sin
+						    scrollear, justo antes de tocar la pista de esta noche. */}
 						<TemplatesPanel
 							templates={templates}
 							hasTracks={eventTracks.length > 0}
@@ -339,6 +328,29 @@ export default function Admin() {
 							onApply={(id) => run("apply_template", { event_id: event.id, template_id: id }, "Plantilla aplicada")}
 							onDelete={(id) => run("delete_template", { template_id: id }, "Plantilla borrada")}
 						/>
+						<div className="grid md:grid-cols-2 gap-5">
+							<LibraryPanel
+								tracks={globalTracks}
+								eventSpotifyIds={eventSpotifyIds}
+								busy={busy}
+								onBulk={(raw) => run("bulk_global", { raw }, "Biblioteca actualizada")}
+								onAdd={(id, spotifyId) => {
+									// Marca la fila para el flash de confirmación en la pista.
+									setFlashSpotifyId(spotifyId);
+									run("add_track", { event_id: event.id, global_id: id }, "Añadida a la noche");
+								}}
+							/>
+							<PlaylistPanel
+								tracks={eventTracks}
+								busy={busy}
+								flashSpotifyId={flashSpotifyId}
+								onFlashDone={() => setFlashSpotifyId(null)}
+								onNowPlaying={(id) => run("now_playing", { event_id: event.id, track_id: id }, "Sonando ahora ▶")}
+								onStopAll={() => run("stop_now_playing", { event_id: event.id }, "⏹ Nada sonando")}
+								onUpdate={(id, patch) => run("update_track", { track_id: id, ...patch }, "Canción actualizada")}
+								onRemove={(id) => run("remove_track", { track_id: id }, "Canción quitada")}
+							/>
+						</div>
 					</>
 				)}
 
@@ -520,7 +532,7 @@ function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 
 function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 	tracks: GlobalTrack[]; eventSpotifyIds: Set<string>; busy: boolean;
-	onBulk: (raw: string) => void; onAdd: (id: string) => void;
+	onBulk: (raw: string) => void; onAdd: (id: string, spotifyId: string) => void;
 }) {
 	const [raw, setRaw] = useState("");
 	const [query, setQuery] = useState("");
@@ -553,7 +565,7 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 							<button
 								type="button"
 								disabled={busy || added}
-								onClick={() => onAdd(tk.id)}
+								onClick={() => onAdd(tk.id, tk.spotify_id)}
 								title={added ? "Ya está en la fiesta de esta noche" : "Inyectar en la pista de esta noche"}
 								className={`shrink-0 h-10 rounded-xl font-black text-xs inline-flex items-center gap-1.5 active:scale-95 transition-colors ${
 									added
@@ -575,8 +587,10 @@ function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
 	);
 }
 
-function PlaylistPanel({ tracks, busy, onNowPlaying, onStopAll, onUpdate, onRemove }: {
+function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, onNowPlaying, onStopAll, onUpdate, onRemove }: {
 	tracks: EventTrack[]; busy: boolean;
+	flashSpotifyId: string | null;
+	onFlashDone: () => void;
 	onNowPlaying: (id: string) => void;
 	onStopAll: () => void;
 	onUpdate: (id: string, patch: Record<string, unknown>) => void;
@@ -612,6 +626,8 @@ function PlaylistPanel({ tracks, busy, onNowPlaying, onStopAll, onUpdate, onRemo
 						track={tk}
 						busy={busy}
 						editing={editing === tk.id}
+						flash={!!flashSpotifyId && tk.spotify_id === flashSpotifyId}
+						onFlashDone={onFlashDone}
 						onEdit={() => setEditing(tk.id)}
 						onCancel={() => setEditing(null)}
 						onNowPlaying={() => onNowPlaying(tk.id)}
@@ -624,15 +640,40 @@ function PlaylistPanel({ tracks, busy, onNowPlaying, onStopAll, onUpdate, onRemo
 	);
 }
 
-function PlaylistRow({ track, busy, editing, onEdit, onCancel, onNowPlaying, onSave, onRemove }: {
+function PlaylistRow({ track, busy, editing, flash, onFlashDone, onEdit, onCancel, onNowPlaying, onSave, onRemove }: {
 	track: EventTrack; busy: boolean; editing: boolean;
+	flash: boolean; onFlashDone: () => void;
 	onEdit: () => void; onCancel: () => void; onNowPlaying: () => void;
 	onSave: (patch: Record<string, unknown>) => void; onRemove: () => void;
 }) {
 	const [title, setTitle] = useState(track.title);
 	const [artist, setArtist] = useState(track.artist);
 	const [cover, setCover] = useState(track.cover_image_url ?? "");
+	const rowRef = useRef<HTMLDivElement>(null);
 	useEffect(() => { setTitle(track.title); setArtist(track.artist); setCover(track.cover_image_url ?? ""); }, [track, editing]);
+
+	// Flash de confirmación cuando esta canción acaba de entrar desde la
+	// Biblioteca (el DJ ve "entrar" la pista sin buscarla a ojo).
+	useGSAP(
+		() => {
+			if (!flash || !rowRef.current) return;
+			const el = rowRef.current;
+			const tl = gsap.timeline({ onComplete: onFlashDone });
+			tl.fromTo(
+				el,
+				{ boxShadow: "0 0 0 rgba(57,255,20,0)", borderColor: "rgba(57,255,20,0.9)", backgroundColor: "rgba(57,255,20,0.18)" },
+				{ boxShadow: "0 0 30px rgba(57,255,20,0.7)", scale: 1.02, duration: 0.3, ease: "power2.out" },
+			).to(el, { boxShadow: "0 0 0 rgba(57,255,20,0)", backgroundColor: "rgba(0,0,0,0)", scale: 1, duration: 0.9, ease: "power2.inOut" });
+		},
+		{ dependencies: [flash] },
+	);
+
+	const confirmRemove = () => {
+		// eslint-disable-next-line no-alert
+		if (window.confirm(`¿Quitar "${track.title}" de la pista de esta noche?`)) {
+			onRemove();
+		}
+	};
 
 	if (editing) {
 		return (
@@ -649,7 +690,7 @@ function PlaylistRow({ track, busy, editing, onEdit, onCancel, onNowPlaying, onS
 	}
 
 	return (
-		<div className={`flex items-center gap-3 rounded-xl border p-2.5 ${track.is_played ? "bg-lime-500/10 border-2 border-lime-400 shadow-[0_0_18px_rgba(57,255,20,0.35)]" : "bg-zinc-950/60 border-zinc-800"}`}>
+		<div ref={rowRef} className={`flex items-center gap-3 rounded-xl border p-2.5 ${track.is_played ? "bg-lime-500/10 border-2 border-lime-400 shadow-[0_0_18px_rgba(57,255,20,0.35)]" : "bg-zinc-950/60 border-zinc-800"}`}>
 			<div className="w-9 text-center shrink-0">
 				<span className="text-sm font-black tabular-nums text-zinc-400">{track.total_votes}</span>
 			</div>
@@ -676,8 +717,17 @@ function PlaylistRow({ track, busy, editing, onEdit, onCancel, onNowPlaying, onS
 					▶ Poner
 				</button>
 			)}
-			<button type="button" onClick={onEdit} className="shrink-0 w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 flex items-center justify-center active:scale-95"><Pencil className="w-4 h-4" /></button>
-			<button type="button" disabled={busy} onClick={onRemove} className="shrink-0 w-9 h-9 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center justify-center active:scale-95"><Trash2 className="w-4 h-4" /></button>
+			<button type="button" onClick={onEdit} title="Editar canción" className="shrink-0 w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 flex items-center justify-center active:scale-95"><Pencil className="w-4 h-4" /></button>
+			<button
+				type="button"
+				disabled={busy}
+				onClick={confirmRemove}
+				title="Eliminar de la pista de esta noche"
+				aria-label={`Eliminar ${track.title}`}
+				className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/50 font-black text-xs active:scale-95 disabled:opacity-50"
+			>
+				<Trash2 className="w-4 h-4" /> Quitar
+			</button>
 		</div>
 	);
 }

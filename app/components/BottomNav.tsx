@@ -16,7 +16,6 @@ export function BottomNav() {
 	const { t } = useTranslation();
 	const current = useGameState((s) => s.currentScreen);
 	const setScreen = useGameState((s) => s.setScreen);
-	const hasTicket = useGameState((s) => s.activeTicket !== null);
 	const containerRef = useRef<HTMLDivElement>(null);
 
 	useGSAP(
@@ -40,7 +39,6 @@ export function BottomNav() {
 		>
 			<div className="flex justify-around items-center">
 				{ITEMS.map(({ id, labelKey, Icon }) => {
-					if (id === "ticket" && !hasTicket) return null;
 					const active = current === id;
 					const label = t(labelKey);
 					return (

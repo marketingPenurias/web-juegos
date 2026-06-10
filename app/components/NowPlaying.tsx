@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Disc3, ExternalLink } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
+import { useEventTracksChannel } from "../lib/useEventTracksChannel";
 import { useGameState } from "../store/useGameState";
 
 /**
@@ -38,6 +39,7 @@ export function NowPlaying() {
 	const [playing, setPlaying] = useState<Playing | null>(null);
 	const barRef = useRef<HTMLDivElement>(null);
 
+	// Estado inicial: la canción marcada como sonando ahora mismo (1 fetch).
 	useEffect(() => {
 		const supabase = getBrowserSupabase();
 		if (!supabase || !eventId) {
@@ -45,8 +47,6 @@ export function NowPlaying() {
 			return;
 		}
 		let cancelled = false;
-
-		// Estado inicial: la canción marcada como sonando ahora mismo.
 		void (async () => {
 			const { data } = await supabase
 				.from("event_tracks")
@@ -57,41 +57,33 @@ export function NowPlaying() {
 				.maybeSingle();
 			if (!cancelled) setPlaying((data as Playing) ?? null);
 		})();
-
-		// Realtime: el DJ cambia el tema → exclusión mutua (una true, resto false).
-		const channel = supabase
-			.channel(`nowplaying:${eventId}`)
-			.on(
-				"postgres_changes",
-				{ event: "*", schema: "public", table: "event_tracks", filter: `event_id=eq.${eventId}` },
-				(payload) => {
-					if (payload.eventType === "DELETE") {
-						const oldId = (payload.old as { id?: string }).id;
-						setPlaying((cur) => (cur && cur.id === oldId ? null : cur));
-						return;
-					}
-					const row = payload.new as Playing & { is_played?: boolean };
-					if (!row?.id) return;
-					if (row.is_played === true) {
-						setPlaying({
-							id: row.id,
-							title: row.title,
-							artist: row.artist,
-							cover_image_url: row.cover_image_url,
-							spotify_id: row.spotify_id,
-						});
-					} else {
-						setPlaying((cur) => (cur && cur.id === row.id ? null : cur));
-					}
-				},
-			)
-			.subscribe();
-
 		return () => {
 			cancelled = true;
-			void supabase.removeChannel(channel);
 		};
 	}, [eventId]);
+
+	// Realtime COMPARTIDO: el DJ cambia el tema → exclusión mutua (una true,
+	// resto false).  Usa el canal único de event_tracks (sin doble socket).
+	useEventTracksChannel(eventId, (payload) => {
+		if (payload.eventType === "DELETE") {
+			const oldId = (payload.old as { id?: string })?.id;
+			setPlaying((cur) => (cur && cur.id === oldId ? null : cur));
+			return;
+		}
+		const row = payload.new as (Playing & { is_played?: boolean }) | undefined;
+		if (!row?.id) return;
+		if (row.is_played === true) {
+			setPlaying({
+				id: row.id,
+				title: row.title,
+				artist: row.artist,
+				cover_image_url: row.cover_image_url,
+				spotify_id: row.spotify_id,
+			});
+		} else {
+			setPlaying((cur) => (cur && cur.id === row.id ? null : cur));
+		}
+	});
 
 	useGSAP(
 		() => {

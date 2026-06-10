@@ -5,6 +5,7 @@ import { TokenWalletCard } from "../components/hub/TokenWalletCard";
 import { TierRibbon } from "../components/hub/TierRibbon";
 import { StreakCard } from "../components/hub/StreakCard";
 import { MissionsCard } from "../components/hub/MissionsCard";
+import { LeaderboardCard } from "../components/hub/LeaderboardCard";
 import { GameLauncherCard } from "../components/hub/GameLauncherCard";
 import { HistoryDrawer } from "../components/HistoryDrawer";
 import { WelcomeModal } from "../components/WelcomeModal";
@@ -17,10 +18,11 @@ import { WelcomeModal } from "../components/WelcomeModal";
  *     · TierRibbon        — los 4 niveles con tu posición actual.
  *     · MissionsCard      — 3 misiones derivadas de `daily_activity`.
  *     · StreakCard        — "Día 1 de piloto" (MVP, sin invent).
+ *     · LeaderboardCard   — top real por saldo (`/api/leaderboard`).
  *     · GameLauncherCard  — accesos a los juegos reales.
  *
- *   Cards retiradas hasta Fase 2 (sin tabla real):
- *     · LeaderboardCard   (vista `tenant_leaderboard` pendiente).
+ *   Cards en barbecho (`components/_future/`, sin backend aún):
+ *     · MissionRow        (tabla `missions` con metas pendiente).
  *     · ViralLoopCard     (RPC `redeem_referral` pendiente).
  *
  *   El GSAP intro anima `.hub-card`; el selector huérfano
@@ -56,6 +58,7 @@ export function Hub() {
 				<TokenWalletCard onOpenHistory={() => setHistoryOpen(true)} />
 				<TierRibbon />
 				<MissionsCard />
+				<LeaderboardCard />
 				<StreakCard />
 				<GameLauncherCard />
 			</main>

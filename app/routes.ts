@@ -10,6 +10,7 @@ export default [
 	route("api/catalog", "routes/api.catalog.ts"),
 	route("api/session", "routes/api.session.ts"),
 	route("api/history", "routes/api.history.ts"),
+	route("api/leaderboard", "routes/api.leaderboard.ts"),
 	route("api/auth-sync", "routes/api.auth-sync.ts"),
 	route("api/checkin", "routes/api.checkin.ts"),
 	route("api/admin", "routes/api.admin.ts"),
