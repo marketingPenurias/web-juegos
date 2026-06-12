@@ -382,7 +382,7 @@ export type VoteTrackReturn =
 
 // ─── Discriminated unions used by API handlers ────────────────────────────
 
-export type RewardActionType = "purchase" | "redeem";
+export type RewardActionType = "purchase" | "redeem" | "consume";
 
 export interface RewardPurchaseRequest {
 	action_type: "purchase";
@@ -395,4 +395,20 @@ export interface RewardRedeemRequest {
 	tenant_slug?: string;
 	reward_id: string;
 }
-export type RewardRequest = RewardPurchaseRequest | RewardRedeemRequest;
+/** Consumo REAL del ticket (anti-fraude): marca el reward 'consumed'. */
+export interface RewardConsumeRequest {
+	action_type: "consume";
+	tenant_slug?: string;
+	reward_id: string;
+}
+export type RewardRequest =
+	| RewardPurchaseRequest
+	| RewardRedeemRequest
+	| RewardConsumeRequest;
+
+export interface CompleteRedemptionReturn {
+	ok: boolean;
+	reward_id?: string;
+	consumed_at?: string;
+	error?: string;
+}

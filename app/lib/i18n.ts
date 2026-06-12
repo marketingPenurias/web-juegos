@@ -326,6 +326,12 @@ const resources = {
 				free: "GRATIS",
 				expired: "Expirado",
 				expiredAction: "Vuelve a pedir el ticket",
+				holdToBurn: "Mantén pulsado para quemar",
+				burning: "Sigue pulsando…",
+				verifying: "Validando…",
+				burned: "¡Ticket quemado!",
+				burnError:
+					"No se pudo validar el ticket. Revisa la conexión e inténtalo otra vez.",
 				screenshotWarning:
 					"La animación es continua y el código cambia. Una captura no es válida.",
 			},
@@ -607,6 +613,12 @@ const resources = {
 				verified: "Verified · show to bartender",
 				expired: "Expired",
 				expiredAction: "Request a new ticket",
+				holdToBurn: "Hold to burn",
+				burning: "Keep holding…",
+				verifying: "Validating…",
+				burned: "Ticket burned!",
+				burnError:
+					"Could not validate the ticket. Check your connection and try again.",
 				screenshotWarning:
 					"The animation is continuous and the code rotates. A screenshot is not valid.",
 			},

@@ -38,9 +38,14 @@ type Props = {
 	expiresAt: string;
 	onExpire: () => void;
 	onClose?: () => void;
-	// Se llama cuando el usuario "quema" el ticket (hold-to-burn completo).
-	// Por defecto reutiliza onExpire (cerrar/limpiar el canje).
-	onBurn?: () => void;
+	// Consumo REAL del ticket (anti-fraude).  Se invoca al completar el
+	// hold-to-burn y DEBE confirmar contra el backend
+	// (`complete_redemption`).  Devuelve `true` SÓLO si el servidor marcó
+	// el reward como 'consumed' (o ya lo estaba — idempotente).  La
+	// animación de "QUEMADO" sólo se muestra cuando esto resuelve a true;
+	// si es false (sin red / no canjeable) la barra se revierte y el
+	// ticket NO se da por consumido.
+	onBurn?: () => Promise<boolean>;
 };
 
 const SHORT_CODE_RE = /[^A-Z0-9]/g;
@@ -82,30 +87,65 @@ export function RedemptionScreen({
 	);
 	const [burning, setBurning] = useState(false);
 	const [burned, setBurned] = useState(false);
+	const [verifying, setVerifying] = useState(false);
+	const [burnError, setBurnError] = useState(false);
 
 	// ── Hold-to-burn (anti-fraude) ──────────────────────────────────────
 	// Mantener pulsado 2s rellena la barra GSAP.  Si suelta antes del 100%,
-	// la barra vuelve a 0 INMEDIATAMENTE (reverse) y NO se consume.  Sólo
-	// al llegar al 100% se "quema" el ticket de verdad.
+	// la barra vuelve a 0 INMEDIATAMENTE (reverse) y NO se consume.  Al
+	// llegar al 100% NO damos el ticket por quemado todavía: confirmamos el
+	// consumo contra el backend (`onBurn` → `complete_redemption`) y SÓLO
+	// si el servidor responde ok mostramos "QUEMADO".  Cero fraude por
+	// captura/refresco: el reward queda 'consumed' en la BD.
 	const startBurn = () => {
-		if (burned || remaining === 0 || !burnFillRef.current) return;
+		if (burned || verifying || remaining === 0 || !burnFillRef.current) return;
+		setBurnError(false);
 		setBurning(true);
 		burnTweenRef.current = gsap.to(burnFillRef.current, {
 			scaleX: 1,
 			duration: 2,
 			ease: "none",
 			onComplete: () => {
-				setBurned(true);
-				setBurning(false);
-				// Pequeño respiro para que se vea el estado "QUEMADO" antes de
-				// que el padre limpie el canje.
-				window.setTimeout(() => (onBurn ?? onExpire)(), 900);
+				void finalizeBurn();
 			},
 		});
 	};
 
+	// Confirmación server-authoritative del consumo.
+	const finalizeBurn = async () => {
+		setBurning(false);
+		setVerifying(true);
+		let confirmed = false;
+		try {
+			// Sin handler de consumo no podemos garantizar el single-use →
+			// jamás fingimos éxito (sería volver al "ticket teatro").
+			confirmed = onBurn ? await onBurn() : false;
+		} catch {
+			confirmed = false;
+		}
+		setVerifying(false);
+		if (confirmed) {
+			setBurned(true);
+			// Pequeño respiro para que se vea el estado "QUEMADO" antes de
+			// que el padre limpie el canje.
+			window.setTimeout(() => onExpire(), 900);
+			return;
+		}
+		// Falló el consumo (sin red, no canjeable…): revertir la barra y
+		// permitir reintento.  El ticket NO se da por quemado.
+		setBurnError(true);
+		if (burnFillRef.current) {
+			gsap.to(burnFillRef.current, {
+				scaleX: 0,
+				duration: 0.18,
+				ease: "power2.out",
+			});
+		}
+	};
+
 	const cancelBurn = () => {
-		if (burned) return;
+		// Durante la verificación o tras quemar, ignorar el gesto.
+		if (burned || verifying) return;
 		setBurning(false);
 		burnTweenRef.current?.kill();
 		burnTweenRef.current = null;
@@ -352,28 +392,44 @@ export function RedemptionScreen({
 
 					{/* ── HOLD-TO-BURN (anti-fraude) ── */}
 					{!expired && !burned && (
-						<button
-							type="button"
-							onPointerDown={startBurn}
-							onPointerUp={cancelBurn}
-							onPointerLeave={cancelBurn}
-							onPointerCancel={cancelBurn}
-							className="relative mt-1 h-14 w-full rounded-2xl overflow-hidden border-2 border-rose-500/60 bg-rose-950/40 active:scale-[0.99] touch-none select-none focus-visible:ring-2 focus-visible:ring-rose-400"
-							aria-label={t("redemption.holdToBurn", "Mantén pulsado para quemar el ticket")}
-						>
-							<div
-								ref={burnFillRef}
-								className="absolute inset-0 origin-left bg-linear-to-r from-rose-600 to-orange-500"
-								style={{ transform: "scaleX(0)" }}
-								aria-hidden="true"
-							/>
-							<span className="relative z-10 flex items-center justify-center gap-2 font-black uppercase tracking-widest text-sm text-white">
-								<Flame className="w-5 h-5" aria-hidden="true" />
-								{burning
-									? t("redemption.burning", "Sigue pulsando…")
-									: t("redemption.holdToBurn", "Mantén pulsado para quemar")}
-							</span>
-						</button>
+						<>
+							<button
+								type="button"
+								disabled={verifying}
+								onPointerDown={verifying ? undefined : startBurn}
+								onPointerUp={cancelBurn}
+								onPointerLeave={cancelBurn}
+								onPointerCancel={cancelBurn}
+								className="relative mt-1 h-14 w-full rounded-2xl overflow-hidden border-2 border-rose-500/60 bg-rose-950/40 active:scale-[0.99] touch-none select-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-80"
+								aria-label={t("redemption.holdToBurn", "Mantén pulsado para quemar el ticket")}
+							>
+								<div
+									ref={burnFillRef}
+									className="absolute inset-0 origin-left bg-linear-to-r from-rose-600 to-orange-500"
+									style={{ transform: "scaleX(0)" }}
+									aria-hidden="true"
+								/>
+								<span className="relative z-10 flex items-center justify-center gap-2 font-black uppercase tracking-widest text-sm text-white">
+									<Flame className="w-5 h-5" aria-hidden="true" />
+									{verifying
+										? t("redemption.verifying", "Validando…")
+										: burning
+											? t("redemption.burning", "Sigue pulsando…")
+											: t("redemption.holdToBurn", "Mantén pulsado para quemar")}
+								</span>
+							</button>
+							{burnError && (
+								<p
+									role="alert"
+									className="text-[11px] text-rose-300 font-bold -mt-1"
+								>
+									{t(
+										"redemption.burnError",
+										"No se pudo validar el ticket. Revisa la conexión e inténtalo otra vez.",
+									)}
+								</p>
+							)}
+						</>
 					)}
 
 					{burned && (

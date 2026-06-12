@@ -1,6 +1,7 @@
 import { useGameState, type Screen } from "../store/useGameState";
 import { useSession } from "../lib/useSession";
 import { usePendingCheckin } from "../lib/usePendingCheckin";
+import { useRewards } from "../lib/useRewards";
 import { AppFrame } from "./AppFrame";
 import { BottomNav } from "./BottomNav";
 import { RedemptionScreen } from "./RedemptionScreen";
@@ -26,7 +27,19 @@ export default function LaPochaApp() {
 	const currentScreen = useGameState((s) => s.currentScreen);
 	const activeRedemption = useGameState((s) => s.activeRedemption);
 	const closeRedemption = useGameState((s) => s.closeRedemption);
+	const { consume } = useRewards();
 	const showNav = SCREENS_WITH_NAV.has(currentScreen);
+
+	// Consumo REAL del ticket (anti-fraude).  El hold-to-burn de
+	// RedemptionScreen llama aquí: marcamos el reward 'consumed' en la BD
+	// vía `complete_redemption` y devolvemos si el servidor lo confirmó.
+	// `already_consumed` cuenta como éxito (idempotente: el ticket ya está
+	// gastado, así que mostrar "QUEMADO" es correcto).
+	const handleBurn = async (): Promise<boolean> => {
+		if (!activeRedemption) return false;
+		const res = await consume(activeRedemption.rewardId);
+		return res.ok || (!res.ok && res.error === "already_consumed");
+	};
 
 	return (
 		<div className="electric-bg min-h-dvh w-full text-white selection:bg-cyan-500/30 relative overflow-hidden overscroll-none">
@@ -48,6 +61,7 @@ export default function LaPochaApp() {
 					expiresAt={activeRedemption.expiresAt}
 					onExpire={closeRedemption}
 					onClose={closeRedemption}
+					onBurn={handleBurn}
 				/>
 			)}
 

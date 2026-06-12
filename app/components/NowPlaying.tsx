@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Disc3, ExternalLink } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
 import { useEventTracksChannel } from "../lib/useEventTracksChannel";
+import { useInterval } from "../lib/useInterval";
 import { useGameState } from "../store/useGameState";
 
 /**
@@ -25,6 +26,10 @@ type Playing = {
 	spotify_id: string | null;
 };
 
+// Short-polling del "sonando ahora" (sustituye al UPDATE Realtime de
+// event_tracks, eliminado por saturar el WAL).  Auditoría 360º · §2.
+const NOWPLAYING_POLL_MS = 2500;
+
 function spotifyUrl(spotifyId?: string | null): string | null {
 	if (!spotifyId) return null;
 	const id = spotifyId.startsWith("spotify:track:")
@@ -39,49 +44,44 @@ export function NowPlaying() {
 	const [playing, setPlaying] = useState<Playing | null>(null);
 	const barRef = useRef<HTMLDivElement>(null);
 
-	// Estado inicial: la canción marcada como sonando ahora mismo (1 fetch).
-	useEffect(() => {
+	// Lee la canción marcada como "sonando ahora" (is_played = true) del
+	// evento activo.  Se usa tanto en la carga inicial como en cada tick
+	// del short-polling.
+	const loadPlaying = useCallback(async () => {
 		const supabase = getBrowserSupabase();
 		if (!supabase || !eventId) {
 			setPlaying(null);
 			return;
 		}
-		let cancelled = false;
-		void (async () => {
-			const { data } = await supabase
-				.from("event_tracks")
-				.select("id, title, artist, cover_image_url, spotify_id")
-				.eq("event_id", eventId)
-				.eq("is_played", true)
-				.limit(1)
-				.maybeSingle();
-			if (!cancelled) setPlaying((data as Playing) ?? null);
-		})();
-		return () => {
-			cancelled = true;
-		};
+		const { data } = await supabase
+			.from("event_tracks")
+			.select("id, title, artist, cover_image_url, spotify_id")
+			.eq("event_id", eventId)
+			.eq("is_played", true)
+			.limit(1)
+			.maybeSingle();
+		setPlaying((data as Playing) ?? null);
 	}, [eventId]);
 
-	// Realtime COMPARTIDO: el DJ cambia el tema → exclusión mutua (una true,
-	// resto false).  Usa el canal único de event_tracks (sin doble socket).
+	// Carga inicial al entrar / cambiar de evento.
+	useEffect(() => {
+		void loadPlaying();
+	}, [loadPlaying]);
+
+	// Short-polling: el cambio de tema (is_played) ya NO llega por UPDATE
+	// Realtime (saturaba el WAL).  Sondeamos cada 2.5s mientras hay evento
+	// y la pestaña está visible.
+	useInterval(() => {
+		void loadPlaying();
+	}, eventId ? NOWPLAYING_POLL_MS : null);
+
+	// Realtime COMPARTIDO: SÓLO INSERT/DELETE.  Si el DJ BORRA el tema que
+	// está sonando, lo limpiamos al instante (no esperamos al siguiente
+	// poll).  El cambio de canción en sí lo detecta el polling.
 	useEventTracksChannel(eventId, (payload) => {
 		if (payload.eventType === "DELETE") {
 			const oldId = (payload.old as { id?: string })?.id;
 			setPlaying((cur) => (cur && cur.id === oldId ? null : cur));
-			return;
-		}
-		const row = payload.new as (Playing & { is_played?: boolean }) | undefined;
-		if (!row?.id) return;
-		if (row.is_played === true) {
-			setPlaying({
-				id: row.id,
-				title: row.title,
-				artist: row.artist,
-				cover_image_url: row.cover_image_url,
-				spotify_id: row.spotify_id,
-			});
-		} else {
-			setPlaying((cur) => (cur && cur.id === row.id ? null : cur));
 		}
 	});
 

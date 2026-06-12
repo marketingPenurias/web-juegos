@@ -26,7 +26,12 @@ export type RewardError =
 	| "missing_tenant"
 	| "service_unavailable"
 	| "network_error"
-	| "rpc_failed";
+	| "rpc_failed"
+	// Consumo del ticket (complete_redemption)
+	| "already_consumed"
+	| "not_redeeming"
+	| "reward_not_found"
+	| "consume_failed";
 
 export type PurchaseSuccess = {
 	ok: true;
@@ -40,6 +45,13 @@ export type RedeemSuccess = {
 	action_type: "redeem";
 	reward_id: string;
 	expires_at: string;
+};
+
+export type ConsumeSuccess = {
+	ok: true;
+	action_type: "consume";
+	reward_id: string;
+	consumed_at?: string;
 };
 
 /** Una fila de "Mis Tickets" (reward comprado aún canjeable). */
@@ -144,6 +156,25 @@ export function useRewards() {
 		[tenant.slug],
 	);
 
+	// Consumo REAL del ticket (anti-fraude).  Marca el reward 'consumed'
+	// server-side vía `complete_redemption`.  La pantalla camarero sólo
+	// debe mostrar la animación de "quemado" si esto devuelve ok:true.
+	const consume = useCallback(
+		async (reward_id: string): Promise<RewardResult<ConsumeSuccess>> => {
+			setPending(true);
+			setLastError(null);
+			const result = await postRewards<ConsumeSuccess>({
+				action_type: "consume",
+				tenant_slug: tenant.slug,
+				reward_id,
+			});
+			setPending(false);
+			if (!result.ok) setLastError(result.error);
+			return result;
+		},
+		[tenant.slug],
+	);
+
 	// GET /api/rewards — lista "Mis Tickets" (rewards aún canjeables).
 	const list = useCallback(async (): Promise<
 		{ ok: true; rows: MyReward[] } | { ok: false; error: RewardError }
@@ -172,5 +203,5 @@ export function useRewards() {
 		}
 	}, [tenant.slug]);
 
-	return { purchase, redeem, list, pending, lastError };
+	return { purchase, redeem, consume, list, pending, lastError };
 }

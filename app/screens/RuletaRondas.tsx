@@ -34,8 +34,8 @@ const DEFAULT_SPIN_REWARD = 15; // fallback; el importe real lo fija tenant_toke
  *     · Cada tirada concedida ahora regala **+15 tokens** al usuario
  *       que pulsa "Girar".  No es premio aleatorio, es un dividendo
  *       de participación — siempre persiste server-side.
- *     · Persistencia vía `useEarn` → POST `/api/wallet` con
- *       `amount: +15`, `reason: 'ruleta_spin'`.
+ *     · Persistencia vía `useClaim` → POST `/api/wallet` con
+ *       `event_code: 'ruleta_spin'` (importe server-authoritative).
  *     · Si la llamada falla (sin red, sin sesión, RPC down):
  *         - Toast warning al usuario.
  *         - NO se actualiza balance local.

@@ -21,8 +21,12 @@ import { extractSlugFromHost } from "../lib/tenant";
  *   - Spend (amount < 0): atomic SQL RPC `spend_tokens` (SELECT FOR
  *     UPDATE + insert in one transaction).  NULL response → 400
  *     insufficient_funds.
- *   - Earn (amount > 0): direct insert; the trigger updates the
- *     read-side projection.
+ *   - Claim (event_code): server-authoritative income via the RPC
+ *     `claim_gamification_reward`.  The amount is read from the DB; the
+ *     client never decides it.  This is the ONLY valid income path.
+ *   - Earn (amount > 0): DISABLED.  The old direct-insert path trusted
+ *     the client-supplied amount and let any JWT mint unlimited tokens
+ *     (Audit 360º · §1 CRITICAL).  Now returns 400 `earn_disabled`.
  *   - Returns the new balance on success.
  */
 
@@ -300,45 +304,22 @@ export async function action({ request, context }: Route.ActionArgs) {
 		);
 	}
 
-	// ── EARN PATH ─────────────────────────────────────────────────────
-	// Direct insert is safe — credits never overdraft.  The AFTER INSERT
-	// trigger updates the materialized balance + lifetime_earned.
-	const { error: insertErr } = await supabase
-		.from("wallet_ledger")
-		.insert({
-			tenant_id,
-			user_id: userProfileId,
-			amount,
-			reason,
-			metadata,
-		});
-
-	if (insertErr) {
-		console.warn("[api.wallet] earn insert failed", insertErr.message);
-		return jsonResponse(
-			{ ok: false, error: "insert_failed" },
-			{ status: 500, request },
-		);
-	}
-
-	// Read back the materialized projection for an accurate response.
-	const { data: updated } = await supabase
-		.from("user_profiles")
-		.select("token_balance, lifetime_earned")
-		.eq("id", userProfileId)
-		.maybeSingle();
-
+	// ── EARN PATH — CERRADO (Auditoría 360º · §1 CRÍTICO) ─────────────
+	// El antiguo camino de ingreso directo confiaba en el `amount` +
+	// `reason` del cliente: un JWT válido podía insertar tokens
+	// arbitrarios en `wallet_ledger` y acuñar saldo infinito, saltándose
+	// por completo `tenant_token_rewards` y el límite diario.
+	//
+	// TODO ingreso pasa ahora EXCLUSIVAMENTE por el RPC
+	// `claim_gamification_reward` (modo CLAIM, arriba): el servidor lee
+	// el importe de la BD e ignora cualquier cantidad del cliente.  Un
+	// `amount > 0` por esta vía ya no es válido.
+	//
+	// `metadata`/`currentBalance` siguen calculándose arriba para el
+	// SPEND PATH; aquí sólo rechazamos.
 	return jsonResponse(
-		{
-			ok: true,
-			amount,
-			reason,
-			balance: Number(updated?.token_balance ?? currentBalance + amount),
-			lifetime_earned: Number(
-				updated?.lifetime_earned ?? Number(profile.lifetime_earned ?? 0) + amount,
-			),
-		},
-		{ request },
+		{ ok: false, error: "earn_disabled", detail: "use /api/wallet claim mode (event_code)" },
+		{ status: 400, request },
 	);
 }
 
