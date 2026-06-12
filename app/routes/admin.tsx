@@ -5,7 +5,7 @@ import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
 	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
 	Square, Search, CalendarClock, CalendarPlus, Play, ListMusic, Copy,
-	Library, FolderPlus, Tv, Images,
+	Library, FolderPlus, Tv, Images, Eye, EyeOff,
 } from "lucide-react";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
@@ -375,13 +375,19 @@ export default function Admin() {
 								<TvControlPanel
 									slug={tenantSlugFromHost()}
 									busy={busy}
-									onSet={(mode, url) =>
+									onSet={(s) =>
 										run(
 											"set_tv_backdrop",
-											{ event_id: event.id, tv_mode: mode, tv_url: url },
-											mode === "photo"
+											{
+												event_id: event.id,
+												tv_mode: s.mode,
+												tv_url: s.url,
+												tv_show_ranking: s.showRanking,
+												tv_show_battle: s.showBattle,
+											},
+											s.mode === "photo"
 												? "📌 Foto fijada en la TV"
-												: mode === "video"
+												: s.mode === "video"
 													? "📺 Sólo vídeo en la TV"
 													: "🔄 Carrusel mixto en la TV",
 										)
@@ -683,23 +689,35 @@ function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 // directo: clavar un flyer concreto o dejar el carrusel automático.  La
 // preferencia se persiste (tenant_events.metadata) y la TV la escucha por
 // Realtime → el cambio se ve al instante en la pantalla grande.
+type TvState = {
+	mode: "video" | "photo" | "carousel";
+	url: string | null;
+	showRanking: boolean;
+	showBattle: boolean;
+};
+
 function TvControlPanel({ slug, busy, onSet }: {
 	slug: string; busy: boolean;
-	onSet: (mode: "video" | "photo" | "carousel", url: string | null) => void;
+	onSet: (state: TvState) => void;
 }) {
 	const photos = useVenuePhotos(slug);
 	const tenant = useTenant();
 	const hasVideo = Boolean(tenant.bgVideoUrl);
 	// Selección local (refleja el último clic del DJ).  La verdad vive en la
 	// BD y la TV la recibe por Realtime.
-	const [sel, setSel] = useState<{ mode: "video" | "photo" | "carousel"; url: string | null }>({
+	const [sel, setSel] = useState<TvState>({
 		mode: "carousel",
 		url: null,
+		showRanking: true,
+		showBattle: true,
 	});
 
-	const pick = (mode: "video" | "photo" | "carousel", url: string | null = null) => {
-		setSel({ mode, url });
-		onSet(mode, url);
+	// Aplica un cambio parcial: actualiza el estado local Y lo envía entero
+	// al backend (la pantalla recibe el objeto completo por Realtime).
+	const apply = (patch: Partial<TvState>) => {
+		const next = { ...sel, ...patch };
+		setSel(next);
+		onSet(next);
 	};
 
 	return (
@@ -709,15 +727,15 @@ function TvControlPanel({ slug, busy, onSet }: {
 				<span className="font-black">Control de Pantallas (TV)</span>
 			</div>
 			<p className="text-[11px] text-zinc-500">
-				Elige qué se ve de fondo en la pantalla del local. El cambio se aplica al instante.
+				Elige qué se ve de fondo y qué capas mostrar en la pantalla del local. El cambio se aplica al instante.
 			</p>
 
-			{/* Selector de MODO: Carrusel mixto · Sólo vídeo */}
+			{/* Selector de MODO de fondo: Carrusel mixto · Sólo vídeo */}
 			<div className="grid grid-cols-2 gap-3">
 				<button
 					type="button"
 					disabled={busy}
-					onClick={() => pick("carousel")}
+					onClick={() => apply({ mode: "carousel", url: null })}
 					className={cn(
 						"rounded-2xl border-2 p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all",
 						sel.mode === "carousel"
@@ -732,7 +750,7 @@ function TvControlPanel({ slug, busy, onSet }: {
 				<button
 					type="button"
 					disabled={busy || !hasVideo}
-					onClick={() => pick("video")}
+					onClick={() => apply({ mode: "video", url: null })}
 					title={hasVideo ? "Mostrar sólo el vídeo del local" : "Este local no tiene vídeo configurado"}
 					className={cn(
 						"rounded-2xl border-2 p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all",
@@ -747,6 +765,25 @@ function TvControlPanel({ slug, busy, onSet }: {
 					<span className="text-[9px] text-zinc-500">{hasVideo ? "Identidad del local" : "Sin vídeo"}</span>
 				</button>
 			</div>
+
+			{/* Toggles de CAPAS: ranking y batalla (ocultar = sólo fondo) */}
+			<div className="grid grid-cols-2 gap-3">
+				<LayerToggle
+					label="Ranking"
+					on={sel.showRanking}
+					busy={busy}
+					onToggle={() => apply({ showRanking: !sel.showRanking })}
+				/>
+				<LayerToggle
+					label="Batalla"
+					on={sel.showBattle}
+					busy={busy}
+					onToggle={() => apply({ showBattle: !sel.showBattle })}
+				/>
+			</div>
+			<p className="text-[10px] text-zinc-600 px-1">
+				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo (foto / vídeo / carrusel).
+			</p>
 
 			{/* Fijar una FOTO concreta (mode='photo') */}
 			<div className="flex items-center justify-between px-1 pt-1">
@@ -764,7 +801,7 @@ function TvControlPanel({ slug, busy, onSet }: {
 								key={url}
 								type="button"
 								disabled={busy}
-								onClick={() => pick("photo", url)}
+								onClick={() => apply({ mode: "photo", url })}
 								title="Fijar esta foto (el vídeo se pausa)"
 								className={cn(
 									"relative aspect-video rounded-xl overflow-hidden border-2 active:scale-95 transition-all",
@@ -785,6 +822,30 @@ function TvControlPanel({ slug, busy, onSet }: {
 				</div>
 			)}
 		</section>
+	);
+}
+
+// Toggle mostrar/ocultar una capa de la TV (ranking o batalla).
+function LayerToggle({ label, on, busy, onToggle }: {
+	label: string; on: boolean; busy: boolean; onToggle: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			disabled={busy}
+			onClick={onToggle}
+			aria-pressed={on}
+			className={cn(
+				"rounded-2xl border-2 p-3 flex items-center justify-center gap-2 active:scale-95 transition-all",
+				on
+					? "border-lime-400/70 bg-lime-500/10 text-lime-200"
+					: "border-zinc-700 bg-zinc-950/60 text-zinc-500",
+			)}
+		>
+			{on ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+			<span className="text-[11px] font-black uppercase tracking-widest">{label}</span>
+			<span className="text-[9px] font-bold opacity-70">{on ? "Visible" : "Oculto"}</span>
+		</button>
 	);
 }
 

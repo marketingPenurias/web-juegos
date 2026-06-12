@@ -40,9 +40,11 @@ type AdminBody = {
 	minutes?: number;
 	event_id?: string;
 	global_ids?: string[];
-	// Control de pantallas (TV): fondo carrusel vs. imagen fijada.
+	// Control de pantallas (TV): modo de fondo + visibilidad de capas.
 	tv_mode?: string;
 	tv_url?: string;
+	tv_show_ranking?: boolean;
+	tv_show_battle?: boolean;
 };
 
 type ParsedTrack = {
@@ -319,6 +321,10 @@ export async function handleAdminAction(
 			if (mode === "photo" && !url) {
 				return jsonResponse({ ok: false, error: "url_required" }, { status: 400, request });
 			}
+			// Visibilidad de capas (toggles del DJ).  Default visible (true).
+			const showRanking = body.tv_show_ranking !== false;
+			const showBattle = body.tv_show_battle !== false;
+			const tvBackdrop = { mode, url, showRanking, showBattle };
 			// Read-modify-write del jsonb (un solo DJ lo toca; sin carrera real).
 			const { data: ev } = await supabase
 				.from("tenant_events")
@@ -329,7 +335,7 @@ export async function handleAdminAction(
 			if (!ev) return jsonResponse({ ok: false, error: "event_not_found" }, { status: 404, request });
 			const metadata = {
 				...((ev.metadata as Record<string, unknown> | null) ?? {}),
-				tv_backdrop: { mode, url },
+				tv_backdrop: tvBackdrop,
 			};
 			const { error } = await supabase
 				.from("tenant_events")
@@ -339,9 +345,9 @@ export async function handleAdminAction(
 			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
 			await supabase.from("audit_logs").insert({
 				tenant_id, actor_id: verifiedId, action: "set_tv_backdrop",
-				table_name: "tenant_events", record_id: eventId, new_data: { mode, url },
+				table_name: "tenant_events", record_id: eventId, new_data: tvBackdrop,
 			});
-			return jsonResponse({ ok: true, backdrop: { mode, url } }, { request });
+			return jsonResponse({ ok: true, backdrop: tvBackdrop }, { request });
 		}
 
 		case "now_playing": {

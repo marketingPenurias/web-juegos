@@ -33,11 +33,18 @@ type Track = {
 
 type Battle = { id: string; endsAt: string; a: Track; b: Track };
 
-/** Preferencia de fondo de la TV (control remoto del Staff).
- *   video    → sólo el vídeo del local
- *   photo    → una foto fija (`url`), vídeo pausado
- *   carousel → MIXTO: vídeo de base + fotos rotando encima */
-type TvBackdrop = { mode: "video" | "photo" | "carousel"; url: string | null };
+/** Preferencia de pantalla de la TV (control remoto del Staff).
+ *   mode:  video    → sólo el vídeo del local
+ *          photo    → una foto fija (`url`), vídeo pausado
+ *          carousel → MIXTO: vídeo de base + fotos rotando encima
+ *   showRanking → mostrar el Top de la noche (false = sólo fondo)
+ *   showBattle  → mostrar la batalla de temas cuando haya una en vivo */
+type TvBackdrop = {
+	mode: "video" | "photo" | "carousel";
+	url: string | null;
+	showRanking: boolean;
+	showBattle: boolean;
+};
 
 type Props = {
 	tenantId: string;
@@ -66,7 +73,7 @@ export function Jumbotron({
 	const venuePhotos = useVenuePhotos(tenant.slug);
 	// Preferencia de fondo controlada por el DJ desde /admin (realtime).
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
-		initialBackdrop ?? { mode: "carousel", url: null },
+		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true },
 	);
 	// Vídeo de fondo del local (siempre disponible si el tenant lo configuró).
 	const bgVideoUrl = tenant.bgVideoUrl ?? null;
@@ -165,12 +172,14 @@ export function Jumbotron({
 				(payload) => {
 					const meta = (payload.new as { metadata?: Record<string, unknown> })?.metadata ?? null;
 					const raw = (meta?.tv_backdrop ?? null) as
-						| { mode?: string; url?: string | null }
+						| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean }
 						| null;
 					const m = raw?.mode;
 					setBackdrop({
 						mode: m === "video" || m === "photo" ? m : "carousel",
 						url: typeof raw?.url === "string" ? raw.url : null,
+						showRanking: raw?.showRanking !== false, // default true
+						showBattle: raw?.showBattle !== false, // default true
 					});
 				},
 			)
@@ -306,7 +315,12 @@ export function Jumbotron({
 	// Foto fijada por el DJ (sólo en modo "photo"; null en video/carousel).
 	const pinnedBackdropUrl = backdrop.mode === "photo" ? backdrop.url : null;
 
-	const inBattle = enableBattle && !!battle;
+	// Visibilidad de capas (toggles del DJ).  Si oculta AMBAS, la pantalla
+	// queda LIMPIA con sólo el fondo (foto / vídeo / carrusel).
+	const displayBattle = enableBattle && !!battle && backdrop.showBattle;
+	const displayRanking = backdrop.showRanking;
+	const cleanMode = !displayBattle && !displayRanking;
+	const inBattle = displayBattle;
 	const total = aVotes + bVotes;
 	const aPct = total > 0 ? Math.round((aVotes / total) * 100) : 50;
 	const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
@@ -333,6 +347,7 @@ export function Jumbotron({
 				<div className="absolute -bottom-32 -right-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-accent)/15 blur-[140px]" />
 			</div>
 
+			{!cleanMode && (
 			<header className="relative z-10 px-12 pt-12 pb-6 flex items-center justify-between">
 				<div className="flex items-center gap-4">
 					<div className="w-16 h-16 rounded-2xl bg-linear-to-tr from-(--jumbo-primary) to-(--jumbo-accent) p-0.5">
@@ -358,8 +373,9 @@ export function Jumbotron({
 					<span className="text-xs font-black uppercase tracking-widest">{connected ? "EN DIRECTO" : "Conectando…"}</span>
 				</div>
 			</header>
+			)}
 
-			{inBattle && battle ? (
+			{!cleanMode && (inBattle && battle ? (
 				// ── MODO DUELO ───────────────────────────────────────────────
 				<main className="relative z-10 flex-1 px-12 pb-12 flex flex-col">
 					<div className="flex items-center justify-center gap-4 mb-6">
@@ -429,13 +445,15 @@ export function Jumbotron({
 
 					{showQr && <QrBlock url={qrTarget} label={venueHost} fgColor={tenant.theme.primary ?? "#ffffff"} />}
 				</main>
-			)}
+			))}
 
+			{!cleanMode && (
 			<footer className="relative z-10 px-12 pb-8 text-center">
 				<p className="text-xs uppercase tracking-[0.4em] text-zinc-600 font-bold">
 					Vota desde tu móvil · {venueHost}
 				</p>
 			</footer>
+			)}
 		</div>
 	);
 }
