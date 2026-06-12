@@ -5,6 +5,7 @@ import { AppFrame } from "./AppFrame";
 import { BottomNav } from "./BottomNav";
 import { RedemptionScreen } from "./RedemptionScreen";
 import { CheckinResultModal } from "./CheckinResultModal";
+import { BirthDateGate } from "./BirthDateGate";
 import { NowPlaying } from "./NowPlaying";
 import { Onboarding } from "../screens/Onboarding";
 import { Hub } from "../screens/Hub";
@@ -51,6 +52,9 @@ export default function LaPochaApp() {
 			)}
 
 			<CheckinResultModal />
+
+			{/* Gate +18 / cumpleaños: bloquea el juego hasta capturar birth_date. */}
+			<BirthDateGate />
 		</div>
 	);
 }

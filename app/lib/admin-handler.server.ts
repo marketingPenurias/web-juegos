@@ -39,6 +39,7 @@ type AdminBody = {
 	cover_image_url?: string;
 	minutes?: number;
 	event_id?: string;
+	global_ids?: string[];
 };
 
 type ParsedTrack = {
@@ -206,7 +207,57 @@ export async function handleAdminAction(
 			const { data } = await supabase.rpc("admin_bulk_insert_global", {
 				p_tenant_id: tenant_id, p_actor_uid: verifiedId, p_tracks: tracks,
 			});
-			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
+
+			// Pegar en el textarea con una fiesta activa = el DJ quiere esas
+			// canciones EN LA PISTA de hoy, no sólo guardadas en biblioteca.
+			// Tras escribir en global_tracks, las reflejamos en event_tracks
+			// (dedupe por spotify_id contra lo ya presente en el evento).
+			let added_to_event = 0;
+			const bulkEventId = String(body.event_id ?? "");
+			if (bulkEventId) {
+				const spotifyIds = tracks.map((t) => t.spotify_id);
+				const { data: globals } = await supabase
+					.from("global_tracks")
+					.select("id, spotify_id, title, artist, cover_image_url")
+					.eq("tenant_id", tenant_id)
+					.in("spotify_id", spotifyIds);
+				const { data: existing } = await supabase
+					.from("event_tracks")
+					.select("spotify_id")
+					.eq("tenant_id", tenant_id)
+					.eq("event_id", bulkEventId);
+				const already = new Set(
+					(existing ?? []).map((r) => (r as { spotify_id: string }).spotify_id),
+				);
+				const toInsert = (globals ?? [])
+					.filter((g) => !already.has((g as { spotify_id: string }).spotify_id))
+					.map((g) => {
+						const row = g as {
+							spotify_id: string; title: string; artist: string; cover_image_url: string | null;
+						};
+						return {
+							tenant_id,
+							event_id: bulkEventId,
+							spotify_id: row.spotify_id,
+							title: row.title,
+							artist: row.artist,
+							cover_image_url: row.cover_image_url,
+						};
+					});
+				if (toInsert.length > 0) {
+					const { error: insErr } = await supabase.from("event_tracks").insert(toInsert);
+					if (!insErr) {
+						added_to_event = toInsert.length;
+						await supabase.from("audit_logs").insert({
+							tenant_id, actor_id: verifiedId, action: "bulk_add_to_event",
+							table_name: "event_tracks", record_id: bulkEventId,
+							new_data: { count: added_to_event },
+						});
+					}
+				}
+			}
+
+			return jsonResponse({ ...(data ?? { ok: true }), added_to_event }, { request });
 		}
 
 		case "add_track": {
@@ -392,6 +443,115 @@ export async function handleAdminAction(
 				p_template_id: String(body.template_id ?? ""),
 			});
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
+		}
+
+		// ── V1.7: inyección MÚLTIPLE biblioteca→evento (modal de carga) ──
+		// Selección de N globales → event_tracks (dedupe por spotify_id).
+		case "add_event_tracks": {
+			const eventId = String(body.event_id ?? "");
+			const ids = Array.isArray(body.global_ids)
+				? body.global_ids.filter((x): x is string => typeof x === "string")
+				: [];
+			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+			if (ids.length === 0) return jsonResponse({ ok: false, error: "no_tracks" }, { status: 400, request });
+
+			const { data: globals } = await supabase
+				.from("global_tracks")
+				.select("spotify_id, title, artist, cover_image_url")
+				.eq("tenant_id", tenant_id)
+				.in("id", ids);
+			const { data: existing } = await supabase
+				.from("event_tracks")
+				.select("spotify_id")
+				.eq("tenant_id", tenant_id)
+				.eq("event_id", eventId);
+			const already = new Set((existing ?? []).map((r) => (r as { spotify_id: string }).spotify_id));
+			const toInsert = (globals ?? [])
+				.filter((g) => !already.has((g as { spotify_id: string }).spotify_id))
+				.map((g) => {
+					const row = g as { spotify_id: string; title: string; artist: string; cover_image_url: string | null };
+					return {
+						tenant_id, event_id: eventId,
+						spotify_id: row.spotify_id, title: row.title, artist: row.artist,
+						cover_image_url: row.cover_image_url,
+					};
+				});
+			let added = 0;
+			if (toInsert.length > 0) {
+				const { error } = await supabase.from("event_tracks").insert(toInsert);
+				if (error) return jsonResponse({ ok: false, error: "insert_failed", detail: error.message }, { status: 500, request });
+				added = toInsert.length;
+				await supabase.from("audit_logs").insert({
+					tenant_id, actor_id: verifiedId, action: "add_event_tracks",
+					table_name: "event_tracks", record_id: eventId, new_data: { added },
+				});
+			}
+			return jsonResponse({ ok: true, added }, { request });
+		}
+
+		// ── V1.7: crear plantilla desde selección de globales SIN evento ──
+		case "create_template": {
+			const name = String(body.name ?? "").trim();
+			const ids = Array.isArray(body.global_ids)
+				? body.global_ids.filter((x): x is string => typeof x === "string")
+				: [];
+			if (!name) return jsonResponse({ ok: false, error: "name_required" }, { status: 400, request });
+			if (ids.length === 0) return jsonResponse({ ok: false, error: "no_tracks" }, { status: 400, request });
+
+			const { data: globals } = await supabase
+				.from("global_tracks")
+				.select("spotify_id, title, artist, cover_image_url")
+				.eq("tenant_id", tenant_id)
+				.in("id", ids);
+			if (!globals || globals.length === 0) {
+				return jsonResponse({ ok: false, error: "no_tracks" }, { status: 400, request });
+			}
+			const { data: tpl, error: tplErr } = await supabase
+				.from("event_templates")
+				.insert({ tenant_id, name: name.slice(0, 120), created_by: verifiedId })
+				.select("id")
+				.single();
+			if (tplErr || !tpl) {
+				return jsonResponse({ ok: false, error: "create_failed", detail: tplErr?.message }, { status: 500, request });
+			}
+			const rows = globals.map((g, i) => {
+				const row = g as { spotify_id: string; title: string; artist: string; cover_image_url: string | null };
+				return {
+					template_id: tpl.id as string, tenant_id,
+					spotify_id: row.spotify_id, title: row.title, artist: row.artist,
+					cover_image_url: row.cover_image_url, position: i,
+				};
+			});
+			const { error: trErr } = await supabase.from("event_template_tracks").insert(rows);
+			if (trErr) {
+				await supabase.from("event_templates").delete().eq("id", tpl.id as string);
+				return jsonResponse({ ok: false, error: "create_failed", detail: trErr.message }, { status: 500, request });
+			}
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "create_template",
+				table_name: "event_templates", record_id: tpl.id as string,
+				new_data: { name, tracks: rows.length },
+			});
+			return jsonResponse({ ok: true, template_id: tpl.id, tracks: rows.length }, { request });
+		}
+
+		// ── V1.7: renombrar plantilla (edición rápida) ──
+		case "rename_template": {
+			const id = String(body.template_id ?? "");
+			const name = String(body.name ?? "").trim();
+			if (!id) return jsonResponse({ ok: false, error: "template_id_required" }, { status: 400, request });
+			if (!name) return jsonResponse({ ok: false, error: "name_required" }, { status: 400, request });
+			const { error } = await supabase
+				.from("event_templates")
+				.update({ name: name.slice(0, 120) })
+				.eq("id", id)
+				.eq("tenant_id", tenant_id);
+			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "rename_template",
+				table_name: "event_templates", record_id: id, new_data: { name },
+			});
+			return jsonResponse({ ok: true }, { request });
 		}
 
 		default:

@@ -81,6 +81,7 @@ export interface UserProfileRow {
 	token_balance: number;
 	lifetime_earned: number;
 	auth_user_id: string | null;
+	birth_date: string | null; // ISO date (YYYY-MM-DD); V1.7
 	created_at: string;
 }
 export type UserProfileInsert = Omit<
@@ -90,7 +91,7 @@ export type UserProfileInsert = Omit<
 	Partial<
 		Pick<
 			UserProfileRow,
-			"id" | "created_at" | "token_balance" | "lifetime_earned"
+			"id" | "created_at" | "token_balance" | "lifetime_earned" | "birth_date"
 		>
 	>;
 export type UserProfileUpdate = Partial<UserProfileRow>;

@@ -20,6 +20,10 @@ import {
  *     · JWT obligatorio · tenant strict.
  *     · Lectura con service-role (igual que /api/history); el aislamiento
  *       por tenant lo impone el `WHERE tenant_id` explícito.
+ *     · RANKING por `lifetime_earned` (tokens ganados de por vida), NUNCA
+ *       por `token_balance`.  Gastar en barra NO debe hacerte caer del Top:
+ *       el ranking premia al que más ha jugado/ganado, no al que acumula sin
+ *       consumir.  El número mostrado es también el lifetime (coherente).
  *     · PRIVACIDAD: nunca devolvemos email.  Mostramos `display_name`
  *       cuando existe; si no, un alias anónimo "Jefe #N".  El email es PII
  *       y no debe filtrarse a otros usuarios.
@@ -99,7 +103,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		.from("user_profiles")
 		.select("id, display_name, token_balance, lifetime_earned")
 		.eq("tenant_id", tenant_id)
-		.order("token_balance", { ascending: false })
+		// Ranking por tokens HISTÓRICOS ganados — gastar no te hace bajar.
 		.order("lifetime_earned", { ascending: false })
 		.limit(limit);
 
@@ -117,7 +121,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		rank: i + 1,
 		// Privacidad: display_name si lo hay; nunca el email.
 		name: p.display_name?.trim() || `Jefe #${i + 1}`,
-		tokens: Number(p.token_balance ?? 0),
+		// Mostramos el lifetime (mismo eje que el ranking) para no confundir.
+		tokens: Number(p.lifetime_earned ?? 0),
 		is_me: p.id === user_profile_id,
 	}));
 
@@ -126,15 +131,15 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	if (myRank === null) {
 		const { data: me } = await supabase
 			.from("user_profiles")
-			.select("token_balance")
+			.select("lifetime_earned")
 			.eq("id", user_profile_id)
 			.maybeSingle();
-		const myBalance = Number(me?.token_balance ?? 0);
+		const myLifetime = Number(me?.lifetime_earned ?? 0);
 		const { count } = await supabase
 			.from("user_profiles")
 			.select("id", { count: "exact", head: true })
 			.eq("tenant_id", tenant_id)
-			.gt("token_balance", myBalance);
+			.gt("lifetime_earned", myLifetime);
 		myRank = (count ?? 0) + 1;
 	}
 

@@ -5,8 +5,10 @@ import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
 	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
 	Square, Search, CalendarClock, CalendarPlus, Play, ListMusic, Copy,
+	Library, FolderPlus,
 } from "lucide-react";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
+import { cn } from "../lib/utils";
 
 /**
  * /admin — Consola del DJ / Staff (Bloque 4).
@@ -27,6 +29,9 @@ type EventTrack = GlobalTrack & { total_votes: number; is_played: boolean };
 type Battle = { id: string; status: string; ends_at: string } | null;
 type Metrics = { total_votes: number; tokens_spent_today: number; checkins_today: number; active_players: number };
 type Template = { id: string; name: string; created_at: string; track_count: number };
+
+// V1.7: navegación por pestañas estilo Rekordbox/Traktor.
+type AdminTab = "live" | "templates" | "global";
 
 type Boot =
 	| { phase: "loading" }
@@ -103,6 +108,17 @@ export default function Admin() {
 	// spotify_id de la última canción inyectada desde la Biblioteca → la fila
 	// correspondiente del PlaylistPanel hace un "flash" GSAP de confirmación.
 	const [flashSpotifyId, setFlashSpotifyId] = useState<string | null>(null);
+	// V1.7 · navegación por pestañas + estado de modales.
+	const [activeTab, setActiveTab] = useState<AdminTab>("live");
+	const [loadOpen, setLoadOpen] = useState(false); // modal "Cargar canciones" (live)
+	const [createTplOpen, setCreateTplOpen] = useState(false); // modal "Crear plantilla"
+	const [saveSessionOpen, setSaveSessionOpen] = useState(false); // modal "Guardar sesión"
+	// Señal de inyección masiva → PlaylistPanel hace pulse + auto-scroll.
+	const [pulse, setPulse] = useState(0);
+	const cheer = (n: number) => {
+		flash(`✅ ${n} ${n === 1 ? "canción inyectada" : "canciones inyectadas"} en la pista`);
+		setPulse((p) => p + 1);
+	};
 
 	const call = useCallback(async (op: string, payload: Record<string, unknown> = {}) => {
 		// NUNCA cacheamos el JWT: supabase-js refresca el token por debajo.
@@ -280,6 +296,24 @@ export default function Admin() {
 		return r;
 	};
 
+	// Borrado OPTIMISTA de una pista: la sacamos del estado local AL INSTANTE
+	// (UI responde sin esperar a la red) y luego confirmamos contra el backend.
+	// Si falla, revalidamos para "deshacer" el borrado optimista.
+	const removeTrackOptimistic = async (trackId: string) => {
+		setBoot((prev) =>
+			prev.phase === "ready"
+				? { ...prev, eventTracks: prev.eventTracks.filter((t) => t.id !== trackId) }
+				: prev,
+		);
+		const r = await call("remove_track", { track_id: trackId });
+		if (r.ok === true) {
+			flash("Canción quitada");
+		} else {
+			flash(`⚠️ ${String(r.error ?? "error")}`);
+			await refresh(); // re-sincroniza: la canción vuelve si no se borró
+		}
+	};
+
 	// ── Render por fases ──────────────────────────────────────────────
 	if (boot.phase === "loading") {
 		return <Center><Loader2 className="w-10 h-10 animate-spin text-cyan-400" /><p className="text-zinc-300 font-bold mt-3">Cargando panel…</p></Center>;
@@ -306,65 +340,161 @@ export default function Admin() {
 				</header>
 
 				{!event ? (
-					<OpenPartyButton busy={busy} onOpen={() => run("open_party", {}, "¡Fiesta abierta!")} />
+					// Sin fiesta activa: abrir la de hoy o programar/activar otra.
+					<>
+						<OpenPartyButton busy={busy} onOpen={() => run("open_party", {}, "¡Fiesta abierta!")} />
+						<EventsManager
+							events={eventsHistory}
+							activeId={null}
+							busy={busy}
+							onCreate={(payload) => run("create_event", payload, "Evento programado")}
+							onActivate={(id) => run("activate_event", { event_id: id }, "Evento activado")}
+						/>
+					</>
 				) : (
 					<>
+						{/* Cabecera de sesión: evento activo + métricas (siempre visible) */}
 						<EventCard event={event} busy={busy} onSave={(patch) => run("update_event", { event_id: event.id, ...patch }, "Evento actualizado")} />
 						<MetricsRow metrics={metrics} />
-						<BattlePanel
-							battle={battle}
-							tracks={eventTracks}
-							busy={busy}
-							onStart={(trackA, trackB, minutes) => run("start_battle", { event_id: event.id, track_a: trackA, track_b: trackB, minutes }, "¡Batalla iniciada!")}
-							onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
-						/>
-						{/* Plantillas ARRIBA (por encima del pliegue): el DJ las ve sin
-						    scrollear, justo antes de tocar la pista de esta noche. */}
-						<TemplatesPanel
-							templates={templates}
-							hasTracks={eventTracks.length > 0}
-							busy={busy}
-							onSave={(name) => run("save_template", { event_id: event.id, name }, "Plantilla guardada")}
-							onApply={(id) => run("apply_template", { event_id: event.id, template_id: id }, "Plantilla aplicada")}
-							onDelete={(id) => run("delete_template", { template_id: id }, "Plantilla borrada")}
-						/>
-						<div className="grid md:grid-cols-2 gap-5">
+
+						<TabBar active={activeTab} onChange={setActiveTab} templateCount={templates.length} />
+
+						{/* ── PESTAÑA 1 · SESIÓN EN VIVO ─────────────────────── */}
+						{activeTab === "live" && (
+							<div className="flex flex-col gap-5">
+								<BattlePanel
+									battle={battle}
+									tracks={eventTracks}
+									busy={busy}
+									onStart={(trackA, trackB, minutes) => run("start_battle", { event_id: event.id, track_a: trackA, track_b: trackB, minutes }, "¡Batalla iniciada!")}
+									onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
+								/>
+
+								{eventTracks.length === 0 ? (
+									// Pista vacía → llamada a la acción gigante centrada.
+									<button
+										type="button"
+										onClick={() => setLoadOpen(true)}
+										className="rounded-3xl border-2 border-dashed border-cyan-500/40 bg-cyan-500/5 hover:bg-cyan-500/10 p-12 flex flex-col items-center justify-center gap-3 active:scale-[0.99] transition-all"
+									>
+										<div className="w-16 h-16 rounded-full bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-center">
+											<Plus className="w-9 h-9 text-cyan-300" strokeWidth={2.5} />
+										</div>
+										<span className="text-2xl font-black italic tracking-tight">Cargar Canciones</span>
+										<span className="text-sm text-zinc-400 font-bold">Inyecta temas desde la biblioteca o una plantilla</span>
+									</button>
+								) : (
+									<>
+										{/* Botón ARRIBA de la lista (la pista ya tiene temas). */}
+										<button
+											type="button"
+											onClick={() => setLoadOpen(true)}
+											className="h-12 rounded-2xl bg-cyan-500 text-black font-black inline-flex items-center justify-center gap-2 active:scale-95 shadow-[0_0_20px_rgba(0,212,255,0.3)]"
+										>
+											<Plus className="w-5 h-5" strokeWidth={3} /> Cargar canciones
+										</button>
+										<PlaylistPanel
+											tracks={eventTracks}
+											busy={busy}
+											pulse={pulse}
+											flashSpotifyId={flashSpotifyId}
+											onFlashDone={() => setFlashSpotifyId(null)}
+											onNowPlaying={(id) => run("now_playing", { event_id: event.id, track_id: id }, "Sonando ahora ▶")}
+											onStopAll={() => run("stop_now_playing", { event_id: event.id }, "⏹ Nada sonando")}
+											onUpdate={(id, patch) => run("update_track", { track_id: id, ...patch }, "Canción actualizada")}
+											onRemove={(id) => removeTrackOptimistic(id)}
+										/>
+										{/* Al final de la pista: guardar la sesión como plantilla. */}
+										<button
+											type="button"
+											onClick={() => setSaveSessionOpen(true)}
+											className="h-12 rounded-2xl bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/40 font-black inline-flex items-center justify-center gap-2 active:scale-95"
+										>
+											<Save className="w-4 h-4" /> Guardar esta sesión como Plantilla
+										</button>
+									</>
+								)}
+
+								{/* Programación de eventos (gestión de sesiones) */}
+								<EventsManager
+									events={eventsHistory}
+									activeId={event.id}
+									busy={busy}
+									onCreate={(payload) => run("create_event", payload, "Evento programado")}
+									onActivate={(id) => run("activate_event", { event_id: id }, "Evento activado")}
+								/>
+							</div>
+						)}
+
+						{/* ── PESTAÑA 2 · GESTIÓN DE PLANTILLAS ──────────────── */}
+						{activeTab === "templates" && (
+							<TemplatesPanel
+								templates={templates}
+								hasActiveEvent={true}
+								busy={busy}
+								onCreate={() => setCreateTplOpen(true)}
+								onApply={(id) => run("apply_template", { event_id: event.id, template_id: id }, "Plantilla aplicada al evento")}
+								onRename={(id, name) => run("rename_template", { template_id: id, name }, "Plantilla renombrada")}
+								onDelete={(id) => run("delete_template", { template_id: id }, "Plantilla borrada")}
+							/>
+						)}
+
+						{/* ── PESTAÑA 3 · ALMACÉN GLOBAL ─────────────────────── */}
+						{activeTab === "global" && (
 							<LibraryPanel
 								tracks={globalTracks}
-								eventSpotifyIds={eventSpotifyIds}
 								busy={busy}
-								onBulk={(raw) => run("bulk_global", { raw }, "Biblioteca actualizada")}
-								onAdd={(id, spotifyId) => {
-									// Marca la fila para el flash de confirmación en la pista.
-									setFlashSpotifyId(spotifyId);
-									run("add_track", { event_id: event.id, global_id: id }, "Añadida a la noche");
-								}}
+								onBulk={(raw) => run("bulk_global", { raw, event_id: event.id }, "Biblioteca + pista actualizadas")}
 							/>
-							<PlaylistPanel
-								tracks={eventTracks}
-								busy={busy}
-								flashSpotifyId={flashSpotifyId}
-								onFlashDone={() => setFlashSpotifyId(null)}
-								onNowPlaying={(id) => run("now_playing", { event_id: event.id, track_id: id }, "Sonando ahora ▶")}
-								onStopAll={() => run("stop_now_playing", { event_id: event.id }, "⏹ Nada sonando")}
-								onUpdate={(id, patch) => run("update_track", { track_id: id, ...patch }, "Canción actualizada")}
-								onRemove={(id) => run("remove_track", { track_id: id }, "Canción quitada")}
-							/>
-						</div>
+						)}
 					</>
 				)}
-
-				<EventsManager
-					events={eventsHistory}
-					activeId={event?.id ?? null}
-					busy={busy}
-					onCreate={(payload) => run("create_event", payload, "Evento programado")}
-					onActivate={(id) => run("activate_event", { event_id: id }, "Evento activado")}
-				/>
 			</div>
 
+			{/* ── Modales ────────────────────────────────────────────── */}
+			{event && loadOpen && (
+				<LoadIntoEventModal
+					globalTracks={globalTracks}
+					eventSpotifyIds={eventSpotifyIds}
+					templates={templates}
+					busy={busy}
+					onClose={() => setLoadOpen(false)}
+					onInject={async (ids) => {
+						const r = await run("add_event_tracks", { event_id: event.id, global_ids: ids });
+						if (r.ok === true) { setLoadOpen(false); cheer(Number(r.added ?? ids.length)); }
+					}}
+					onApplyTemplate={async (id) => {
+						const r = await run("apply_template", { event_id: event.id, template_id: id });
+						if (r.ok === true) { setLoadOpen(false); cheer(Number(r.added ?? 0)); }
+					}}
+				/>
+			)}
+
+			{event && saveSessionOpen && (
+				<SaveTemplateModal
+					busy={busy}
+					onClose={() => setSaveSessionOpen(false)}
+					onSave={async (name) => {
+						const r = await run("save_template", { event_id: event.id, name }, "Sesión guardada como plantilla");
+						if (r.ok === true) setSaveSessionOpen(false);
+					}}
+				/>
+			)}
+
+			{createTplOpen && (
+				<CreateTemplateModal
+					globalTracks={globalTracks}
+					busy={busy}
+					onClose={() => setCreateTplOpen(false)}
+					onCreate={async (name, ids) => {
+						const r = await run("create_template", { name, global_ids: ids }, "Plantilla creada");
+						if (r.ok === true) setCreateTplOpen(false);
+					}}
+				/>
+			)}
+
 			{toast && (
-				<div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-100 px-5 py-3 rounded-2xl bg-zinc-900 border border-zinc-700 text-sm font-bold shadow-xl">
+				<div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[120] px-5 py-3 rounded-2xl bg-zinc-900 border border-zinc-700 text-sm font-bold shadow-xl">
 					{toast}
 				</div>
 			)}
@@ -530,67 +660,61 @@ function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 	);
 }
 
-function LibraryPanel({ tracks, eventSpotifyIds, busy, onBulk, onAdd }: {
-	tracks: GlobalTrack[]; eventSpotifyIds: Set<string>; busy: boolean;
-	onBulk: (raw: string) => void; onAdd: (id: string, spotifyId: string) => void;
+// ── PESTAÑA 3 · Almacén Global (data-entry del manager) ──────────────
+// Bulk add masivo + catálogo de sólo lectura.  Inyectar a la pista de hoy
+// NO vive aquí: se hace desde el modal "Cargar canciones" de la pestaña Live.
+function LibraryPanel({ tracks, busy, onBulk }: {
+	tracks: GlobalTrack[]; busy: boolean;
+	onBulk: (raw: string) => void;
 }) {
 	const [raw, setRaw] = useState("");
 	const [query, setQuery] = useState("");
 	const filtered = filterTracks(tracks, query);
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0">
-			<h2 className="font-black flex items-center gap-2"><Music2 className="w-5 h-5 text-cyan-400" /> Biblioteca Global</h2>
-			<p className="text-[11px] text-zinc-500 -mt-1">Tu catálogo guardado. Pulsa <span className="text-cyan-300 font-bold">+ Al evento</span> en cada tema para meterlo en la fiesta de esta noche →</p>
+			<div>
+				<h2 className="font-black flex items-center gap-2"><Library className="w-5 h-5 text-cyan-400" /> Almacén Global</h2>
+				<p className="text-[11px] text-zinc-500 mt-1">El catálogo permanente del local. Pega canciones nuevas aquí (el manager actualiza el catálogo). Para meterlas en la fiesta de hoy, usa <span className="text-cyan-300 font-bold">Cargar canciones</span> en la pestaña Sesión.</p>
+			</div>
 			<textarea
 				value={raw}
 				onChange={(e) => setRaw(e.target.value)}
 				placeholder={"Pega las canciones en este formato (admite varias):\n('0TJYJrUDKQ1btt4g0Xwklw', 'LA GRACIOSA', 'Quevedo, Elvis Crespo', 'https://i.scdn.co/image/...')"}
-				className="w-full h-28 rounded-xl bg-zinc-950 border border-zinc-800 p-3 text-xs font-mono text-zinc-200 resize-none"
+				className="w-full h-32 rounded-xl bg-zinc-950 border border-zinc-800 p-3 text-xs font-mono text-zinc-200 resize-none"
 			/>
-			<button type="button" disabled={busy || !raw.trim()} onClick={() => { onBulk(raw); setRaw(""); }} className="h-10 rounded-xl bg-cyan-500 text-black font-black active:scale-95 disabled:opacity-40">Cargar a biblioteca</button>
+			<button type="button" disabled={busy || !raw.trim()} onClick={() => { onBulk(raw); setRaw(""); }} className="h-11 rounded-xl bg-cyan-500 text-black font-black active:scale-95 disabled:opacity-40 inline-flex items-center justify-center gap-2"><Plus className="w-4 h-4" strokeWidth={3} /> Cargar al almacén</button>
 
-			<SearchInput value={query} onChange={setQuery} placeholder="Buscar en la biblioteca…" />
+			<SearchInput value={query} onChange={setQuery} placeholder="Buscar en el almacén…" />
 
-			<div className="flex flex-col gap-2 overflow-y-auto max-h-[420px] no-scrollbar">
-				{tracks.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Biblioteca vacía. Pega canciones arriba.</p>}
+			<div className="flex items-center justify-between px-1">
+				<span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Catálogo</span>
+				<span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold tabular-nums">{tracks.length} temas</span>
+			</div>
+
+			<div className="flex flex-col gap-2 overflow-y-auto max-h-[480px] no-scrollbar">
+				{tracks.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Almacén vacío. Pega canciones arriba.</p>}
 				{tracks.length > 0 && filtered.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Sin resultados para “{query}”.</p>}
-				{filtered.map((tk) => {
-					const added = eventSpotifyIds.has(tk.spotify_id);
-					return (
-						<div key={tk.id} className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-2.5">
-							<div className="flex-1 min-w-0">
-								<p className="text-sm font-bold truncate">{tk.title}</p>
-								<p className="text-[11px] text-zinc-500 truncate">{tk.artist}</p>
-							</div>
-							<button
-								type="button"
-								disabled={busy || added}
-								onClick={() => onAdd(tk.id, tk.spotify_id)}
-								title={added ? "Ya está en la fiesta de esta noche" : "Inyectar en la pista de esta noche"}
-								className={`shrink-0 h-10 rounded-xl font-black text-xs inline-flex items-center gap-1.5 active:scale-95 transition-colors ${
-									added
-										? "px-3 bg-lime-500/15 text-lime-300 border border-lime-500/40 cursor-default"
-										: "px-4 bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_18px_rgba(16,185,129,0.55)]"
-								}`}
-							>
-								{added ? (
-									<><Check className="w-4 h-4" /> En la pista</>
-								) : (
-									<><Plus className="w-5 h-5" strokeWidth={3} /> Al evento</>
-								)}
-							</button>
+				{filtered.map((tk) => (
+					<div key={tk.id} className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-2.5">
+						<div className="w-10 h-10 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center shrink-0">
+							{tk.cover_image_url ? <img src={tk.cover_image_url} alt="" className="w-full h-full object-cover" /> : <Music2 className="w-4 h-4 text-zinc-600" />}
 						</div>
-					);
-				})}
+						<div className="flex-1 min-w-0">
+							<p className="text-sm font-bold truncate">{tk.title}</p>
+							<p className="text-[11px] text-zinc-500 truncate">{tk.artist}</p>
+						</div>
+					</div>
+				))}
 			</div>
 		</section>
 	);
 }
 
-function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, onNowPlaying, onStopAll, onUpdate, onRemove }: {
+function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, pulse = 0, onNowPlaying, onStopAll, onUpdate, onRemove }: {
 	tracks: EventTrack[]; busy: boolean;
 	flashSpotifyId: string | null;
 	onFlashDone: () => void;
+	pulse?: number; // se incrementa tras una inyección masiva → feedback visual
 	onNowPlaying: (id: string) => void;
 	onStopAll: () => void;
 	onUpdate: (id: string, patch: Record<string, unknown>) => void;
@@ -600,10 +724,36 @@ function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, onNowPlaying
 	const [query, setQuery] = useState("");
 	const filtered = filterTracks(tracks, query);
 	const somethingPlaying = tracks.some((t) => t.is_played);
+	const sectionRef = useRef<HTMLElement>(null);
+	const headerRef = useRef<HTMLDivElement>(null);
+
+	// Inyección masiva: en vez de animar 50 filas (mata el FPS), pulsamos el
+	// HEADER y auto-scrolleamos la pista a la vista → el cerebro del DJ valida
+	// que "algo entró" sin coste de rendimiento.
+	useGSAP(
+		() => {
+			if (pulse <= 0) return;
+			sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+			if (headerRef.current) {
+				gsap.fromTo(
+					headerRef.current,
+					{ scale: 1 },
+					{ scale: 1.06, duration: 0.22, ease: "power2.out", yoyo: true, repeat: 1, transformOrigin: "left center" },
+				);
+				gsap.fromTo(
+					headerRef.current,
+					{ color: "#39FF14" },
+					{ color: "#ffffff", duration: 1.1, ease: "power2.inOut" },
+				);
+			}
+		},
+		{ dependencies: [pulse] },
+	);
+
 	return (
-		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0">
+		<section ref={sectionRef} className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0 scroll-mt-20">
 			<div className="flex items-center justify-between gap-2">
-				<h2 className="font-black flex items-center gap-2"><Radio className="w-5 h-5 text-lime-400" /> Control de Pista (esta noche)</h2>
+				<h2 ref={headerRef} className="font-black flex items-center gap-2"><Radio className="w-5 h-5 text-lime-400" /> Control de Pista (esta noche)</h2>
 				<button
 					type="button"
 					disabled={busy || !somethingPlaying}
@@ -650,13 +800,21 @@ function PlaylistRow({ track, busy, editing, flash, onFlashDone, onEdit, onCance
 	const [artist, setArtist] = useState(track.artist);
 	const [cover, setCover] = useState(track.cover_image_url ?? "");
 	const rowRef = useRef<HTMLDivElement>(null);
+	// Guard anti-estroboscópico: garantiza que el flash se ejecuta UNA sola vez
+	// por activación.  Sin esto, un re-render de la tabla (p.ej. un voto entrante)
+	// mientras `flash` sigue true podría re-disparar el destello.
+	const flashedRef = useRef(false);
 	useEffect(() => { setTitle(track.title); setArtist(track.artist); setCover(track.cover_image_url ?? ""); }, [track, editing]);
 
 	// Flash de confirmación cuando esta canción acaba de entrar desde la
-	// Biblioteca (el DJ ve "entrar" la pista sin buscarla a ojo).
+	// Biblioteca (el DJ ve "entrar" la pista sin buscarla a ojo).  Al terminar,
+	// `onFlashDone` resetea el flashId en el padre → la prop vuelve a false y el
+	// guard se rearma para el próximo añadido.  Nunca se repite por sí solo.
 	useGSAP(
 		() => {
-			if (!flash || !rowRef.current) return;
+			if (!flash) { flashedRef.current = false; return; }
+			if (flashedRef.current || !rowRef.current) return;
+			flashedRef.current = true;
 			const el = rowRef.current;
 			const tl = gsap.timeline({ onComplete: onFlashDone });
 			tl.fromTo(
@@ -667,13 +825,6 @@ function PlaylistRow({ track, busy, editing, flash, onFlashDone, onEdit, onCance
 		},
 		{ dependencies: [flash] },
 	);
-
-	const confirmRemove = () => {
-		// eslint-disable-next-line no-alert
-		if (window.confirm(`¿Quitar "${track.title}" de la pista de esta noche?`)) {
-			onRemove();
-		}
-	};
 
 	if (editing) {
 		return (
@@ -721,10 +872,10 @@ function PlaylistRow({ track, busy, editing, flash, onFlashDone, onEdit, onCance
 			<button
 				type="button"
 				disabled={busy}
-				onClick={confirmRemove}
-				title="Eliminar de la pista de esta noche"
-				aria-label={`Eliminar ${track.title}`}
-				className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/50 font-black text-xs active:scale-95 disabled:opacity-50"
+				onClick={onRemove}
+				title="Quitar de la pista de esta noche"
+				aria-label={`Quitar ${track.title}`}
+				className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-lg bg-rose-600 text-white border border-rose-400 font-black text-xs active:scale-95 disabled:opacity-50 shadow-[0_0_12px_rgba(244,63,94,0.4)]"
 			>
 				<Trash2 className="w-4 h-4" /> Quitar
 			</button>
@@ -861,88 +1012,397 @@ function EventsManager({ events, activeId, busy, onCreate, onActivate }: {
 }
 
 // ── Plantillas de setlist (V1.6.1) ───────────────────────────────────
-function TemplatesPanel({ templates, hasTracks, busy, onSave, onApply, onDelete }: {
-	templates: Template[]; hasTracks: boolean; busy: boolean;
-	onSave: (name: string) => void;
-	onApply: (id: string) => Promise<unknown>;
+// ── PESTAÑA 2 · Gestión de Plantillas (trabajo de oficina) ───────────
+function TemplatesPanel({ templates, hasActiveEvent, busy, onCreate, onApply, onRename, onDelete }: {
+	templates: Template[]; hasActiveEvent: boolean; busy: boolean;
+	onCreate: () => void;
+	onApply: (id: string) => Promise<unknown> | void;
+	onRename: (id: string, name: string) => void;
 	onDelete: (id: string) => void;
 }) {
-	const [name, setName] = useState("");
-	// Estado por-plantilla: bloquea el botón y muestra "Aplicando…" hasta que
-	// la promesa resuelve → evita misclicks y pulsaciones repetidas que
-	// saturarían la pista en directo.
-	const [applyingId, setApplyingId] = useState<string | null>(null);
-	const canSave = !!name.trim() && hasTracks && !busy;
-
-	const handleApply = async (id: string) => {
-		if (applyingId) return; // ya hay una aplicación en curso
-		// eslint-disable-next-line no-alert
-		if (!window.confirm("¿Seguro que quieres inyectar esta plantilla en la pista actual?")) return;
-		setApplyingId(id);
-		try {
-			await onApply(id);
-		} finally {
-			setApplyingId(null);
-		}
-	};
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-4">
-			<div>
-				<h2 className="font-black flex items-center gap-2"><ListMusic className="w-5 h-5 text-fuchsia-400" /> Plantillas de setlist</h2>
-				<p className="text-[11px] text-zinc-500 mt-1">Guarda el setlist de esta noche y reutilízalo en futuras fiestas con un clic.</p>
-			</div>
-
-			{/* Guardar la noche actual */}
-			<div className="rounded-2xl bg-zinc-950/60 border border-zinc-800 p-4 flex flex-col sm:flex-row gap-3 sm:items-end">
-				<div className="flex-1">
-					<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Nombre de la plantilla</label>
-					<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Reggaetón Viernes" className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 font-bold text-white text-sm" />
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<h2 className="font-black flex items-center gap-2"><ListMusic className="w-5 h-5 text-fuchsia-400" /> Gestión de Plantillas</h2>
+					<p className="text-[11px] text-zinc-500 mt-1">Crea setlists reutilizables desde el catálogo, sin necesidad de una fiesta activa. Aplícalos a cualquier evento con un clic.</p>
 				</div>
 				<button
 					type="button"
-					disabled={!canSave}
-					onClick={() => { onSave(name.trim()); setName(""); }}
-					title={hasTracks ? "Guardar el setlist actual como plantilla" : "Añade canciones al evento primero"}
-					className="shrink-0 h-11 px-4 rounded-xl bg-fuchsia-500 text-white font-black active:scale-95 disabled:opacity-40 inline-flex items-center justify-center gap-1.5"
+					onClick={onCreate}
+					className="shrink-0 inline-flex items-center gap-1.5 h-11 px-4 rounded-xl bg-fuchsia-500 text-white font-black text-sm active:scale-95 shadow-[0_0_20px_rgba(217,70,239,0.35)]"
 				>
-					<Save className="w-4 h-4" /> Guardar setlist
+					<FolderPlus className="w-4 h-4" /> Crear plantilla
 				</button>
 			</div>
 
-			{/* Listado de plantillas */}
 			<div className="flex flex-col gap-2">
-				{templates.length === 0 && <p className="text-zinc-500 text-sm text-center py-4">Sin plantillas todavía. Guarda el setlist de esta noche para repetirlo.</p>}
+				{templates.length === 0 && <div className="text-zinc-500 italic py-6 text-center">No hay plantillas guardadas.</div>}
 				{templates.map((tpl) => (
-					<div key={tpl.id} className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
-						<div className="flex-1 min-w-0">
-							<p className="text-sm font-bold truncate">{tpl.name}</p>
-							<p className="text-[11px] text-zinc-500">{tpl.track_count} {tpl.track_count === 1 ? "canción" : "canciones"} · {fmtMadrid(tpl.created_at)}</p>
-						</div>
-						<button
-							type="button"
-							disabled={busy || applyingId !== null}
-							onClick={() => void handleApply(tpl.id)}
-							title="Añadir las canciones de esta plantilla al evento actual"
-							className="shrink-0 inline-flex items-center gap-1 h-9 px-3 rounded-lg bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/40 font-black text-xs active:scale-95 disabled:opacity-50"
-						>
-							{applyingId === tpl.id ? (
-								<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Aplicando…</>
-							) : (
-								<><Copy className="w-3.5 h-3.5" /> Aplicar</>
-							)}
-						</button>
-						<button
-							type="button"
-							disabled={busy || applyingId !== null}
-							onClick={() => onDelete(tpl.id)}
-							title="Borrar plantilla"
-							className="shrink-0 w-9 h-9 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center justify-center active:scale-95 disabled:opacity-50"
-						>
-							<Trash2 className="w-4 h-4" />
-						</button>
-					</div>
+					<TemplateRow
+						key={tpl.id}
+						tpl={tpl}
+						busy={busy}
+						hasActiveEvent={hasActiveEvent}
+						onApply={onApply}
+						onRename={onRename}
+						onDelete={onDelete}
+					/>
 				))}
 			</div>
 		</section>
+	);
+}
+
+function TemplateRow({ tpl, busy, hasActiveEvent, onApply, onRename, onDelete }: {
+	tpl: Template; busy: boolean; hasActiveEvent: boolean;
+	onApply: (id: string) => Promise<unknown> | void;
+	onRename: (id: string, name: string) => void;
+	onDelete: (id: string) => void;
+}) {
+	const [editing, setEditing] = useState(false);
+	const [name, setName] = useState(tpl.name);
+	const [applying, setApplying] = useState(false);
+	useEffect(() => { setName(tpl.name); }, [tpl.name]);
+
+	const handleApply = async () => {
+		if (applying) return;
+		setApplying(true);
+		try { await onApply(tpl.id); } finally { setApplying(false); }
+	};
+
+	if (editing) {
+		return (
+			<div className="flex items-center gap-2 rounded-xl bg-zinc-950/80 border border-fuchsia-500/40 p-3">
+				<input
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					className="flex-1 h-10 rounded-lg bg-zinc-900 border border-zinc-800 px-3 font-bold text-sm text-white"
+					autoFocus
+				/>
+				<button type="button" disabled={busy || !name.trim()} onClick={() => { onRename(tpl.id, name.trim()); setEditing(false); }} className="h-10 px-3 rounded-lg bg-fuchsia-500 text-white font-black text-sm inline-flex items-center gap-1 disabled:opacity-40"><Save className="w-4 h-4" /></button>
+				<button type="button" onClick={() => { setName(tpl.name); setEditing(false); }} className="h-10 px-3 rounded-lg bg-zinc-800 text-zinc-300 font-bold text-sm inline-flex items-center gap-1"><X className="w-4 h-4" /></button>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex items-center gap-3 rounded-xl bg-zinc-950/60 border border-zinc-800 p-3">
+			<div className="w-10 h-10 rounded-lg bg-fuchsia-500/10 border border-fuchsia-500/30 flex items-center justify-center shrink-0">
+				<ListMusic className="w-4 h-4 text-fuchsia-300" />
+			</div>
+			<div className="flex-1 min-w-0">
+				<p className="text-sm font-bold truncate">{tpl.name}</p>
+				<p className="text-[11px] text-zinc-500">{tpl.track_count} {tpl.track_count === 1 ? "canción" : "canciones"} · {fmtMadrid(tpl.created_at)}</p>
+			</div>
+			{hasActiveEvent && (
+				<button
+					type="button"
+					disabled={busy || applying}
+					onClick={() => void handleApply()}
+					title="Inyectar esta plantilla en el evento activo"
+					className="shrink-0 inline-flex items-center gap-1 h-9 px-3 rounded-lg bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/40 font-black text-xs active:scale-95 disabled:opacity-50"
+				>
+					{applying ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Aplicando…</> : <><Copy className="w-3.5 h-3.5" /> Aplicar</>}
+				</button>
+			)}
+			<button type="button" disabled={busy} onClick={() => setEditing(true)} title="Renombrar" className="shrink-0 w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 flex items-center justify-center active:scale-95 disabled:opacity-50"><Pencil className="w-4 h-4" /></button>
+			<button type="button" disabled={busy} onClick={() => onDelete(tpl.id)} title="Borrar plantilla" className="shrink-0 w-9 h-9 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center justify-center active:scale-95 disabled:opacity-50"><Trash2 className="w-4 h-4" /></button>
+		</div>
+	);
+}
+
+// ── Navegación por pestañas (Rekordbox/Traktor style) ────────────────
+function TabBar({ active, onChange, templateCount }: {
+	active: AdminTab; onChange: (t: AdminTab) => void; templateCount: number;
+}) {
+	const tabs: { id: AdminTab; label: string; Icon: typeof Radio }[] = [
+		{ id: "live", label: "Sesión en vivo", Icon: Radio },
+		{ id: "templates", label: "Plantillas", Icon: ListMusic },
+		{ id: "global", label: "Almacén global", Icon: Library },
+	];
+	return (
+		<div className="flex gap-1 p-1 rounded-2xl bg-zinc-900/70 border border-zinc-800 sticky top-2 z-20 backdrop-blur-md">
+			{tabs.map(({ id, label, Icon }) => {
+				const on = active === id;
+				return (
+					<button
+						key={id}
+						type="button"
+						onClick={() => onChange(id)}
+						className={cn(
+							"flex-1 inline-flex items-center justify-center gap-2 h-11 rounded-xl font-black text-[11px] sm:text-xs uppercase tracking-wide transition-colors",
+							on ? "bg-cyan-500 text-black shadow-[0_0_18px_rgba(0,212,255,0.4)]" : "text-zinc-400 hover:text-zinc-200",
+						)}
+					>
+						<Icon className="w-4 h-4" />
+						<span className="hidden xs:inline sm:inline">{label}</span>
+						{id === "templates" && templateCount > 0 && (
+							<span className={cn("text-[10px] rounded-full px-1.5 tabular-nums", on ? "bg-black/20" : "bg-zinc-800")}>{templateCount}</span>
+						)}
+					</button>
+				);
+			})}
+		</div>
+	);
+}
+
+// ── Modal genérico (overlay oscuro + entrada GSAP suave) ─────────────
+function Modal({ title, subtitle, onClose, children, footer }: {
+	title: string; subtitle?: string; onClose: () => void;
+	children: React.ReactNode; footer?: React.ReactNode;
+}) {
+	const ref = useRef<HTMLDivElement>(null);
+	useGSAP(() => {
+		if (ref.current) {
+			gsap.fromTo(ref.current, { opacity: 0, y: 24, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.35, ease: "back.out(1.4)" });
+		}
+	});
+	return (
+		<div
+			className="fixed inset-0 z-[150] bg-black/85 backdrop-blur-md flex items-end sm:items-center justify-center sm:p-6"
+			onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+		>
+			<div ref={ref} className="w-full sm:max-w-2xl max-h-[92dvh] sm:max-h-[85dvh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-zinc-950 border border-zinc-800 shadow-2xl overflow-hidden">
+				<header className="flex items-center justify-between gap-3 p-5 border-b border-zinc-800 shrink-0">
+					<div>
+						<h3 className="text-lg font-black italic tracking-tight">{title}</h3>
+						{subtitle && <p className="text-[11px] text-zinc-500 mt-0.5">{subtitle}</p>}
+					</div>
+					<button type="button" onClick={onClose} aria-label="Cerrar" className="w-9 h-9 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 active:scale-95"><X className="w-4 h-4" /></button>
+				</header>
+				<div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-5">{children}</div>
+				{footer && <footer className="p-4 border-t border-zinc-800 shrink-0 bg-zinc-950">{footer}</footer>}
+			</div>
+		</div>
+	);
+}
+
+// ── Selector multi-canción con checkboxes (reusado por modales) ──────
+function GlobalPicker({ tracks, selected, onToggle, setSelected }: {
+	tracks: GlobalTrack[]; selected: Set<string>; onToggle: (id: string) => void;
+	setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
+	const [query, setQuery] = useState("");
+	const filtered = filterTracks(tracks, query);
+	const allFilteredSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.id));
+
+	// Operan sobre lo ACTUALMENTE filtrado (la búsqueda acota el "todas").
+	const selectAllFiltered = () =>
+		setSelected((prev) => {
+			const n = new Set(prev);
+			filtered.forEach((t) => n.add(t.id));
+			return n;
+		});
+	const clearAllFiltered = () =>
+		setSelected((prev) => {
+			const n = new Set(prev);
+			filtered.forEach((t) => n.delete(t.id));
+			return n;
+		});
+
+	return (
+		<div className="flex flex-col gap-3">
+			<SearchInput value={query} onChange={setQuery} placeholder="Buscar en el almacén…" />
+
+			{/* Herramientas de selección masiva */}
+			<div className="flex items-center justify-between gap-2">
+				<span className="text-[11px] text-zinc-500 font-bold tabular-nums">
+					{selected.size} sel. · {filtered.length} visibles
+				</span>
+				<div className="flex gap-2">
+					<button
+						type="button"
+						onClick={selectAllFiltered}
+						disabled={filtered.length === 0 || allFilteredSelected}
+						className="inline-flex items-center gap-1 h-8 px-3 rounded-lg bg-cyan-500/15 text-cyan-300 border border-cyan-500/40 font-black text-[11px] active:scale-95 disabled:opacity-40"
+					>
+						<Check className="w-3.5 h-3.5" strokeWidth={3} /> Todas
+					</button>
+					<button
+						type="button"
+						onClick={clearAllFiltered}
+						disabled={selected.size === 0}
+						className="inline-flex items-center gap-1 h-8 px-3 rounded-lg bg-zinc-800 text-zinc-300 border border-zinc-700 font-black text-[11px] active:scale-95 disabled:opacity-40"
+					>
+						<X className="w-3.5 h-3.5" strokeWidth={3} /> Ninguna
+					</button>
+				</div>
+			</div>
+
+			<div className="flex flex-col gap-2">
+				{tracks.length === 0 && <p className="text-zinc-500 text-sm text-center py-6">El almacén está vacío. Añade canciones en la pestaña «Almacén global».</p>}
+				{tracks.length > 0 && filtered.length === 0 && <p className="text-zinc-500 text-sm text-center py-6">Sin resultados.</p>}
+				{filtered.map((tk) => {
+					const on = selected.has(tk.id);
+					return (
+						<button
+							key={tk.id}
+							type="button"
+							onClick={() => onToggle(tk.id)}
+							className={cn(
+								"flex items-center gap-3 rounded-xl border p-2.5 text-left transition-colors",
+								on ? "bg-cyan-500/10 border-cyan-500/50" : "bg-zinc-900/60 border-zinc-800 hover:border-zinc-700",
+							)}
+						>
+							<span className={cn("w-6 h-6 rounded-md border flex items-center justify-center shrink-0", on ? "bg-cyan-500 border-cyan-400 text-black" : "border-zinc-600")}>
+								{on && <Check className="w-4 h-4" strokeWidth={3} />}
+							</span>
+							<div className="w-9 h-9 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center shrink-0">
+								{tk.cover_image_url ? <img src={tk.cover_image_url} alt="" className="w-full h-full object-cover" /> : <Music2 className="w-4 h-4 text-zinc-600" />}
+							</div>
+							<div className="flex-1 min-w-0">
+								<p className="text-sm font-bold truncate">{tk.title}</p>
+								<p className="text-[11px] text-zinc-500 truncate">{tk.artist}</p>
+							</div>
+						</button>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+// ── Modal "Cargar canciones" (Live): Biblioteca (multi) + Plantilla ──
+function LoadIntoEventModal({ globalTracks, eventSpotifyIds, templates, busy, onClose, onInject, onApplyTemplate }: {
+	globalTracks: GlobalTrack[]; eventSpotifyIds: Set<string>; templates: Template[]; busy: boolean;
+	onClose: () => void;
+	onInject: (ids: string[]) => void;
+	onApplyTemplate: (id: string) => void;
+}) {
+	const [sub, setSub] = useState<"library" | "template">("library");
+	const [selected, setSelected] = useState<Set<string>>(new Set());
+	// Sólo mostramos lo que AÚN no está en la pista (lo ya presente no se re-inyecta).
+	const addable = globalTracks.filter((t) => !eventSpotifyIds.has(t.spotify_id));
+	const toggle = (id: string) =>
+		setSelected((prev) => {
+			const n = new Set(prev);
+			if (n.has(id)) n.delete(id); else n.add(id);
+			return n;
+		});
+
+	return (
+		<Modal
+			title="Cargar canciones"
+			subtitle="Inyecta temas en la pista de esta noche"
+			onClose={onClose}
+			footer={
+				sub === "library" ? (
+					<button
+						type="button"
+						disabled={busy || selected.size === 0}
+						onClick={() => onInject([...selected])}
+						className="w-full h-12 rounded-2xl bg-cyan-500 text-black font-black inline-flex items-center justify-center gap-2 active:scale-95 disabled:opacity-40"
+					>
+						<Plus className="w-5 h-5" strokeWidth={3} /> Inyectar seleccionadas ({selected.size})
+					</button>
+				) : null
+			}
+		>
+			{/* Sub-pestañas */}
+			<div className="flex gap-1 p-1 rounded-xl bg-zinc-900 border border-zinc-800 mb-4">
+				<button type="button" onClick={() => setSub("library")} className={cn("flex-1 h-9 rounded-lg font-black text-xs uppercase tracking-wide", sub === "library" ? "bg-cyan-500 text-black" : "text-zinc-400")}>Desde Biblioteca</button>
+				<button type="button" onClick={() => setSub("template")} className={cn("flex-1 h-9 rounded-lg font-black text-xs uppercase tracking-wide", sub === "template" ? "bg-fuchsia-500 text-white" : "text-zinc-400")}>Desde Plantilla</button>
+			</div>
+
+			{sub === "library" ? (
+				<GlobalPicker tracks={addable} selected={selected} onToggle={toggle} setSelected={setSelected} />
+			) : (
+				<div className="flex flex-col gap-2">
+					{templates.length === 0 && <p className="text-zinc-500 italic text-center py-6">No hay plantillas. Crea una en la pestaña «Plantillas».</p>}
+					{templates.map((tpl) => (
+						<div key={tpl.id} className="flex items-center gap-3 rounded-xl bg-zinc-900/60 border border-zinc-800 p-3">
+							<div className="w-10 h-10 rounded-lg bg-fuchsia-500/10 border border-fuchsia-500/30 flex items-center justify-center shrink-0"><ListMusic className="w-4 h-4 text-fuchsia-300" /></div>
+							<div className="flex-1 min-w-0">
+								<p className="text-sm font-bold truncate">{tpl.name}</p>
+								<p className="text-[11px] text-zinc-500">{tpl.track_count} {tpl.track_count === 1 ? "canción" : "canciones"}</p>
+							</div>
+							<button type="button" disabled={busy} onClick={() => onApplyTemplate(tpl.id)} className="shrink-0 inline-flex items-center gap-1 h-9 px-3 rounded-lg bg-fuchsia-500 text-white font-black text-xs active:scale-95 disabled:opacity-50">
+								<Plus className="w-3.5 h-3.5" strokeWidth={3} /> Inyectar
+							</button>
+						</div>
+					))}
+				</div>
+			)}
+		</Modal>
+	);
+}
+
+// ── Modal "Crear plantilla" (Templates): multi-select + nombre ───────
+function CreateTemplateModal({ globalTracks, busy, onClose, onCreate }: {
+	globalTracks: GlobalTrack[]; busy: boolean;
+	onClose: () => void;
+	onCreate: (name: string, ids: string[]) => void;
+}) {
+	const [selected, setSelected] = useState<Set<string>>(new Set());
+	const [name, setName] = useState("");
+	const toggle = (id: string) =>
+		setSelected((prev) => {
+			const n = new Set(prev);
+			if (n.has(id)) n.delete(id); else n.add(id);
+			return n;
+		});
+	const canSave = !!name.trim() && selected.size > 0 && !busy;
+
+	return (
+		<Modal
+			title="Crear nueva plantilla"
+			subtitle="Selecciona temas del almacén — no necesitas una fiesta activa"
+			onClose={onClose}
+			footer={
+				<div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+					<input
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+						placeholder="Nombre de la plantilla (ej. Reggaetón Viernes)"
+						className="flex-1 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 px-3 font-bold text-white text-sm"
+					/>
+					<button
+						type="button"
+						disabled={!canSave}
+						onClick={() => onCreate(name.trim(), [...selected])}
+						className="shrink-0 h-12 px-5 rounded-2xl bg-fuchsia-500 text-white font-black inline-flex items-center justify-center gap-2 active:scale-95 disabled:opacity-40"
+					>
+						<Save className="w-4 h-4" /> Guardar plantilla ({selected.size})
+					</button>
+				</div>
+			}
+		>
+			<GlobalPicker tracks={globalTracks} selected={selected} onToggle={toggle} setSelected={setSelected} />
+		</Modal>
+	);
+}
+
+// ── Modal "Guardar sesión como plantilla" (Live) ─────────────────────
+// (Sustituye cualquier prompt() nativo — modal Tailwind con backdrop.)
+function SaveTemplateModal({ busy, onClose, onSave }: {
+	busy: boolean; onClose: () => void; onSave: (name: string) => void;
+}) {
+	const [name, setName] = useState("");
+	return (
+		<Modal
+			title="Guardar sesión como plantilla"
+			subtitle="Guarda el setlist actual para repetirlo otra noche"
+			onClose={onClose}
+			footer={
+				<button
+					type="button"
+					disabled={busy || !name.trim()}
+					onClick={() => onSave(name.trim())}
+					className="w-full h-12 rounded-2xl bg-fuchsia-500 text-white font-black inline-flex items-center justify-center gap-2 active:scale-95 disabled:opacity-40"
+				>
+					<Save className="w-4 h-4" /> Guardar plantilla
+				</button>
+			}
+		>
+			<label className="block text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">Nombre de la plantilla</label>
+			<input
+				value={name}
+				onChange={(e) => setName(e.target.value)}
+				placeholder="Ej. Sábado Techno"
+				autoFocus
+				className="w-full h-12 rounded-2xl bg-zinc-900 border border-zinc-800 px-3 font-bold text-white text-sm"
+			/>
+		</Modal>
 	);
 }

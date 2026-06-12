@@ -13,6 +13,18 @@ const resources = {
 			},
 			lang: { es: "ES", en: "EN", switch: "Cambiar idioma" },
 			nav: { hub: "Hub", live: "Live", menu: "Menú", ticket: "Ticket" },
+			birthGate: {
+				title: "¿Cuándo es tu cumple?",
+				subtitle:
+					"Lo necesitamos para verificar que eres +18 y prepararte sorpresas de cumpleaños 🎁",
+				label: "Fecha de nacimiento",
+				cta: "Entrar a jugar",
+				saving: "Guardando…",
+				errInvalid: "Introduce una fecha válida.",
+				errUnder18: "Debes ser mayor de 18 años para entrar.",
+				errSave: "No se pudo guardar. Inténtalo de nuevo.",
+				privacy: "Solo para verificación de edad y promos. +18.",
+			},
 			onboarding: {
 				brand: "La Pocha · Madrid",
 				youAreIn: "¡ESTÁS DENTRO,",
@@ -348,6 +360,18 @@ const resources = {
 			},
 			lang: { es: "ES", en: "EN", switch: "Change language" },
 			nav: { hub: "Hub", live: "Live", menu: "Menu", ticket: "Ticket" },
+			birthGate: {
+				title: "When's your birthday?",
+				subtitle:
+					"We need it to verify you're 18+ and to prep birthday surprises for you 🎁",
+				label: "Date of birth",
+				cta: "Enter & play",
+				saving: "Saving…",
+				errInvalid: "Enter a valid date.",
+				errUnder18: "You must be 18 or older to enter.",
+				errSave: "Couldn't save. Please try again.",
+				privacy: "Only for age verification and promos. 18+.",
+			},
 			onboarding: {
 				brand: "La Pocha · Madrid",
 				youAreIn: "YOU'RE IN,",

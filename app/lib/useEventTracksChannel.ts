@@ -7,10 +7,10 @@ import { getBrowserSupabase } from "./supabase.client";
  * evento, COMPARTIDO entre componentes (Operación Wiring · WebSockets).
  *
  *   Antes la pantalla `live` del móvil abría DOS suscripciones idénticas a
- *   `event_tracks` (una en `NowPlaying`, otra en `LiveBattle`), procesando
- *   el mismo payload dos veces.  Este hook mantiene un registro
- *   module-level ref-counted: el primer consumidor abre el canal, los
- *   siguientes se enganchan, y cuando el último se desmonta se cierra.
+ *   `event_tracks` (una en `NowPlaying`, otra en `LiveBattle`).  Aquí el
+ *   estado del canal vive a NIVEL DE MÓDULO (fuera del ciclo de vida de
+ *   React), así que es un Singleton auténtico: por muchas veces que React
+ *   re-renderice o monte componentes, sólo existe UN socket a la vez.
  *
  *   Cada consumidor recibe el payload crudo y decide qué hacer (NowPlaying
  *   mira `is_played`; LiveBattle mira `total_votes` de sus dos pistas).
@@ -24,68 +24,76 @@ export type EventTrackChange = {
 
 type Subscriber = (payload: EventTrackChange) => void;
 
-type Entry = {
-	channel: RealtimeChannel | null;
-	subscribers: Set<Subscriber>;
-};
+// ── Estado SINGLETON a nivel de módulo (NO dentro del hook) ─────────────
+let sharedChannel: RealtimeChannel | null = null;
+let sharedEventId: string | null = null;
+let subscriberCount = 0;
+const subscribers = new Set<Subscriber>();
 
-// Registro compartido por event_id — vive mientras haya ≥1 suscriptor.
-const registry = new Map<string, Entry>();
+/** Abre (o reabre, si cambió el evento) el único canal compartido. */
+function ensureChannel(eventId: string): void {
+	if (sharedChannel && sharedEventId === eventId) return; // ya abierto para este evento
 
-function acquire(eventId: string, cb: Subscriber): () => void {
-	let entry = registry.get(eventId);
-	if (!entry) {
-		const supabase = getBrowserSupabase();
-		const subscribers = new Set<Subscriber>();
-		let channel: RealtimeChannel | null = null;
-		if (supabase) {
-			channel = supabase
-				.channel(`event_tracks:shared:${eventId}`)
-				.on(
-					"postgres_changes",
-					{
-						event: "*",
-						schema: "public",
-						table: "event_tracks",
-						filter: `event_id=eq.${eventId}`,
-					},
-					(payload) => {
-						// Fan-out a TODOS los consumidores enganchados.
-						for (const sub of subscribers) sub(payload as EventTrackChange);
-					},
-				)
-				.subscribe();
-		}
-		entry = { channel, subscribers };
-		registry.set(eventId, entry);
+	// Evento distinto o sin canal → cerramos el anterior antes de abrir.
+	if (sharedChannel) {
+		const sb = getBrowserSupabase();
+		if (sb) void sb.removeChannel(sharedChannel);
+		sharedChannel = null;
 	}
-	entry.subscribers.add(cb);
 
-	return () => {
-		const e = registry.get(eventId);
-		if (!e) return;
-		e.subscribers.delete(cb);
-		if (e.subscribers.size === 0) {
-			const supabase = getBrowserSupabase();
-			if (supabase && e.channel) void supabase.removeChannel(e.channel);
-			registry.delete(eventId);
-		}
-	};
+	const supabase = getBrowserSupabase();
+	sharedEventId = eventId;
+	if (!supabase) return; // SSR / sin configurar: sin socket (los cb nunca disparan)
+
+	sharedChannel = supabase
+		.channel(`event_tracks:shared:${eventId}`)
+		.on(
+			"postgres_changes",
+			{
+				event: "*",
+				schema: "public",
+				table: "event_tracks",
+				filter: `event_id=eq.${eventId}`,
+			},
+			(payload) => {
+				// Fan-out a TODOS los consumidores enganchados al singleton.
+				for (const sub of subscribers) sub(payload as EventTrackChange);
+			},
+		)
+		.subscribe();
+}
+
+/** Cierra el canal singleton cuando ya no queda ningún consumidor. */
+function teardown(): void {
+	const sb = getBrowserSupabase();
+	if (sb && sharedChannel) void sb.removeChannel(sharedChannel);
+	sharedChannel = null;
+	sharedEventId = null;
 }
 
 export function useEventTracksChannel(
 	eventId: string | null,
 	onChange: (p: EventTrackChange) => void,
 ): void {
-	// Mantenemos el callback en un ref para que cambiar su identidad NO
-	// re-suscriba el canal (la suscripción sólo depende de `eventId`).
+	// El callback vive en un ref: cambiar su identidad NO re-suscribe nada
+	// (la suscripción sólo depende de `eventId`).
 	const cbRef = useRef(onChange);
 	cbRef.current = onChange;
 
 	useEffect(() => {
 		if (!eventId) return;
 		const stable: Subscriber = (p) => cbRef.current(p);
-		const release = acquire(eventId, stable);
-		return release;
+		subscribers.add(stable);
+		subscriberCount += 1;
+		ensureChannel(eventId);
+
+		return () => {
+			subscribers.delete(stable);
+			subscriberCount -= 1;
+			if (subscriberCount <= 0) {
+				subscriberCount = 0;
+				teardown();
+			}
+		};
 	}, [eventId]);
 }

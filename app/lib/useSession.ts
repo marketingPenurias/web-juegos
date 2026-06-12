@@ -44,6 +44,7 @@ type SessionPayload = {
 		id: string;
 		token_balance: number;
 		lifetime_earned: number;
+		birth_date?: string | null;
 	};
 	auth_email?: string | null;
 	active_event: { id: string; name: string } | null;
@@ -112,6 +113,7 @@ export function useSession() {
 					rewardRules: data.reward_rules,
 					streak: data.streak,
 					isNewUser: data.is_new_user,
+					birthDate: data.profile.birth_date ?? null,
 				});
 			} catch (err) {
 				// TODO: CLEANUP SESSION DEBUG
