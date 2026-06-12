@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
+import { useTenant } from "../lib/tenant";
 import { cn } from "../lib/utils";
 
 /**
@@ -378,7 +379,11 @@ export default function Admin() {
 										run(
 											"set_tv_backdrop",
 											{ event_id: event.id, tv_mode: mode, tv_url: url },
-											mode === "pinned" ? "📌 Imagen fijada en la TV" : "🔄 Carrusel automático en la TV",
+											mode === "photo"
+												? "📌 Foto fijada en la TV"
+												: mode === "video"
+													? "📺 Sólo vídeo en la TV"
+													: "🔄 Carrusel mixto en la TV",
 										)
 									}
 								/>
@@ -680,15 +685,22 @@ function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 // Realtime → el cambio se ve al instante en la pantalla grande.
 function TvControlPanel({ slug, busy, onSet }: {
 	slug: string; busy: boolean;
-	onSet: (mode: "carousel" | "pinned", url: string | null) => void;
+	onSet: (mode: "video" | "photo" | "carousel", url: string | null) => void;
 }) {
 	const photos = useVenuePhotos(slug);
+	const tenant = useTenant();
+	const hasVideo = Boolean(tenant.bgVideoUrl);
 	// Selección local (refleja el último clic del DJ).  La verdad vive en la
-	// BD y la TV la recibe por Realtime; null = carrusel automático.
-	const [selected, setSelected] = useState<string | null>(null);
+	// BD y la TV la recibe por Realtime.
+	const [sel, setSel] = useState<{ mode: "video" | "photo" | "carousel"; url: string | null }>({
+		mode: "carousel",
+		url: null,
+	});
 
-	const pickCarousel = () => { setSelected(null); onSet("carousel", null); };
-	const pickPhoto = (url: string) => { setSelected(url); onSet("pinned", url); };
+	const pick = (mode: "video" | "photo" | "carousel", url: string | null = null) => {
+		setSel({ mode, url });
+		onSet(mode, url);
+	};
 
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3">
@@ -697,39 +709,63 @@ function TvControlPanel({ slug, busy, onSet }: {
 				<span className="font-black">Control de Pantallas (TV)</span>
 			</div>
 			<p className="text-[11px] text-zinc-500">
-				Fija una imagen como fondo único de la pantalla (ej. una promo) o deja el carrusel automático rotando las fotos del local. El cambio se aplica al instante.
+				Elige qué se ve de fondo en la pantalla del local. El cambio se aplica al instante.
 			</p>
 
+			{/* Selector de MODO: Carrusel mixto · Sólo vídeo */}
+			<div className="grid grid-cols-2 gap-3">
+				<button
+					type="button"
+					disabled={busy}
+					onClick={() => pick("carousel")}
+					className={cn(
+						"rounded-2xl border-2 p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all",
+						sel.mode === "carousel"
+							? "border-cyan-400 bg-cyan-500/15 text-cyan-200 shadow-[0_0_18px_rgba(0,212,255,0.3)]"
+							: "border-zinc-700 bg-zinc-950/60 text-zinc-300",
+					)}
+				>
+					<Images className="w-5 h-5" />
+					<span className="text-[10px] font-black uppercase tracking-widest">Carrusel mixto</span>
+					<span className="text-[9px] text-zinc-500">Vídeo + fotos</span>
+				</button>
+				<button
+					type="button"
+					disabled={busy || !hasVideo}
+					onClick={() => pick("video")}
+					title={hasVideo ? "Mostrar sólo el vídeo del local" : "Este local no tiene vídeo configurado"}
+					className={cn(
+						"rounded-2xl border-2 p-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all",
+						sel.mode === "video"
+							? "border-fuchsia-400 bg-fuchsia-500/15 text-fuchsia-200 shadow-[0_0_18px_rgba(232,121,249,0.3)]"
+							: "border-zinc-700 bg-zinc-950/60 text-zinc-300",
+						!hasVideo && "opacity-40 cursor-not-allowed",
+					)}
+				>
+					<Tv className="w-5 h-5" />
+					<span className="text-[10px] font-black uppercase tracking-widest">Sólo vídeo</span>
+					<span className="text-[9px] text-zinc-500">{hasVideo ? "Identidad del local" : "Sin vídeo"}</span>
+				</button>
+			</div>
+
+			{/* Fijar una FOTO concreta (mode='photo') */}
+			<div className="flex items-center justify-between px-1 pt-1">
+				<span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Fijar una foto</span>
+				<span className="text-[10px] uppercase tracking-widest text-zinc-600 font-bold tabular-nums">{photos.length} fotos</span>
+			</div>
 			{photos.length === 0 ? (
-				<p className="text-zinc-500 text-sm text-center py-4">No hay imágenes subidas para este local todavía.</p>
+				<p className="text-zinc-500 text-xs text-center py-3">No hay fotos subidas para este local todavía.</p>
 			) : (
 				<div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-					{/* Carrusel automático */}
-					<button
-						type="button"
-						disabled={busy}
-						onClick={pickCarousel}
-						className={cn(
-							"aspect-video rounded-xl border-2 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all",
-							selected === null
-								? "border-cyan-400 bg-cyan-500/15 text-cyan-200 shadow-[0_0_18px_rgba(0,212,255,0.3)]"
-								: "border-zinc-700 bg-zinc-950/60 text-zinc-400",
-						)}
-					>
-						<Images className="w-5 h-5" />
-						<span className="text-[9px] font-black uppercase tracking-widest">Carrusel</span>
-					</button>
-
-					{/* Miniaturas → clic para fijar */}
 					{photos.map((url) => {
-						const active = selected === url;
+						const active = sel.mode === "photo" && sel.url === url;
 						return (
 							<button
 								key={url}
 								type="button"
 								disabled={busy}
-								onClick={() => pickPhoto(url)}
-								title="Fijar esta imagen en la pantalla"
+								onClick={() => pick("photo", url)}
+								title="Fijar esta foto (el vídeo se pausa)"
 								className={cn(
 									"relative aspect-video rounded-xl overflow-hidden border-2 active:scale-95 transition-all",
 									active ? "border-amber-400 shadow-[0_0_18px_rgba(245,158,11,0.45)]" : "border-zinc-700 hover:border-zinc-500",
