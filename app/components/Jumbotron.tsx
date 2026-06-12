@@ -33,8 +33,11 @@ type Track = {
 
 type Battle = { id: string; endsAt: string; a: Track; b: Track };
 
-/** Preferencia de fondo de la TV (control remoto del Staff). */
-type TvBackdrop = { mode: "carousel" | "pinned"; url: string | null };
+/** Preferencia de fondo de la TV (control remoto del Staff).
+ *   video    → sólo el vídeo del local
+ *   photo    → una foto fija (`url`), vídeo pausado
+ *   carousel → MIXTO: vídeo de base + fotos rotando encima */
+type TvBackdrop = { mode: "video" | "photo" | "carousel"; url: string | null };
 
 type Props = {
 	tenantId: string;
@@ -65,6 +68,8 @@ export function Jumbotron({
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
 		initialBackdrop ?? { mode: "carousel", url: null },
 	);
+	// Vídeo de fondo del local (siempre disponible si el tenant lo configuró).
+	const bgVideoUrl = tenant.bgVideoUrl ?? null;
 	const [tracks, setTracks] = useState<Track[]>(initialTracks);
 	const [battle, setBattle] = useState<Battle | null>(initialBattle);
 	const [connected, setConnected] = useState(false);
@@ -162,8 +167,9 @@ export function Jumbotron({
 					const raw = (meta?.tv_backdrop ?? null) as
 						| { mode?: string; url?: string | null }
 						| null;
+					const m = raw?.mode;
 					setBackdrop({
-						mode: raw?.mode === "pinned" ? "pinned" : "carousel",
+						mode: m === "video" || m === "photo" ? m : "carousel",
 						url: typeof raw?.url === "string" ? raw.url : null,
 					});
 				},
@@ -297,8 +303,8 @@ export function Jumbotron({
 		[tenant.theme],
 	);
 
-	// URL fijada por el DJ (o null = carrusel automático).
-	const pinnedBackdropUrl = backdrop.mode === "pinned" ? backdrop.url : null;
+	// Foto fijada por el DJ (sólo en modo "photo"; null en video/carousel).
+	const pinnedBackdropUrl = backdrop.mode === "photo" ? backdrop.url : null;
 
 	const inBattle = enableBattle && !!battle;
 	const total = aVotes + bVotes;
@@ -308,33 +314,20 @@ export function Jumbotron({
 
 	return (
 		<div ref={containerRef} style={containerStyle} className="min-h-dvh w-full bg-(--jumbo-bg) text-white relative overflow-hidden flex flex-col">
-			{/* Fondo PREMIUM dinámico.  Prioridad:
-			    1) Fotos del local (bucket tenant-assets) → carrusel crossfade.
-			    2) Vídeo en loop (tenant.bgVideoUrl) si no hay fotos.
-			    3) Fondo sólido (--jumbo-bg) + blobs como último fallback.
-			    Las fotos van primero porque es el branding más vivo del local
-			    de cara a la pantalla (lo pidió el CTO para el piloto).
-			    El DJ puede FIJAR una imagen (backdrop.mode='pinned') desde
-			    /admin → se muestra estática; si es 'carousel', rota con GSAP. */}
-			{/* TODO: UX - Hacer convivir bg-video con fotos (ej. Picture-in-Picture) o hacer configurable la prioridad */}
-			{pinnedBackdropUrl || venuePhotos.length > 0 ? (
-				<VenueBackdrop urls={venuePhotos} pinnedUrl={pinnedBackdropUrl} />
-			) : tenant.bgVideoUrl ? (
-				<>
-					<video
-						key={tenant.bgVideoUrl}
-						src={tenant.bgVideoUrl}
-						autoPlay
-						loop
-						muted
-						playsInline
-						aria-hidden="true"
-						className="absolute inset-0 w-full h-full object-cover"
-					/>
-					{/* Capa oscura por DELANTE del vídeo: legibilidad del leaderboard. */}
-					<div className="absolute inset-0 bg-black/65 pointer-events-none" />
-				</>
-			) : null}
+			{/* Fondo PREMIUM dinámico — VÍDEO del local + FOTOS, controlado por
+			    el DJ desde /admin (3 modos, ver VenueBackdrop):
+			      · video    → sólo el vídeo (identidad del local)
+			      · photo    → una foto fija (flyer), vídeo pausado
+			      · carousel → MIXTO: vídeo de base + fotos rotando encima
+			    El vídeo vuelve a verse SIEMPRE salvo en "foto fija". */}
+			{(bgVideoUrl || venuePhotos.length > 0) && (
+				<VenueBackdrop
+					videoUrl={bgVideoUrl}
+					photos={venuePhotos}
+					mode={backdrop.mode}
+					pinnedUrl={pinnedBackdropUrl}
+				/>
+			)}
 			<div className="absolute inset-0 pointer-events-none">
 				<div className="absolute -top-32 -left-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-primary)/20 blur-[120px]" />
 				<div className="absolute -bottom-32 -right-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-accent)/15 blur-[140px]" />

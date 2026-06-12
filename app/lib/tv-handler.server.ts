@@ -110,8 +110,9 @@ export async function handleTvAction(
 	const rawBackdrop = (meta?.tv_backdrop ?? null) as
 		| { mode?: string; url?: string | null }
 		| null;
+	const bm = rawBackdrop?.mode;
 	const backdrop = {
-		mode: rawBackdrop?.mode === "pinned" ? "pinned" : "carousel",
+		mode: bm === "video" || bm === "photo" ? bm : "carousel",
 		url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
 	};
 

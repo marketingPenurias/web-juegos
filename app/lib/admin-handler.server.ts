@@ -306,12 +306,17 @@ export async function handleAdminAction(
 		case "set_tv_backdrop": {
 			const eventId = String(body.event_id ?? "");
 			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
-			const mode = body.tv_mode === "pinned" ? "pinned" : "carousel";
+			// 3 modos: 'video' (sólo vídeo) · 'photo' (foto fija + url) ·
+			// 'carousel' (mixto: vídeo de base + fotos rotando).
+			const mode =
+				body.tv_mode === "video" || body.tv_mode === "photo"
+					? body.tv_mode
+					: "carousel";
 			const url =
-				mode === "pinned" && typeof body.tv_url === "string" && body.tv_url.trim()
+				mode === "photo" && typeof body.tv_url === "string" && body.tv_url.trim()
 					? body.tv_url.trim().slice(0, 1024)
 					: null;
-			if (mode === "pinned" && !url) {
+			if (mode === "photo" && !url) {
 				return jsonResponse({ ok: false, error: "url_required" }, { status: 400, request });
 			}
 			// Read-modify-write del jsonb (un solo DJ lo toca; sin carrera real).
