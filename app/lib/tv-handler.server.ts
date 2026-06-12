@@ -95,7 +95,7 @@ export async function handleTvAction(
 	// El cierre de eventos vencidos lo hace el cron (cada minuto), no aquí.
 	const { data: activeEvent } = await supabase
 		.from("tenant_events")
-		.select("id, status")
+		.select("id, status, metadata")
 		.eq("tenant_id", tenant_id)
 		.in("status", ["active", "draft"])
 		.order("start_time", { ascending: false })
@@ -103,6 +103,17 @@ export async function handleTvAction(
 		.maybeSingle();
 
 	const event_id = (activeEvent?.id as string | undefined) ?? null;
+
+	// Preferencia de fondo de la TV (control remoto del Staff).  Default
+	// carrusel automático si no se ha fijado nada.
+	const meta = (activeEvent?.metadata as Record<string, unknown> | null) ?? null;
+	const rawBackdrop = (meta?.tv_backdrop ?? null) as
+		| { mode?: string; url?: string | null }
+		| null;
+	const backdrop = {
+		mode: rawBackdrop?.mode === "pinned" ? "pinned" : "carousel",
+		url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
+	};
 
 	let tracks: TvTrack[] = [];
 	let battle: { id: string; ends_at: string; a: TvTrack; b: TvTrack } | null = null;
@@ -144,5 +155,5 @@ export async function handleTvAction(
 		}
 	}
 
-	return jsonResponse({ ok: true, tenant_id, event_id, tracks, battle }, { request });
+	return jsonResponse({ ok: true, tenant_id, event_id, tracks, battle, backdrop }, { request });
 }

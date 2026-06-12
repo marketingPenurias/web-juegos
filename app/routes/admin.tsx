@@ -5,9 +5,10 @@ import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
 	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
 	Square, Search, CalendarClock, CalendarPlus, Play, ListMusic, Copy,
-	Library, FolderPlus,
+	Library, FolderPlus, Tv, Images,
 } from "lucide-react";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
+import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { cn } from "../lib/utils";
 
 /**
@@ -370,6 +371,18 @@ export default function Admin() {
 									onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
 								/>
 
+								<TvControlPanel
+									slug={tenantSlugFromHost()}
+									busy={busy}
+									onSet={(mode, url) =>
+										run(
+											"set_tv_backdrop",
+											{ event_id: event.id, tv_mode: mode, tv_url: url },
+											mode === "pinned" ? "📌 Imagen fijada en la TV" : "🔄 Carrusel automático en la TV",
+										)
+									}
+								/>
+
 								{eventTracks.length === 0 ? (
 									// Pista vacía → llamada a la acción gigante centrada.
 									<button
@@ -657,6 +670,85 @@ function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 				))}
 			</select>
 		</div>
+	);
+}
+
+// ── Control de Pantallas (TV) — fijar imagen o carrusel (V1.7) ───────
+// Mini-panel para que el DJ controle el FONDO de la pantalla del local en
+// directo: clavar un flyer concreto o dejar el carrusel automático.  La
+// preferencia se persiste (tenant_events.metadata) y la TV la escucha por
+// Realtime → el cambio se ve al instante en la pantalla grande.
+function TvControlPanel({ slug, busy, onSet }: {
+	slug: string; busy: boolean;
+	onSet: (mode: "carousel" | "pinned", url: string | null) => void;
+}) {
+	const photos = useVenuePhotos(slug);
+	// Selección local (refleja el último clic del DJ).  La verdad vive en la
+	// BD y la TV la recibe por Realtime; null = carrusel automático.
+	const [selected, setSelected] = useState<string | null>(null);
+
+	const pickCarousel = () => { setSelected(null); onSet("carousel", null); };
+	const pickPhoto = (url: string) => { setSelected(url); onSet("pinned", url); };
+
+	return (
+		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3">
+			<div className="flex items-center gap-2">
+				<Tv className="w-5 h-5 text-cyan-400" />
+				<span className="font-black">Control de Pantallas (TV)</span>
+			</div>
+			<p className="text-[11px] text-zinc-500">
+				Fija una imagen como fondo único de la pantalla (ej. una promo) o deja el carrusel automático rotando las fotos del local. El cambio se aplica al instante.
+			</p>
+
+			{photos.length === 0 ? (
+				<p className="text-zinc-500 text-sm text-center py-4">No hay imágenes subidas para este local todavía.</p>
+			) : (
+				<div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+					{/* Carrusel automático */}
+					<button
+						type="button"
+						disabled={busy}
+						onClick={pickCarousel}
+						className={cn(
+							"aspect-video rounded-xl border-2 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all",
+							selected === null
+								? "border-cyan-400 bg-cyan-500/15 text-cyan-200 shadow-[0_0_18px_rgba(0,212,255,0.3)]"
+								: "border-zinc-700 bg-zinc-950/60 text-zinc-400",
+						)}
+					>
+						<Images className="w-5 h-5" />
+						<span className="text-[9px] font-black uppercase tracking-widest">Carrusel</span>
+					</button>
+
+					{/* Miniaturas → clic para fijar */}
+					{photos.map((url) => {
+						const active = selected === url;
+						return (
+							<button
+								key={url}
+								type="button"
+								disabled={busy}
+								onClick={() => pickPhoto(url)}
+								title="Fijar esta imagen en la pantalla"
+								className={cn(
+									"relative aspect-video rounded-xl overflow-hidden border-2 active:scale-95 transition-all",
+									active ? "border-amber-400 shadow-[0_0_18px_rgba(245,158,11,0.45)]" : "border-zinc-700 hover:border-zinc-500",
+								)}
+							>
+								<img src={url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+								{active && (
+									<span className="absolute inset-0 bg-amber-500/25 flex items-center justify-center">
+										<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-400 text-black text-[9px] font-black uppercase tracking-widest">
+											<Check className="w-3 h-3" /> Fijada
+										</span>
+									</span>
+								)}
+							</button>
+						);
+					})}
+				</div>
+			)}
+		</section>
 	);
 }
 

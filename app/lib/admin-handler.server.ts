@@ -40,6 +40,9 @@ type AdminBody = {
 	minutes?: number;
 	event_id?: string;
 	global_ids?: string[];
+	// Control de pantallas (TV): fondo carrusel vs. imagen fijada.
+	tv_mode?: string;
+	tv_url?: string;
 };
 
 type ParsedTrack = {
@@ -295,6 +298,45 @@ export async function handleAdminAction(
 				table_name: "event_tracks", record_id: trackId,
 			});
 			return jsonResponse({ ok: true }, { request });
+		}
+
+		// Control remoto del FONDO de la TV (V1.7).  Persistimos en
+		// tenant_events.metadata.tv_backdrop; la TV lo escucha por Realtime.
+		// 'carousel' → fotos rotando · 'pinned' → una imagen fija (url).
+		case "set_tv_backdrop": {
+			const eventId = String(body.event_id ?? "");
+			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+			const mode = body.tv_mode === "pinned" ? "pinned" : "carousel";
+			const url =
+				mode === "pinned" && typeof body.tv_url === "string" && body.tv_url.trim()
+					? body.tv_url.trim().slice(0, 1024)
+					: null;
+			if (mode === "pinned" && !url) {
+				return jsonResponse({ ok: false, error: "url_required" }, { status: 400, request });
+			}
+			// Read-modify-write del jsonb (un solo DJ lo toca; sin carrera real).
+			const { data: ev } = await supabase
+				.from("tenant_events")
+				.select("metadata")
+				.eq("id", eventId)
+				.eq("tenant_id", tenant_id)
+				.maybeSingle();
+			if (!ev) return jsonResponse({ ok: false, error: "event_not_found" }, { status: 404, request });
+			const metadata = {
+				...((ev.metadata as Record<string, unknown> | null) ?? {}),
+				tv_backdrop: { mode, url },
+			};
+			const { error } = await supabase
+				.from("tenant_events")
+				.update({ metadata })
+				.eq("id", eventId)
+				.eq("tenant_id", tenant_id);
+			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "set_tv_backdrop",
+				table_name: "tenant_events", record_id: eventId, new_data: { mode, url },
+			});
+			return jsonResponse({ ok: true, backdrop: { mode, url } }, { request });
 		}
 
 		case "now_playing": {

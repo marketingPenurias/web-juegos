@@ -33,6 +33,9 @@ type Track = {
 
 type Battle = { id: string; endsAt: string; a: Track; b: Track };
 
+/** Preferencia de fondo de la TV (control remoto del Staff). */
+type TvBackdrop = { mode: "carousel" | "pinned"; url: string | null };
+
 type Props = {
 	tenantId: string;
 	eventId: string | null;
@@ -40,6 +43,7 @@ type Props = {
 	showQr?: boolean;
 	enableBattle?: boolean;
 	initialBattle?: Battle | null;
+	initialBackdrop?: TvBackdrop | null;
 };
 
 const ROW_HEIGHT = 96; // px — must match the row's CSS height
@@ -52,10 +56,15 @@ export function Jumbotron({
 	showQr = false,
 	enableBattle = false,
 	initialBattle = null,
+	initialBackdrop = null,
 }: Props) {
 	const tenant = useTenant();
 	// Fotos del local (bucket tenant-assets) para el fondo dinámico de la TV.
 	const venuePhotos = useVenuePhotos(tenant.slug);
+	// Preferencia de fondo controlada por el DJ desde /admin (realtime).
+	const [backdrop, setBackdrop] = useState<TvBackdrop>(
+		initialBackdrop ?? { mode: "carousel", url: null },
+	);
 	const [tracks, setTracks] = useState<Track[]>(initialTracks);
 	const [battle, setBattle] = useState<Battle | null>(initialBattle);
 	const [connected, setConnected] = useState(false);
@@ -130,6 +139,36 @@ export function Jumbotron({
 				},
 			)
 			.subscribe((status) => setConnected(status === "SUBSCRIBED"));
+
+		return () => { void supabase.removeChannel(channel); };
+	}, [eventId]);
+
+	// ── Realtime tenant_events → control del FONDO de la TV ─────────────
+	// El DJ fija/desfija una imagen desde /admin (op set_tv_backdrop, escribe
+	// en tenant_events.metadata).  Aquí lo recibimos al instante y cambiamos
+	// entre carrusel automático e imagen fija.  Bajo volumen (sólo cambia
+	// cuando el DJ toca el panel) → sin coste de fan-out.
+	useEffect(() => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !eventId) return;
+
+		const channel = supabase
+			.channel(`tv:backdrop:${eventId}`)
+			.on(
+				"postgres_changes",
+				{ event: "UPDATE", schema: "public", table: "tenant_events", filter: `id=eq.${eventId}` },
+				(payload) => {
+					const meta = (payload.new as { metadata?: Record<string, unknown> })?.metadata ?? null;
+					const raw = (meta?.tv_backdrop ?? null) as
+						| { mode?: string; url?: string | null }
+						| null;
+					setBackdrop({
+						mode: raw?.mode === "pinned" ? "pinned" : "carousel",
+						url: typeof raw?.url === "string" ? raw.url : null,
+					});
+				},
+			)
+			.subscribe();
 
 		return () => { void supabase.removeChannel(channel); };
 	}, [eventId]);
@@ -258,6 +297,9 @@ export function Jumbotron({
 		[tenant.theme],
 	);
 
+	// URL fijada por el DJ (o null = carrusel automático).
+	const pinnedBackdropUrl = backdrop.mode === "pinned" ? backdrop.url : null;
+
 	const inBattle = enableBattle && !!battle;
 	const total = aVotes + bVotes;
 	const aPct = total > 0 ? Math.round((aVotes / total) * 100) : 50;
@@ -271,10 +313,12 @@ export function Jumbotron({
 			    2) Vídeo en loop (tenant.bgVideoUrl) si no hay fotos.
 			    3) Fondo sólido (--jumbo-bg) + blobs como último fallback.
 			    Las fotos van primero porque es el branding más vivo del local
-			    de cara a la pantalla (lo pidió el CTO para el piloto). */}
+			    de cara a la pantalla (lo pidió el CTO para el piloto).
+			    El DJ puede FIJAR una imagen (backdrop.mode='pinned') desde
+			    /admin → se muestra estática; si es 'carousel', rota con GSAP. */}
 			{/* TODO: UX - Hacer convivir bg-video con fotos (ej. Picture-in-Picture) o hacer configurable la prioridad */}
-			{venuePhotos.length > 0 ? (
-				<VenueBackdrop urls={venuePhotos} />
+			{pinnedBackdropUrl || venuePhotos.length > 0 ? (
+				<VenueBackdrop urls={venuePhotos} pinnedUrl={pinnedBackdropUrl} />
 			) : tenant.bgVideoUrl ? (
 				<>
 					<video
