@@ -108,12 +108,14 @@ export async function handleTvAction(
 	// carrusel automático si no se ha fijado nada.
 	const meta = (activeEvent?.metadata as Record<string, unknown> | null) ?? null;
 	const rawBackdrop = (meta?.tv_backdrop ?? null) as
-		| { mode?: string; url?: string | null }
+		| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean }
 		| null;
 	const bm = rawBackdrop?.mode;
 	const backdrop = {
 		mode: bm === "video" || bm === "photo" ? bm : "carousel",
 		url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
+		showRanking: rawBackdrop?.showRanking !== false, // default true
+		showBattle: rawBackdrop?.showBattle !== false, // default true
 	};
 
 	let tracks: TvTrack[] = [];

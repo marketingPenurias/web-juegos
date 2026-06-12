@@ -25,7 +25,12 @@ type TvTrack = {
 	is_played: boolean;
 };
 type TvBattle = { id: string; ends_at: string; a: TvTrack; b: TvTrack } | null;
-export type TvBackdrop = { mode: "video" | "photo" | "carousel"; url: string | null };
+export type TvBackdrop = {
+	mode: "video" | "photo" | "carousel";
+	url: string | null;
+	showRanking: boolean;
+	showBattle: boolean;
+};
 
 type Boot =
 	| { phase: "loading" }
@@ -103,6 +108,8 @@ export function TvScreen({
 				backdrop: {
 					mode: bm === "video" || bm === "photo" ? bm : "carousel",
 					url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
+					showRanking: rawBackdrop?.showRanking !== false,
+					showBattle: rawBackdrop?.showBattle !== false,
 				},
 			});
 		})();
