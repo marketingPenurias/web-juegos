@@ -4,6 +4,8 @@ import { QRCodeSVG } from "qrcode.react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
 import { useTenant } from "../lib/tenant";
+import { useVenuePhotos } from "../lib/useVenuePhotos";
+import { VenueBackdrop } from "./VenueBackdrop";
 import { cn } from "../lib/utils";
 
 /**
@@ -52,6 +54,8 @@ export function Jumbotron({
 	initialBattle = null,
 }: Props) {
 	const tenant = useTenant();
+	// Fotos del local (bucket tenant-assets) para el fondo dinámico de la TV.
+	const venuePhotos = useVenuePhotos(tenant.slug);
 	const [tracks, setTracks] = useState<Track[]>(initialTracks);
 	const [battle, setBattle] = useState<Battle | null>(initialBattle);
 	const [connected, setConnected] = useState(false);
@@ -262,10 +266,16 @@ export function Jumbotron({
 
 	return (
 		<div ref={containerRef} style={containerStyle} className="min-h-dvh w-full bg-(--jumbo-bg) text-white relative overflow-hidden flex flex-col">
-			{/* Fondo PREMIUM: vídeo en loop del local (bucket tenant-assets).
-			    Si no hay vídeo configurado, se mantiene el fondo sólido
-			    (--jumbo-bg) + blobs como fallback. */}
-			{tenant.bgVideoUrl && (
+			{/* Fondo PREMIUM dinámico.  Prioridad:
+			    1) Fotos del local (bucket tenant-assets) → carrusel crossfade.
+			    2) Vídeo en loop (tenant.bgVideoUrl) si no hay fotos.
+			    3) Fondo sólido (--jumbo-bg) + blobs como último fallback.
+			    Las fotos van primero porque es el branding más vivo del local
+			    de cara a la pantalla (lo pidió el CTO para el piloto). */}
+			{/* TODO: UX - Hacer convivir bg-video con fotos (ej. Picture-in-Picture) o hacer configurable la prioridad */}
+			{venuePhotos.length > 0 ? (
+				<VenueBackdrop urls={venuePhotos} />
+			) : tenant.bgVideoUrl ? (
 				<>
 					<video
 						key={tenant.bgVideoUrl}
@@ -280,7 +290,7 @@ export function Jumbotron({
 					{/* Capa oscura por DELANTE del vídeo: legibilidad del leaderboard. */}
 					<div className="absolute inset-0 bg-black/65 pointer-events-none" />
 				</>
-			)}
+			) : null}
 			<div className="absolute inset-0 pointer-events-none">
 				<div className="absolute -top-32 -left-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-primary)/20 blur-[120px]" />
 				<div className="absolute -bottom-32 -right-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-accent)/15 blur-[140px]" />
