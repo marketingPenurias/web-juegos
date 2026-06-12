@@ -12,8 +12,19 @@ import { getBrowserSupabase } from "./supabase.client";
  *   React), así que es un Singleton auténtico: por muchas veces que React
  *   re-renderice o monte componentes, sólo existe UN socket a la vez.
  *
- *   Cada consumidor recibe el payload crudo y decide qué hacer (NowPlaying
- *   mira `is_played`; LiveBattle mira `total_votes` de sus dos pistas).
+ *   ⚡ ANTI FAN-OUT CUADRÁTICO (Auditoría 360º · §2):
+ *   Este canal escucha SÓLO `INSERT` y `DELETE` — eventos RAROS (el DJ
+ *   mete/quita un tema).  El `UPDATE` de `event_tracks` se ELIMINÓ a
+ *   propósito: cada voto incrementaba `total_votes`, y con `postgres_changes`
+ *   sobre UPDATE eso se difundía a TODOS los clientes del evento (500 votos
+ *   × 500 móviles = 250k mensajes/min por local) saturando el WAL de
+ *   Postgres → Realtime.  Los porcentajes en vivo y el "sonando ahora" se
+ *   refrescan ahora por SHORT-POLLING (GET ligero cada 2.5s) en `LiveBattle`
+ *   y `NowPlaying`, no por WebSocket.
+ *
+ *   Cada consumidor recibe el payload crudo de INSERT/DELETE y decide qué
+ *   hacer (NowPlaying limpia si borran el tema que sonaba; LiveBattle lo
+ *   ignora y se apoya en el polling).
  */
 
 export type EventTrackChange = {
@@ -45,20 +56,34 @@ function ensureChannel(eventId: string): void {
 	sharedEventId = eventId;
 	if (!supabase) return; // SSR / sin configurar: sin socket (los cb nunca disparan)
 
+	// Fan-out a TODOS los consumidores enganchados al singleton.
+	const fanout = (payload: unknown) => {
+		for (const sub of subscribers) sub(payload as EventTrackChange);
+	};
+
+	// SÓLO INSERT + DELETE.  El UPDATE (votos) se sirve por short-polling
+	// para no saturar el WAL/WebSockets (ver cabecera del módulo).
 	sharedChannel = supabase
 		.channel(`event_tracks:shared:${eventId}`)
 		.on(
 			"postgres_changes",
 			{
-				event: "*",
+				event: "INSERT",
 				schema: "public",
 				table: "event_tracks",
 				filter: `event_id=eq.${eventId}`,
 			},
-			(payload) => {
-				// Fan-out a TODOS los consumidores enganchados al singleton.
-				for (const sub of subscribers) sub(payload as EventTrackChange);
+			fanout,
+		)
+		.on(
+			"postgres_changes",
+			{
+				event: "DELETE",
+				schema: "public",
+				table: "event_tracks",
+				filter: `event_id=eq.${eventId}`,
 			},
+			fanout,
 		)
 		.subscribe();
 }

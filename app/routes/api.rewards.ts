@@ -10,6 +10,7 @@ import {
 	resolveTenantProfile,
 } from "../lib/tenant-resolver.server";
 import type {
+	CompleteRedemptionReturn,
 	PurchaseRewardReturn,
 	RewardRequest,
 	StartRedemptionReturn,
@@ -44,7 +45,11 @@ import type {
 function isReward(body: unknown): body is RewardRequest {
 	if (!body || typeof body !== "object") return false;
 	const b = body as { action_type?: unknown };
-	return b.action_type === "purchase" || b.action_type === "redeem";
+	return (
+		b.action_type === "purchase" ||
+		b.action_type === "redeem" ||
+		b.action_type === "consume"
+	);
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -255,6 +260,58 @@ export async function action({ request, context }: Route.ActionArgs) {
 					action_type: "redeem",
 					reward_id: body.reward_id,
 					expires_at: payload?.expires_at,
+				},
+				{ request },
+			);
+		}
+
+		if (body.action_type === "consume") {
+			// Consumo REAL del ticket (anti-fraude).  El RPC
+			// `complete_redemption` marca el reward 'consumed' de forma
+			// atómica e idempotente.  El cliente sólo muestra la animación
+			// de "quemado" si esta respuesta es ok:true (200).
+			if (!body.reward_id) {
+				return jsonResponse(
+					{ ok: false, error: "reward_id_required" },
+					{ status: 400, request },
+				);
+			}
+
+			const { data, error } = await supabase.rpc("complete_redemption", {
+				p_tenant_id: tenant_id,
+				p_user_id: user_profile_id,
+				p_reward_id: body.reward_id,
+			});
+
+			if (error) {
+				console.warn(
+					"[api.rewards] complete_redemption error",
+					error.message,
+				);
+				return jsonResponse(
+					{ ok: false, error: "rpc_failed", detail: error.message },
+					{ status: 500, request },
+				);
+			}
+
+			const payload = (data ?? {}) as CompleteRedemptionReturn;
+			if (payload.ok === false) {
+				// Idempotencia: un ticket ya consumido (doble-tap, reintento)
+				// devuelve 409 — la UI lo trata como "ya quemado".  El resto
+				// (reward_not_found / not_redeeming) → 409 también: el ticket
+				// no está en un estado quemable.
+				return jsonResponse(
+					{ ok: false, error: payload.error ?? "consume_failed" },
+					{ status: 409, request },
+				);
+			}
+
+			return jsonResponse(
+				{
+					ok: true,
+					action_type: "consume",
+					reward_id: body.reward_id,
+					consumed_at: payload.consumed_at,
 				},
 				{ request },
 			);

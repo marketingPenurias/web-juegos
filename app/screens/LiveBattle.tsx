@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Timer } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
-import { useEventTracksChannel } from "../lib/useEventTracksChannel";
+import { useInterval } from "../lib/useInterval";
 import { useGameState } from "../store/useGameState";
 import { useMusic } from "../lib/useMusic";
 import { useClaim } from "../lib/useClaim";
@@ -34,6 +34,10 @@ import { VoteFooter, type VoteAction } from "../components/live/VoteFooter";
 // Fallbacks: el coste/premio REAL los fija `tenant_token_rewards`.
 const DEFAULT_BOOST_COST = 30;
 const DEFAULT_VOTE_REWARD = 10;
+
+// Short-polling de los porcentajes en vivo (sustituye al UPDATE Realtime
+// de event_tracks, que saturaba el WAL).  Auditoría 360º · §2.
+const VOTES_POLL_MS = 2500;
 
 type BTrack = { id: string; title: string; artist: string; total_votes: number };
 type Battle = { id: string; endsAt: string; a: BTrack; b: BTrack };
@@ -126,20 +130,15 @@ export function LiveBattle() {
 		return () => { void supabase.removeChannel(channel); };
 	}, [activeEventId, loadBattle]);
 
-	// ── Realtime: event_tracks (porcentajes en vivo de las dos canciones) ─
-	// Canal COMPARTIDO con NowPlaying (un solo socket de event_tracks por
-	// evento) — antes LiveBattle abría su propio `live:tracks:*` duplicado.
-	useEventTracksChannel(activeEventId, (payload) => {
-		if (payload.eventType === "DELETE") return;
-		const row = payload.new as { id?: string; total_votes?: number } | undefined;
-		if (!row?.id) return;
-		setBattle((cur) => {
-			if (!cur) return cur;
-			if (row.id === cur.a.id) return { ...cur, a: { ...cur.a, total_votes: Number(row.total_votes ?? cur.a.total_votes) } };
-			if (row.id === cur.b.id) return { ...cur, b: { ...cur.b, total_votes: Number(row.total_votes ?? cur.b.total_votes) } };
-			return cur;
-		});
-	});
+	// ── Porcentajes en vivo por SHORT-POLLING (no Realtime) ─────────────
+	// El UPDATE de event_tracks ya NO se difunde por WebSocket (saturaba el
+	// WAL/Realtime con 250k msg/min por local).  Refrescamos las dos pistas
+	// del duelo cada 2.5s mientras haya batalla y la pestaña esté visible;
+	// `loadBattle` relee `total_votes`.  El cambio de batalla (start/stop)
+	// sigue llegando por el canal `live_battles` (bajo volumen).
+	useInterval(() => {
+		void loadBattle();
+	}, battle ? VOTES_POLL_MS : null);
 
 	// ── Cuenta atrás del duelo ──────────────────────────────────────────
 	useEffect(() => {
