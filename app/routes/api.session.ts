@@ -1,6 +1,5 @@
 import type { Route } from "./+types/api.session";
 import {
-	corsHeaders,
 	jsonResponse,
 	preflight,
 	verifyAuthToken,
@@ -119,6 +118,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		id: string;
 		token_balance: number;
 		lifetime_earned: number;
+		birth_date: string | null;
 	};
 	let profile: ProfileRow | null = null;
 	// is_new_user: true SOLO cuando el JIT crea el perfil en esta llamada
@@ -129,7 +129,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 	const { data: existing, error: profileErr } = await supabase
 		.from("user_profiles")
-		.select("id, token_balance, lifetime_earned")
+		.select("id, token_balance, lifetime_earned, birth_date")
 		.eq("tenant_id", tenant_id)
 		.eq("auth_user_id", verified.id)
 		.maybeSingle();
@@ -146,6 +146,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			id: existing.id as string,
 			token_balance: Number(existing.token_balance ?? 0),
 			lifetime_earned: Number(existing.lifetime_earned ?? 0),
+			birth_date: (existing.birth_date as string | null) ?? null,
 		};
 	} else {
 		// JIT — creamos el perfil del recién llegado.  email viene del
@@ -162,7 +163,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 				token_balance: 0,
 				lifetime_earned: 0,
 			})
-			.select("id, token_balance, lifetime_earned")
+			.select("id, token_balance, lifetime_earned, birth_date")
 			.single();
 
 		if (insertErr || !created) {
@@ -208,7 +209,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		// Releer el perfil para capturar el balance tras el bonus.
 		const { data: refreshed } = await supabase
 			.from("user_profiles")
-			.select("id, token_balance, lifetime_earned")
+			.select("id, token_balance, lifetime_earned, birth_date")
 			.eq("id", created.id)
 			.maybeSingle();
 		const finalProfile = refreshed ?? created;
@@ -217,6 +218,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			id: finalProfile.id as string,
 			token_balance: Number(finalProfile.token_balance ?? 0),
 			lifetime_earned: Number(finalProfile.lifetime_earned ?? 0),
+			birth_date: (finalProfile.birth_date as string | null) ?? null,
 		};
 		is_new_user = true;
 	}
@@ -352,6 +354,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 				id: profile.id,
 				token_balance: profile.token_balance,
 				lifetime_earned: profile.lifetime_earned,
+				birth_date: profile.birth_date,
 			},
 			auth_email: verified.email,
 			active_event,
@@ -365,17 +368,90 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	);
 }
 
-export function action({ request }: Route.ActionArgs) {
+/**
+ * POST /api/session — actualiza campos del perfil del usuario autenticado.
+ *
+ *   Hoy: `birth_date` (captado en el onboarding, V1.7).  El user_id viene
+ *   SIEMPRE del JWT verificado, nunca del body.  Escribe con service_role
+ *   acotado por tenant_id + auth_user_id.
+ */
+export async function action({ request, context }: Route.ActionArgs) {
 	const cors = preflight(request);
 	if (cors) return cors;
-	return new Response(
-		JSON.stringify({ ok: false, error: "method_not_allowed" }),
-		{
-			status: 405,
-			headers: {
-				"Content-Type": "application/json",
-				...corsHeaders(request.headers.get("origin")),
-			},
-		},
+
+	if (request.method !== "POST") {
+		return jsonResponse(
+			{ ok: false, error: "method_not_allowed" },
+			{ status: 405, request },
+		);
+	}
+
+	const verified = await verifyAuthToken(request, context);
+	if (!verified) {
+		return jsonResponse({ ok: false, error: "unauthorized" }, { status: 401, request });
+	}
+
+	let body: { tenant_slug?: string; birth_date?: string };
+	try {
+		body = (await request.json()) as { tenant_slug?: string; birth_date?: string };
+	} catch {
+		return jsonResponse({ ok: false, error: "invalid_json" }, { status: 400, request });
+	}
+
+	// Validación estricta de la fecha: formato YYYY-MM-DD, real y razonable
+	// (no futuro, no antes de 1900, +18 recomendado pero no bloqueante aquí).
+	const birth = String(body.birth_date ?? "").trim();
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(birth)) {
+		return jsonResponse({ ok: false, error: "invalid_birth_date" }, { status: 400, request });
+	}
+	const parsed = new Date(`${birth}T00:00:00Z`);
+	if (Number.isNaN(parsed.getTime()) || parsed > new Date() || parsed.getUTCFullYear() < 1900) {
+		return jsonResponse({ ok: false, error: "invalid_birth_date" }, { status: 400, request });
+	}
+
+	// Control de edad +18 EXACTO (mes/día incluidos) — el backend es la
+	// autoridad final: aunque el cliente lo saltara, aquí se frena.  Cutoff =
+	// la fecha de nacimiento más reciente que ya cumple 18 hoy; nacer DESPUÉS
+	// de esa fecha = menor.
+	const today = new Date();
+	const cutoff = new Date(
+		Date.UTC(today.getUTCFullYear() - 18, today.getUTCMonth(), today.getUTCDate()),
 	);
+	if (parsed.getTime() > cutoff.getTime()) {
+		return jsonResponse({ ok: false, error: "under_18" }, { status: 400, request });
+	}
+
+	const slugResult = pickTenantSlug(body.tenant_slug ?? null, request);
+	if (!slugResult.ok) {
+		return jsonResponse({ ok: false, error: slugResult.error }, { status: 400, request });
+	}
+
+	let supabase: ReturnType<typeof getServiceSupabase>;
+	try {
+		supabase = getServiceSupabase(context);
+	} catch (err) {
+		if (err instanceof Response) return err;
+		return jsonResponse({ ok: false, error: "service_unavailable" }, { status: 503, request });
+	}
+
+	const { data: tenant } = await supabase
+		.from("tenants")
+		.select("id")
+		.eq("slug", slugResult.slug)
+		.maybeSingle();
+	if (!tenant) {
+		return jsonResponse({ ok: false, error: "unknown_tenant" }, { status: 404, request });
+	}
+
+	const { error } = await supabase
+		.from("user_profiles")
+		.update({ birth_date: birth })
+		.eq("tenant_id", tenant.id as string)
+		.eq("auth_user_id", verified.id);
+	if (error) {
+		console.warn("[api.session] birth_date update failed", error.message);
+		return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+	}
+
+	return jsonResponse({ ok: true, birth_date: birth }, { request });
 }

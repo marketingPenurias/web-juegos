@@ -81,6 +81,8 @@ type GameState = {
 	lifetimeEarned: number;
 	activeEventId: string | null;
 	activeEventName: string | null;
+	// Fecha de nacimiento (V1.7).  null = aún no capturada → gate de onboarding.
+	birthDate: string | null;
 
 	// ── Estado de canje activo (pantalla camarero) ──────────────────────
 	activeRedemption: ActiveRedemption | null;
@@ -100,6 +102,7 @@ type GameState = {
 	// el historial real vive en wallet_ledger (no se guarda en cliente).
 	addTokens: (n: number, labelKey?: string) => void;
 	setFriends: (friends: string[]) => void;
+	setBirthDate: (d: string) => void;
 	logout: () => void;
 
 	// ── Acciones de sync con backend ───────────────────────────────────
@@ -113,6 +116,7 @@ type GameState = {
 		rewardRules?: RewardRule[];
 		streak?: number;
 		isNewUser?: boolean;
+		birthDate?: string | null;
 	}) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
 	setStreak: (streak: number) => void;
@@ -137,6 +141,7 @@ export const useGameState = create<GameState>()(
 			lifetimeEarned: 0,
 			activeEventId: null,
 			activeEventName: null,
+			birthDate: null,
 			activeRedemption: null,
 			dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 			rewardRules: [],
@@ -152,6 +157,8 @@ export const useGameState = create<GameState>()(
 
 			setFriends: (friends) => set({ friends }),
 
+			setBirthDate: (d) => set({ birthDate: d }),
+
 			logout: () =>
 				set({
 					currentScreen: "onboarding",
@@ -161,6 +168,7 @@ export const useGameState = create<GameState>()(
 					lifetimeEarned: 0,
 					activeEventId: null,
 					activeEventName: null,
+					birthDate: null,
 					dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 					rewardRules: [],
 					// Reset para que el SIGUIENTE usuario en este móvil (otro JIT)
@@ -181,6 +189,7 @@ export const useGameState = create<GameState>()(
 				rewardRules,
 				streak,
 				isNewUser,
+				birthDate,
 			}) =>
 				set((state) => ({
 					userProfileId,
@@ -188,6 +197,7 @@ export const useGameState = create<GameState>()(
 					lifetimeEarned: Math.max(0, lifetimeEarned),
 					activeEventId,
 					activeEventName,
+					birthDate: birthDate !== undefined ? birthDate : state.birthDate,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
 					streak: typeof streak === "number" ? streak : state.streak,
