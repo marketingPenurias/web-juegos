@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	ArrowLeft,
@@ -49,10 +49,40 @@ export function Jukebox() {
 	const BOOST_COST = Math.abs(rewardAmount("jukebox_boost", -DEFAULT_BOOST_COST));
 	const REQUEST_REWARD = rewardAmount("jukebox_request", DEFAULT_REQUEST_REWARD);
 
-	const { deck, loading, error, castVote, reload } = useMusic(activeEventId);
+	// CATÁLOGO COMPLETO (ligero) del evento — el Jukebox no usa el deck
+	// "no-votado" de Tinder, sino todas las canciones disponibles para poder
+	// buscar sobre el 100% y mostrar 50 aleatorias por defecto.
+	const { deck: catalog, loading, error, castVote, reload } = useMusic(
+		activeEventId,
+		"catalog",
+	);
 	const addTokens = useGameState((s) => s.addTokens);
 	const markDaily = useGameState((s) => s.markDaily);
 	const { claim } = useClaim();
+
+	// ── Snapshot estable del catálogo (mismo patrón anti-rebaraje que
+	// Tinder).  `castVote` hace `setDeck(filter)` al votar; si renderizáramos
+	// las 50 aleatorias directo desde `catalog`, cada voto rebarajaría la
+	// vista.  Congelamos el catálogo una vez por evento.
+	const [allSongs, setAllSongs] = useState<MusicTrack[]>([]);
+	const catalogEventRef = useRef<string | null>(null);
+
+	useEffect(() => {
+		catalogEventRef.current = null;
+		setAllSongs([]);
+	}, [activeEventId]);
+
+	useEffect(() => {
+		if (
+			activeEventId &&
+			catalogEventRef.current !== activeEventId &&
+			!loading &&
+			catalog.length > 0
+		) {
+			catalogEventRef.current = activeEventId;
+			setAllSongs(catalog);
+		}
+	}, [activeEventId, catalog, loading]);
 
 	const [query, setQuery] = useState("");
 	const [requested, setRequested] = useState<Set<string>>(new Set());
@@ -84,18 +114,37 @@ export function Jukebox() {
 				delay: 0.1,
 			});
 		},
-		{ scope: containerRef, dependencies: [deck.length] },
+		{ scope: containerRef, dependencies: [allSongs.length] },
 	);
 
+	// 50 ALEATORIAS para la vista por defecto (Fisher-Yates parcial, sin
+	// sesgo).  Se recalcula sólo cuando cambia el catálogo (carga / evento),
+	// así que el Jukebox "parece nuevo" cada vez que se abre (remontaje) pero
+	// NO se rebaraja al votar.
+	const randomFifty = useMemo(() => {
+		if (allSongs.length <= 50) return allSongs;
+		const arr = allSongs.slice();
+		for (let i = arr.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[arr[i], arr[j]] = [arr[j], arr[i]];
+		}
+		return arr.slice(0, 50);
+	}, [allSongs]);
+
+	// Búsqueda: filtra sobre el 100% del catálogo (no sólo las 50 visibles).
+	// Cap a 50 resultados renderizados para no reventar el DOM con queries
+	// muy genéricas.
 	const filtered = useMemo(() => {
 		const q = query.trim().toLowerCase();
-		if (!q) return deck;
-		return deck.filter(
-			(s) =>
-				s.title.toLowerCase().includes(q) ||
-				s.artist.toLowerCase().includes(q),
-		);
-	}, [deck, query]);
+		if (!q) return randomFifty;
+		return allSongs
+			.filter(
+				(s) =>
+					s.title.toLowerCase().includes(q) ||
+					s.artist.toLowerCase().includes(q),
+			)
+			.slice(0, 50);
+	}, [allSongs, randomFifty, query]);
 
 	const flashRow = (id: string, color: "amber" | "cyan") => {
 		const row = rowRefs.current.get(id);
@@ -267,12 +316,12 @@ export function Jukebox() {
 				{!activeEventId && (
 					<EmptyJukebox label={t("live.noEventSub", "Sin evento activo")} />
 				)}
-				{activeEventId && loading && deck.length === 0 && (
+				{activeEventId && loading && catalog.length === 0 && (
 					<p className="text-center text-zinc-500 text-sm py-8">
 						{t("menu.loading")}
 					</p>
 				)}
-				{activeEventId && error && deck.length === 0 && (
+				{activeEventId && error && catalog.length === 0 && (
 					<div className="text-center py-8 flex flex-col gap-3 items-center">
 						<p className="text-rose-300 text-sm">{t("menu.errLoad")}</p>
 						<button

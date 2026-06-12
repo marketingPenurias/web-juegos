@@ -136,6 +136,33 @@ export async function handleMusicLoader(
 		return jsonResponse({ ok: true, tracks: data ?? [] }, { request });
 	}
 
+	// Jukebox CATALOG — TODAS las canciones disponibles (is_played=false) del
+	// evento, ligeras, SIN excluir las ya votadas (el Jukebox las muestra
+	// igual para poder boostearlas).  El cliente elige 50 aleatorias para la
+	// vista por defecto y filtra sobre el 100% al buscar.  Cap defensivo a
+	// 1000 para no escupir catálogos absurdos al móvil.
+	if (mode === "catalog") {
+		const { data, error } = await supabase
+			.from("event_tracks")
+			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played")
+			.eq("tenant_id", tenant_id)
+			.eq("event_id", event_id)
+			.eq("is_played", false)
+			.order("total_votes", { ascending: false })
+			.order("title", { ascending: true })
+			.limit(1000);
+
+		if (error) {
+			console.warn("[api.music] catalog lookup failed", error.message);
+			return jsonResponse(
+				{ ok: false, error: "lookup_failed" },
+				{ status: 500, request },
+			);
+		}
+
+		return jsonResponse({ ok: true, tracks: data ?? [] }, { request });
+	}
+
 	// Swipe deck — unplayed + not yet voted by this user
 	const { data: votedRows, error: votedErr } = await supabase
 		.from("track_votes")

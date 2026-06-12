@@ -25,6 +25,7 @@ type TvTrack = {
 	is_played: boolean;
 };
 type TvBattle = { id: string; ends_at: string; a: TvTrack; b: TvTrack } | null;
+export type TvBackdrop = { mode: "carousel" | "pinned"; url: string | null };
 
 type Boot =
 	| { phase: "loading" }
@@ -36,6 +37,7 @@ type Boot =
 			eventId: string | null;
 			tracks: TvTrack[];
 			battle: TvBattle;
+			backdrop: TvBackdrop;
 	  };
 
 function tenantSlugFromHost(): string {
@@ -90,12 +92,17 @@ export function TvScreen({
 				});
 				return;
 			}
+			const rawBackdrop = (data.backdrop as Partial<TvBackdrop> | null) ?? null;
 			setBoot({
 				phase: "ready",
 				tenantId: String(data.tenant_id ?? ""),
 				eventId: (data.event_id as string | null) ?? null,
 				tracks: (data.tracks as TvTrack[]) ?? [],
 				battle: (data.battle as TvBattle) ?? null,
+				backdrop: {
+					mode: rawBackdrop?.mode === "pinned" ? "pinned" : "carousel",
+					url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
+				},
 			});
 		})();
 		return () => {
@@ -156,6 +163,7 @@ export function TvScreen({
 			showQr={showQr}
 			enableBattle={enableBattle}
 			initialBattle={initialBattle}
+			initialBackdrop={boot.backdrop}
 		/>
 	);
 }

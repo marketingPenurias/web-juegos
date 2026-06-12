@@ -95,7 +95,9 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	return payload;
 }
 
-export function useMusic(eventId: string | null) {
+export type MusicMode = "swipe" | "catalog";
+
+export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 	const tenant = useTenant();
 	const [deck, setDeck] = useState<MusicTrack[]>([]);
 	const [loading, setLoading] = useState(false);
@@ -106,8 +108,10 @@ export function useMusic(eventId: string | null) {
 		setLoading(true);
 		setError(null);
 		try {
+			// `swipe`  → deck no-votado (Tinder).
+			// `catalog`→ catálogo completo ligero (Jukebox: 50 random + búsqueda).
 			const data = await fetchJson<{ ok: true; tracks: MusicTrack[] }>(
-				`${ENDPOINT}?event_id=${encodeURIComponent(eventId)}&mode=swipe`,
+				`${ENDPOINT}?event_id=${encodeURIComponent(eventId)}&mode=${mode}`,
 				{
 					method: "GET",
 					headers: { "X-Tenant-Slug": tenant.slug },
@@ -120,7 +124,7 @@ export function useMusic(eventId: string | null) {
 		} finally {
 			setLoading(false);
 		}
-	}, [eventId, tenant.slug]);
+	}, [eventId, tenant.slug, mode]);
 
 	useEffect(() => {
 		void reload();

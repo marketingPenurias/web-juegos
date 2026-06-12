@@ -4,25 +4,39 @@ import { gsap, useGSAP } from "../lib/gsap";
 /**
  * VenueBackdrop — fondo dinámico de la TV con las fotos del local.
  *
- *   Renderiza todas las imágenes apiladas a pantalla completa y las hace
- *   rotar con un CROSSFADE lento (GSAP) + un Ken Burns sutil (zoom muy
- *   lento) para que el fondo "respire" sin distraer de las mecánicas
- *   (Batalla, Leaderboard, QR).  Encima va una capa oscura para mantener
- *   la legibilidad del contenido.
+ *   Dos modos:
+ *     · CARRUSEL (default): rota las fotos con un CROSSFADE lento (GSAP) +
+ *       Ken Burns sutil para que el fondo "respire" sin distraer.
+ *     · FIJADO (`pinnedUrl`): el DJ ha clavado una imagen desde /admin →
+ *       se muestra ESTÁTICA, sin animación (ej. flyer "Promo Chupitos").
  *
+ *   Encima va una capa oscura para legibilidad (Batalla, Leaderboard, QR).
  *   Diseñado para vivir DETRÁS del contenido (lo posiciona el padre con
- *   z-index): este componente sólo ocupa el `absolute inset-0` que le den.
+ *   z-index): sólo ocupa el `absolute inset-0` que le den.
  */
 
 const HOLD_S = 6; // segundos visible cada foto
 const FADE_S = 2.2; // duración del crossfade
 const KENBURNS_S = 14; // zoom lento (ida/vuelta)
 
-export function VenueBackdrop({ urls }: { urls: string[] }) {
+export function VenueBackdrop({
+	urls,
+	pinnedUrl = null,
+}: {
+	urls: string[];
+	pinnedUrl?: string | null;
+}) {
 	const ref = useRef<HTMLDivElement>(null);
+
+	// Imagen fija → una sola foto estática.  Carrusel → todas las del local.
+	const isPinned = Boolean(pinnedUrl);
+	const photos = isPinned ? [pinnedUrl as string] : urls;
 
 	useGSAP(
 		() => {
+			// FIJADO: estática, sin animar (lo pidió el CTO para los flyers).
+			if (isPinned) return;
+
 			const layers = gsap.utils.toArray<HTMLElement>(".venue-photo");
 			if (layers.length === 0) return;
 
@@ -53,12 +67,12 @@ export function VenueBackdrop({ urls }: { urls: string[] }) {
 					.to(layer, { opacity: 0, duration: FADE_S, ease: "power2.inOut" }, "<");
 			});
 		},
-		{ scope: ref, dependencies: [urls.join("|")] },
+		{ scope: ref, dependencies: [photos.join("|"), isPinned] },
 	);
 
 	return (
 		<div ref={ref} className="absolute inset-0 overflow-hidden" aria-hidden="true">
-			{urls.map((url) => (
+			{photos.map((url) => (
 				<div
 					key={url}
 					className="venue-photo absolute inset-0 will-change-transform"
@@ -66,7 +80,8 @@ export function VenueBackdrop({ urls }: { urls: string[] }) {
 						backgroundImage: `url("${url}")`,
 						backgroundSize: "cover",
 						backgroundPosition: "center",
-						opacity: 0,
+						// Fijada → visible ya (sin GSAP).  Carrusel → GSAP la revela.
+						opacity: isPinned ? 1 : 0,
 					}}
 				/>
 			))}
