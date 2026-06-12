@@ -25,10 +25,9 @@ import { cn } from "../lib/utils";
  *     · Swipe izquierda → trackEvent analytics, NO vota (Tinder real
  *       no manda dislikes a la BD: ahorra escrituras y respeta el
  *       índice único `(track_id, user_id)`).
- *     · Al cubrir REQUIRED votos, otorga la recompensa local
- *       (+20 tokens) — el ledger real lo gestiona el server, esto es
- *       feedback inmediato hasta que /api/wallet earn endpoint cierre
- *       el círculo en Fase 2.
+ *     · Al cubrir REQUIRED votos, otorga la recompensa de forma optimista
+ *       (addTokens) y la confirma server-side vía `useClaim`
+ *       ('tinder_completion', 1/noche); el ledger reconcilia el balance.
  */
 
 const SWIPE_THRESHOLD = 100;
@@ -62,19 +61,48 @@ export function TinderMusical() {
 	);
 	const animatingRef = useRef(false);
 
-	// Firma estable del deck: cambia cuando el server trae otras canciones
-	// (otra noche, otro evento, o un reload).  La usamos para resetear el
-	// índice Y limpiar el array de refs — evita que refs posicionales de un
-	// deck anterior se filtren al nuevo (causa raíz de "cartas a ciegas").
-	const deckKey = deck.map((d) => d.id).join(",");
+	// ── Baraja LOCAL estable (FIX del bug de swipe a la derecha) ────────
+	// `useMusic.castVote` hace `setDeck(d => d.filter(...))` para quitar la
+	// carta votada (verdad del servidor).  Si renderizáramos directo desde
+	// `deck`, ese filtrado — que SÓLO ocurre en el "like" — desplazaba los
+	// índices de las cartas restantes y, peor, cambiaba la firma del deck
+	// disparando un reset de `index`/stats a 0 → parpadeo, progreso que
+	// retrocede y `cardRefs[index]` apuntando a la carta equivocada.  El
+	// "dislike" parecía sano sólo porque NO vota (no mutaba el deck).
+	//
+	// Solución: congelamos un SNAPSHOT del deck por sesión de swipe.  El
+	// avance lo controla `index`; las mutaciones de `deck` ya no tocan las
+	// cartas en pantalla.  Sólo un cambio de evento reinicia la sesión.
+	const [cards, setCards] = useState<MusicTrack[]>([]);
+	const cardsEventRef = useRef<string | null>(null);
+
+	// Cambio de evento → corta la sesión actual al instante.
 	useEffect(() => {
+		cardsEventRef.current = null;
+		setCards([]);
 		cardRefs.current = [];
 		setIndex(0);
 		setStats({ likes: 0, dislikes: 0 });
 		setDone(false);
-	}, [deckKey]);
+	}, [activeEventId]);
 
-	const ready = activeEventId !== null && deck.length > 0 && !done;
+	// Congela el deck del server como baraja estable la PRIMERA vez que
+	// llega para este evento.  Espera a `!loading` para no capturar el deck
+	// del evento anterior durante la transición; el guard por evento evita
+	// re-congelar cuando castVote encoge `deck`.
+	useEffect(() => {
+		if (
+			activeEventId &&
+			cardsEventRef.current !== activeEventId &&
+			!loading &&
+			deck.length > 0
+		) {
+			cardsEventRef.current = activeEventId;
+			setCards(deck);
+		}
+	}, [activeEventId, deck, loading]);
+
+	const ready = activeEventId !== null && cards.length > 0 && !done;
 
 	useGSAP(
 		() => {
@@ -96,7 +124,7 @@ export function TinderMusical() {
 				});
 			});
 		},
-		{ scope: containerRef, dependencies: [deck.length] },
+		{ scope: containerRef, dependencies: [cards.length] },
 	);
 
 	const restackBelow = (from: number) => {
@@ -117,7 +145,7 @@ export function TinderMusical() {
 	const handleSwipe = async (dir: "like" | "dislike") => {
 		if (animatingRef.current || done) return;
 		const card = cardRefs.current[index];
-		const song = deck[index];
+		const song = cards[index];
 		if (!card || !song) return;
 		animatingRef.current = true;
 
@@ -336,7 +364,7 @@ export function TinderMusical() {
 							maxWidth: "min(100%, 320px)",
 						}}
 					>
-						{deck.map((song, i) => (
+						{cards.map((song, i) => (
 							<SongCard
 								key={song.id}
 								song={song}
@@ -345,7 +373,7 @@ export function TinderMusical() {
 									cardRefs.current[i] = el;
 								}}
 								pointerOff={i < index}
-								zIndex={deck.length - i}
+								zIndex={cards.length - i}
 							/>
 						))}
 					</div>
