@@ -19,7 +19,8 @@ const TONES = [
 
 export function LeaderboardCard() {
 	const { t } = useTranslation();
-	const { rows, myRank, loading, error } = useLeaderboard(10);
+	// Top 6 jefes de sala (los mejores, sin saturar la card).
+	const { rows, myRank, loading, error } = useLeaderboard(6);
 
 	const meVisible = rows.some((r) => r.is_me);
 

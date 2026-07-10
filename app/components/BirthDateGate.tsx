@@ -23,6 +23,7 @@ export function BirthDateGate() {
 	const tenant = useTenant();
 	const userProfileId = useGameState((s) => s.userProfileId);
 	const birthDate = useGameState((s) => s.birthDate);
+	const sessionLoaded = useGameState((s) => s.sessionLoaded);
 	const setBirthDate = useGameState((s) => s.setBirthDate);
 
 	const [value, setValue] = useState("");
@@ -39,7 +40,9 @@ export function BirthDateGate() {
 		return { maxDate: max, minDate: "1920-01-01" };
 	}, []);
 
-	const show = userProfileId !== null && !birthDate;
+	// Sólo tras resolver /api/session: así el gate NO parpadea en cada recarga
+	// mientras `birthDate` (no persistido) aún viaja desde el server.
+	const show = sessionLoaded && userProfileId !== null && !birthDate;
 
 	useGSAP(
 		() => {

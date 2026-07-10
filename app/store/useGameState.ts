@@ -83,6 +83,10 @@ type GameState = {
 	activeEventName: string | null;
 	// Fecha de nacimiento (V1.7).  null = aún no capturada → gate de onboarding.
 	birthDate: string | null;
+	// ¿Se ha resuelto ya /api/session al menos una vez?  El gate de cumpleaños
+	// SÓLO puede mostrarse cuando esto es true — así no parpadea en cada
+	// recarga mientras `birthDate` (no persistido) aún no ha llegado del server.
+	sessionLoaded: boolean;
 
 	// ── Estado de canje activo (pantalla camarero) ──────────────────────
 	activeRedemption: ActiveRedemption | null;
@@ -142,6 +146,7 @@ export const useGameState = create<GameState>()(
 			activeEventId: null,
 			activeEventName: null,
 			birthDate: null,
+			sessionLoaded: false,
 			activeRedemption: null,
 			dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 			rewardRules: [],
@@ -169,6 +174,9 @@ export const useGameState = create<GameState>()(
 					activeEventId: null,
 					activeEventName: null,
 					birthDate: null,
+					// Al desloguear, la próxima sesión debe re-resolverse antes de
+					// poder mostrar el gate de cumpleaños.
+					sessionLoaded: false,
 					dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 					rewardRules: [],
 					// Reset para que el SIGUIENTE usuario en este móvil (otro JIT)
@@ -197,6 +205,9 @@ export const useGameState = create<GameState>()(
 					lifetimeEarned: Math.max(0, lifetimeEarned),
 					activeEventId,
 					activeEventName,
+					// Sesión resuelta desde el server → el gate de cumpleaños ya
+					// puede decidir con datos reales (evita el parpadeo al recargar).
+					sessionLoaded: true,
 					birthDate: birthDate !== undefined ? birthDate : state.birthDate,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
