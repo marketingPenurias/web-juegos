@@ -112,7 +112,25 @@ export function LiveBattle() {
 		const list = (rows ?? []) as BTrack[];
 		const a = list.find((r) => r.id === b.track_a);
 		const bb = list.find((r) => r.id === b.track_b);
-		setBattle(a && bb ? { id: b.id as string, endsAt: b.ends_at as string, a, b: bb } : null);
+		const nextB =
+			a && bb ? { id: b.id as string, endsAt: b.ends_at as string, a, b: bb } : null;
+		// Estabilidad de referencia: si el poll (cada 2.5s) trae los MISMOS datos
+		// (mismo duelo y mismos votos), devolvemos el objeto anterior → sin
+		// re-render.  Así el contador y las animaciones no se re-disparan en cada
+		// tick (era lo que hacía parpadear el texto/botones de la batalla).
+		setBattle((prev) => {
+			if (!nextB) return null;
+			if (
+				prev &&
+				prev.id === nextB.id &&
+				prev.endsAt === nextB.endsAt &&
+				prev.a.total_votes === nextB.a.total_votes &&
+				prev.b.total_votes === nextB.b.total_votes
+			) {
+				return prev;
+			}
+			return nextB;
+		});
 		setLoading(false);
 	}, [activeEventId]);
 
@@ -157,11 +175,14 @@ export function LiveBattle() {
 	// ── Cuenta atrás del duelo ──────────────────────────────────────────
 	useEffect(() => {
 		if (!battle) return;
-		const tick = () => setRemaining(Math.max(0, Math.floor((new Date(battle.endsAt).getTime() - Date.now()) / 1000)));
+		const endsAt = battle.endsAt;
+		const tick = () => setRemaining(Math.max(0, Math.floor((new Date(endsAt).getTime() - Date.now()) / 1000)));
 		tick();
-		const id = window.setInterval(tick, 250);
+		// 1s basta para un mm:ss (antes 250ms = 4 re-renders/seg innecesarios,
+		// que en móvil hacían parpadear las capas con blur).
+		const id = window.setInterval(tick, 1000);
 		return () => window.clearInterval(id);
-	}, [battle]);
+	}, [battle?.id, battle?.endsAt]);
 
 	// Reset selección/voto al cambiar de batalla.
 	useEffect(() => { setVoted(null); setSelected(null); }, [battle?.id]);
@@ -171,11 +192,25 @@ export function LiveBattle() {
 	const totalVotes = (a?.total_votes ?? 0) + (b?.total_votes ?? 0);
 	const aPct = totalVotes > 0 ? Math.round(((a?.total_votes ?? 0) / totalVotes) * 100) : 50;
 	const bPct = 100 - aPct;
-	const ended = remaining === 0 && !!battle;
+	// `ended` derivado del reloj real, NO del estado `remaining` (que arranca en
+	// 0 y provocaba un flash de "¡Duelo cerrado!" al aparecer la batalla).  Se
+	// re-evalúa en cada tick del contador (1s).
+	const ended = !!battle && new Date(battle.endsAt).getTime() <= Date.now();
 
+	// Intro BULLETPROOF: `fromTo` con destino FIJO opacity:1 (nunca captura la
+	// opacidad "a medio animar" como destino, que era lo que trinquetaba los
+	// elementos a 0 y los hacía desaparecer) + `clearProps` para dejarlos en su
+	// estado natural visible + corre UNA sola vez (deps []), no en cada
+	// re-render del contador/poll.
 	useGSAP(
-		() => { gsap.from(".live-fade", { y: 16, opacity: 0, stagger: 0.07, duration: 0.5, ease: "power3.out" }); },
-		{ scope: containerRef, dependencies: [battle?.id] },
+		() => {
+			gsap.fromTo(
+				".live-fade",
+				{ y: 16, opacity: 0 },
+				{ y: 0, opacity: 1, stagger: 0.07, duration: 0.5, ease: "power3.out", clearProps: "opacity,transform" },
+			);
+		},
+		{ scope: containerRef, dependencies: [] },
 	);
 
 	useGSAP(

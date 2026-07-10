@@ -79,7 +79,10 @@ const HIDE_MS = 2 * 60 * 60 * 1000;
 const TV_POLL_MS = 3_000;
 // Sólo celebramos ganadores de batallas que cerraron hace poco (evita
 // disparar la animación por una batalla vieja al arrancar la pantalla).
-const WINNER_FRESH_MS = 45_000;
+// 120s: el cron de cierre puede tardar hasta ~60s tras `ends_at`, así que la
+// ventana debe cubrir ese retardo + el del poll (si fuera 45s, un cierre lento
+// del cron dejaría al ganador sin animación).
+const WINNER_FRESH_MS = 120_000;
 const WINNER_SHOW_MS = 8_000;
 
 export function Jumbotron({
@@ -318,12 +321,14 @@ export function Jumbotron({
 	// ── Cuenta atrás del duelo (sólo reloj de UI; sin polling de datos) ──
 	useEffect(() => {
 		if (!battle) return;
+		const endsAt = battle.endsAt;
 		const tick = () =>
-			setRemaining(Math.max(0, Math.floor((new Date(battle.endsAt).getTime() - Date.now()) / 1000)));
+			setRemaining(Math.max(0, Math.floor((new Date(endsAt).getTime() - Date.now()) / 1000)));
 		tick();
-		const id = window.setInterval(tick, 250);
+		// 1s basta para el mm:ss; evita re-renders innecesarios de la TV.
+		const id = window.setInterval(tick, 1000);
 		return () => window.clearInterval(id);
-	}, [battle]);
+	}, [battle?.id, battle?.endsAt]);
 
 	// ── FALLBACK de red (12s): reconciliación completa por si el WS cae ─────
 	// El Realtime es la vía primaria (votos, is_played, batalla, fondo).  Este
@@ -451,12 +456,25 @@ export function Jumbotron({
 	// ── GSAP: barras del duelo ──────────────────────────────────────────
 	const aVotes = battle?.a.total_votes ?? 0;
 	const bVotes = battle?.b.total_votes ?? 0;
+
+	// Entrada del duelo: UNA vez por batalla (dep = battle?.id).  Antes estaba
+	// junto a la animación de barras con dep [aVotes,bVotes], así que se
+	// re-disparaba en CADA voto → las tarjetas parpadeaban (fade desde 0) en la
+	// TV mientras la gente votaba.  Separado, la entrada ya no se repite.
+	useGSAP(
+		() => {
+			if (!battle) return;
+			gsap.fromTo(".jb-duel-enter", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, stagger: 0.08, ease: "back.out(1.5)" });
+		},
+		{ scope: containerRef, dependencies: [battle?.id] },
+	);
+
+	// Barras: se re-calculan en cada voto (transform scaleX, sin tocar opacidad).
 	useGSAP(
 		() => {
 			if (!battle) return;
 			const total = aVotes + bVotes;
 			const aPct = total > 0 ? aVotes / total : 0.5;
-			gsap.fromTo(".jb-duel-enter", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, stagger: 0.08, ease: "back.out(1.5)" });
 			if (aBarRef.current) gsap.to(aBarRef.current, { scaleX: aPct, duration: 0.7, ease: "power3.out" });
 			if (bBarRef.current) gsap.to(bBarRef.current, { scaleX: 1 - aPct, duration: 0.7, ease: "power3.out" });
 		},
