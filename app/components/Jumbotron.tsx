@@ -30,6 +30,9 @@ type Track = {
 	cover_image_url: string | null;
 	total_votes: number;
 	is_played: boolean;
+	// V17: sello temporal para ocultar del ranking 2h tras sonar (permite que
+	// el filtro cliente respete la ventana igual que el poll/servidor).
+	played_at?: string | null;
 };
 
 type Battle = { id: string; endsAt: string; a: Track; b: Track };
@@ -66,11 +69,11 @@ const MAX_ROWS = 8;
 // Ventana de ocultación V17: una canción sonada no vuelve al ranking hasta
 // pasadas 2h (mientras, is_played la oculta; después, played_at).
 const HIDE_MS = 2 * 60 * 60 * 1000;
-// Short-polling de la TV (votos + canción actual + batalla).  El realtime de
-// event_tracks no es fiable a escala, así que la fuente de verdad es un GET
-// ligero cada 2.5s (1 pantalla por local → coste nulo).  Mismo patrón que el
-// móvil (NowPlaying/LiveBattle).
-const TV_POLL_MS = 2500;
+// Red de la TV: Realtime PRIMARIO (event_tracks votos + is_played,
+// live_battles ganador, tenant_events fondo) y este poll como FALLBACK de
+// seguridad cada 12s — con 1 pantalla por local el coste es despreciable y
+// garantiza que la TV nunca se quede congelada si el WebSocket cae.
+const TV_POLL_MS = 12_000;
 // Sólo celebramos ganadores de batallas que cerraron hace poco (evita
 // disparar la animación por una batalla vieja al arrancar la pantalla).
 const WINNER_FRESH_MS = 45_000;
@@ -116,6 +119,31 @@ export function Jumbotron({
 	const tracksRef = useRef<Track[]>(tracks);
 	tracksRef.current = tracks;
 
+	// Celebra al ganador de una batalla recién cerrada (overlay).  Lo llaman
+	// TANTO el Realtime de `live_battles` (dashboard, instantáneo) COMO el poll
+	// de fallback (ambas TVs).  Idempotente: cada batalla se celebra una vez, y
+	// sólo si cerró hace poco (evita disparar por una batalla vieja al bootear).
+	const maybeCelebrateWinner = useCallback(
+		async (battleId: string, winnerTrack: string | null, endsAt: string) => {
+			if (!winnerTrack || celebratedRef.current.has(battleId)) return;
+			celebratedRef.current.add(battleId);
+			const closedAgo = Date.now() - new Date(endsAt).getTime();
+			if (closedAgo < 0 || closedAgo >= WINNER_FRESH_MS) return; // vieja → sólo marcar
+			const supabase = getBrowserSupabase();
+			if (!supabase) return;
+			// La ganadora puede estar en memoria (era una de las del duelo).
+			const local = tracksRef.current.find((t) => t.id === winnerTrack);
+			if (local) { setWinner(local); return; }
+			const { data: wt } = await supabase
+				.from("event_tracks")
+				.select("id, title, artist, cover_image_url, total_votes, is_played")
+				.eq("id", winnerTrack)
+				.maybeSingle();
+			if (wt) setWinner(wt as Track);
+		},
+		[],
+	);
+
 	// Dominio real del local (.io).  El QR lleva `?ref=QR-TV` para atribuir
 	// los escaneos que entran por la pantalla — el root loader captura `ref`
 	// en cookie y lo consume el pipeline de atribución.
@@ -123,17 +151,21 @@ export function Jumbotron({
 	const venueUrl = `https://${venueHost}`;
 	const qrTarget = `${venueUrl}/?ref=QR-TV`;
 
-	// Ranking visible: fuera las que suenan ahora (is_played) — el poll ya las
-	// excluye por played_at<2h, pero filtramos también en cliente para que los
-	// UPDATE de realtime (que sí traen is_played) no las cuelen ni un frame.
-	const sorted = useMemo(
-		() =>
-			[...tracks]
-				.filter((t) => !t.is_played)
-				.sort((a, b) => b.total_votes - a.total_votes)
-				.slice(0, MAX_ROWS),
-		[tracks],
-	);
+	// Ranking visible: fuera las que suenan ahora (is_played) Y las sonadas
+	// hace <2h (played_at).  El poll ya las excluye en la query, pero como el
+	// Realtime es la vía primaria y sus UPDATE traen is_played/played_at,
+	// filtramos también en cliente para que no se cuelen ni un frame.
+	const sorted = useMemo(() => {
+		const cutoff = Date.now() - HIDE_MS;
+		return [...tracks]
+			.filter(
+				(t) =>
+					!t.is_played &&
+					(!t.played_at || Date.parse(t.played_at) < cutoff),
+			)
+			.sort((a, b) => b.total_votes - a.total_votes)
+			.slice(0, MAX_ROWS);
+	}, [tracks]);
 
 	// Prune refs de tracks que han salido de la ventana visible (la TV vive 8h+).
 	useEffect(() => {
@@ -177,6 +209,12 @@ export function Jumbotron({
 							if (next.id === cur.b.id) return { ...cur, b: { ...cur.b, ...next } };
 							return cur;
 						});
+						// "Canción actual" en vivo: si el DJ marca/quita is_played,
+						// el split view reacciona al instante (sin esperar al poll).
+						if (next?.id) {
+							if (next.is_played === true) setNowPlaying(next);
+							else setNowPlaying((cur) => (cur && cur.id === next.id ? null : cur));
+						}
 					}
 				},
 			)
@@ -255,19 +293,24 @@ export function Jumbotron({
 				(payload) => {
 					if (payload.eventType === "DELETE") { setBattle(null); return; }
 					const row = payload.new as {
-						id?: string; track_a?: string; track_b?: string; status?: string; ends_at?: string;
+						id?: string; track_a?: string; track_b?: string; status?: string; ends_at?: string; winner_track?: string | null;
 					};
 					if (row.status === "live" && row.id && row.track_a && row.track_b && row.ends_at) {
 						void activate(row.id, row.track_a, row.track_b, row.ends_at);
 					} else {
-						setBattle(null); // closed → de vuelta al leaderboard
+						// closed → salir del duelo y, si acaba de terminar, celebrar
+						// al ganador al INSTANTE (sin esperar al poll de fallback).
+						setBattle(null);
+						if (row.id && row.ends_at) {
+							void maybeCelebrateWinner(row.id, row.winner_track ?? null, row.ends_at);
+						}
 					}
 				},
 			)
 			.subscribe();
 
 		return () => { void supabase.removeChannel(channel); };
-	}, [enableBattle, eventId]);
+	}, [enableBattle, eventId, maybeCelebrateWinner]);
 
 	// ── Cuenta atrás del duelo (sólo reloj de UI; sin polling de datos) ──
 	useEffect(() => {
@@ -279,21 +322,22 @@ export function Jumbotron({
 		return () => window.clearInterval(id);
 	}, [battle]);
 
-	// ── SHORT-POLLING de la TV: votos + canción actual + batalla + ganador ─
-	// Fuente de verdad de los datos en vivo (el realtime queda como acelerador
-	// opcional).  Reproduce en la pantalla el mismo patrón robusto del móvil.
+	// ── FALLBACK de red (12s): reconciliación completa por si el WS cae ─────
+	// El Realtime es la vía primaria (votos, is_played, batalla, fondo).  Este
+	// poll es la RED DE SEGURIDAD: cada 12s reconcilia ranking + canción actual
+	// + batalla + ganador contra la BD, para que la pantalla nunca se congele.
 	const pollTv = useCallback(async () => {
 		const supabase = getBrowserSupabase();
 		if (!supabase || !eventId) return;
-		// El polling ES la fuente de verdad: si trae datos, estamos "en directo"
-		// aunque el WebSocket de realtime no llegue a conectar.
+		// Si el poll trae datos, estamos "en directo" aunque el WS no conecte.
 		setConnected(true);
 		const cutoff = new Date(Date.now() - HIDE_MS).toISOString();
 
-		// 1) Ranking (excluye la que suena y las sonadas hace <2h).
+		// 1) Ranking (excluye la que suena y las sonadas hace <2h).  Incluye
+		//    played_at para que el filtro cliente de `sorted` sea consistente.
 		const { data: top } = await supabase
 			.from("event_tracks")
-			.select("id, title, artist, cover_image_url, total_votes, is_played")
+			.select("id, title, artist, cover_image_url, total_votes, is_played, played_at")
 			.eq("event_id", eventId)
 			.eq("is_played", false)
 			.or(`played_at.is.null,played_at.lt.${cutoff}`)
@@ -344,21 +388,11 @@ export function Jumbotron({
 			return;
 		}
 
-		// Cerrada → salir del duelo y, si acaba de terminar, celebrar ganador.
+		// Cerrada → salir del duelo y, si acaba de terminar, celebrar ganador
+		// (idempotente vía `maybeCelebrateWinner`; el Realtime pudo hacerlo ya).
 		if (enableBattle) setBattle(null);
-		if (row.winner_track && !celebratedRef.current.has(row.id)) {
-			celebratedRef.current.add(row.id);
-			const closedAgo = Date.now() - new Date(row.ends_at).getTime();
-			if (closedAgo >= 0 && closedAgo < WINNER_FRESH_MS) {
-				const { data: wt } = await supabase
-					.from("event_tracks")
-					.select("id, title, artist, cover_image_url, total_votes, is_played")
-					.eq("id", row.winner_track)
-					.maybeSingle();
-				if (wt) setWinner(wt as Track);
-			}
-		}
-	}, [eventId, enableBattle]);
+		void maybeCelebrateWinner(row.id, row.winner_track, row.ends_at);
+	}, [eventId, enableBattle, maybeCelebrateWinner]);
 
 	useInterval(() => {
 		void pollTv();
