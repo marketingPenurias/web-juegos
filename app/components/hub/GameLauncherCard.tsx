@@ -19,14 +19,16 @@ type Game = {
 	ring: string;
 };
 
+// Orden de aparición (V17): el Jukebox es el juego estrella → primero,
+// seguido del Tinder Musical.  Luego la Batalla en directo y la Ruleta.
 const GAMES: Game[] = [
 	{
-		id: "live",
-		titleKey: "hub.gameLiveTitle",
-		subtitleKey: "hub.gameLiveSub",
-		Icon: Music2,
-		gradient: "from-cyan-600/30 to-blue-700/20",
-		ring: "ring-cyan-500/40",
+		id: "jukebox",
+		titleKey: "hub.gameJukeboxTitle",
+		subtitleKey: "hub.gameJukeboxSub",
+		Icon: Disc3,
+		gradient: "from-amber-500/30 to-orange-700/20",
+		ring: "ring-amber-400/40",
 	},
 	{
 		id: "tinder",
@@ -37,20 +39,20 @@ const GAMES: Game[] = [
 		ring: "ring-pink-500/40",
 	},
 	{
+		id: "live",
+		titleKey: "hub.gameLiveTitle",
+		subtitleKey: "hub.gameLiveSub",
+		Icon: Music2,
+		gradient: "from-cyan-600/30 to-blue-700/20",
+		ring: "ring-cyan-500/40",
+	},
+	{
 		id: "ruleta",
 		titleKey: "hub.gameRuletaTitle",
 		subtitleKey: "hub.gameRuletaSub",
 		Icon: Dices,
 		gradient: "from-lime-600/30 to-emerald-700/20",
 		ring: "ring-lime-500/40",
-	},
-	{
-		id: "jukebox",
-		titleKey: "hub.gameJukeboxTitle",
-		subtitleKey: "hub.gameJukeboxSub",
-		Icon: Disc3,
-		gradient: "from-amber-500/30 to-orange-700/20",
-		ring: "ring-amber-400/40",
 	},
 ];
 

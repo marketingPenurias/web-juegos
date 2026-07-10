@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Disc3, Flame, Music2, Radio, Sparkles, Swords, Timer, QrCode } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Disc3, Flame, Music2, Radio, Sparkles, Swords, Timer, QrCode, Trophy, Crown } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
+import { useInterval } from "../lib/useInterval";
 import { useTenant } from "../lib/tenant";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { VenueBackdrop } from "./VenueBackdrop";
@@ -29,6 +30,9 @@ type Track = {
 	cover_image_url: string | null;
 	total_votes: number;
 	is_played: boolean;
+	// V17: sello temporal para ocultar del ranking 2h tras sonar (permite que
+	// el filtro cliente respete la ventana igual que el poll/servidor).
+	played_at?: string | null;
 };
 
 type Battle = { id: string; endsAt: string; a: Track; b: Track };
@@ -44,12 +48,15 @@ type TvBackdrop = {
 	url: string | null;
 	showRanking: boolean;
 	showBattle: boolean;
+	// V17: partir la pantalla mostrando "Canción actual" en la mitad derecha.
+	showNowPlaying: boolean;
 };
 
 type Props = {
 	tenantId: string;
 	eventId: string | null;
 	initialTracks: Track[];
+	initialNowPlaying?: Track | null;
 	showQr?: boolean;
 	enableBattle?: boolean;
 	initialBattle?: Battle | null;
@@ -59,10 +66,27 @@ type Props = {
 const ROW_HEIGHT = 96; // px — must match the row's CSS height
 const MAX_ROWS = 8;
 
+// Ventana de ocultación V17: una canción sonada no vuelve al ranking hasta
+// pasadas 2h (mientras, is_played la oculta; después, played_at).
+const HIDE_MS = 2 * 60 * 60 * 1000;
+// Red de la TV: Realtime PRIMARIO (event_tracks votos + is_played,
+// live_battles ganador, tenant_events fondo) y este poll como FALLBACK de
+// seguridad — con 1 pantalla por local el coste es despreciable.
+//
+// ⚠️ MODO PILOTO: 3s → la TV va instantánea aunque el realtime falle.  Como
+// sólo hay 1 pantalla por local, incluso 3s es coste nulo (~80 queries/min).
+// Tras el piloto, si se prioriza el realtime, se puede subir a 10-12s.
+const TV_POLL_MS = 3_000;
+// Sólo celebramos ganadores de batallas que cerraron hace poco (evita
+// disparar la animación por una batalla vieja al arrancar la pantalla).
+const WINNER_FRESH_MS = 45_000;
+const WINNER_SHOW_MS = 8_000;
+
 export function Jumbotron({
 	tenantId: _tenantId,
 	eventId,
 	initialTracks,
+	initialNowPlaying = null,
 	showQr = false,
 	enableBattle = false,
 	initialBattle = null,
@@ -73,14 +97,19 @@ export function Jumbotron({
 	const venuePhotos = useVenuePhotos(tenant.slug);
 	// Preferencia de fondo controlada por el DJ desde /admin (realtime).
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
-		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true },
+		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true, showNowPlaying: false },
 	);
 	// Vídeo de fondo del local (siempre disponible si el tenant lo configuró).
 	const bgVideoUrl = tenant.bgVideoUrl ?? null;
 	const [tracks, setTracks] = useState<Track[]>(initialTracks);
+	const [nowPlaying, setNowPlaying] = useState<Track | null>(initialNowPlaying);
 	const [battle, setBattle] = useState<Battle | null>(initialBattle);
+	// Ganador recién proclamado (overlay de celebración, ambas TVs).
+	const [winner, setWinner] = useState<Track | null>(null);
 	const [connected, setConnected] = useState(false);
 	const [remaining, setRemaining] = useState(0);
+	// Batallas ya celebradas (para no repetir la animación en cada poll).
+	const celebratedRef = useRef<Set<string>>(new Set<string>());
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
@@ -93,6 +122,31 @@ export function Jumbotron({
 	const tracksRef = useRef<Track[]>(tracks);
 	tracksRef.current = tracks;
 
+	// Celebra al ganador de una batalla recién cerrada (overlay).  Lo llaman
+	// TANTO el Realtime de `live_battles` (dashboard, instantáneo) COMO el poll
+	// de fallback (ambas TVs).  Idempotente: cada batalla se celebra una vez, y
+	// sólo si cerró hace poco (evita disparar por una batalla vieja al bootear).
+	const maybeCelebrateWinner = useCallback(
+		async (battleId: string, winnerTrack: string | null, endsAt: string) => {
+			if (!winnerTrack || celebratedRef.current.has(battleId)) return;
+			celebratedRef.current.add(battleId);
+			const closedAgo = Date.now() - new Date(endsAt).getTime();
+			if (closedAgo < 0 || closedAgo >= WINNER_FRESH_MS) return; // vieja → sólo marcar
+			const supabase = getBrowserSupabase();
+			if (!supabase) return;
+			// La ganadora puede estar en memoria (era una de las del duelo).
+			const local = tracksRef.current.find((t) => t.id === winnerTrack);
+			if (local) { setWinner(local); return; }
+			const { data: wt } = await supabase
+				.from("event_tracks")
+				.select("id, title, artist, cover_image_url, total_votes, is_played")
+				.eq("id", winnerTrack)
+				.maybeSingle();
+			if (wt) setWinner(wt as Track);
+		},
+		[],
+	);
+
 	// Dominio real del local (.io).  El QR lleva `?ref=QR-TV` para atribuir
 	// los escaneos que entran por la pantalla — el root loader captura `ref`
 	// en cookie y lo consume el pipeline de atribución.
@@ -100,10 +154,21 @@ export function Jumbotron({
 	const venueUrl = `https://${venueHost}`;
 	const qrTarget = `${venueUrl}/?ref=QR-TV`;
 
-	const sorted = useMemo(
-		() => [...tracks].sort((a, b) => b.total_votes - a.total_votes).slice(0, MAX_ROWS),
-		[tracks],
-	);
+	// Ranking visible: fuera las que suenan ahora (is_played) Y las sonadas
+	// hace <2h (played_at).  El poll ya las excluye en la query, pero como el
+	// Realtime es la vía primaria y sus UPDATE traen is_played/played_at,
+	// filtramos también en cliente para que no se cuelen ni un frame.
+	const sorted = useMemo(() => {
+		const cutoff = Date.now() - HIDE_MS;
+		return [...tracks]
+			.filter(
+				(t) =>
+					!t.is_played &&
+					(!t.played_at || Date.parse(t.played_at) < cutoff),
+			)
+			.sort((a, b) => b.total_votes - a.total_votes)
+			.slice(0, MAX_ROWS);
+	}, [tracks]);
 
 	// Prune refs de tracks que han salido de la ventana visible (la TV vive 8h+).
 	useEffect(() => {
@@ -147,6 +212,12 @@ export function Jumbotron({
 							if (next.id === cur.b.id) return { ...cur, b: { ...cur.b, ...next } };
 							return cur;
 						});
+						// "Canción actual" en vivo: si el DJ marca/quita is_played,
+						// el split view reacciona al instante (sin esperar al poll).
+						if (next?.id) {
+							if (next.is_played === true) setNowPlaying(next);
+							else setNowPlaying((cur) => (cur && cur.id === next.id ? null : cur));
+						}
 					}
 				},
 			)
@@ -172,7 +243,7 @@ export function Jumbotron({
 				(payload) => {
 					const meta = (payload.new as { metadata?: Record<string, unknown> })?.metadata ?? null;
 					const raw = (meta?.tv_backdrop ?? null) as
-						| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean }
+						| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean; showNowPlaying?: boolean }
 						| null;
 					const m = raw?.mode;
 					setBackdrop({
@@ -180,6 +251,7 @@ export function Jumbotron({
 						url: typeof raw?.url === "string" ? raw.url : null,
 						showRanking: raw?.showRanking !== false, // default true
 						showBattle: raw?.showBattle !== false, // default true
+						showNowPlaying: raw?.showNowPlaying === true, // default false
 					});
 				},
 			)
@@ -224,19 +296,24 @@ export function Jumbotron({
 				(payload) => {
 					if (payload.eventType === "DELETE") { setBattle(null); return; }
 					const row = payload.new as {
-						id?: string; track_a?: string; track_b?: string; status?: string; ends_at?: string;
+						id?: string; track_a?: string; track_b?: string; status?: string; ends_at?: string; winner_track?: string | null;
 					};
 					if (row.status === "live" && row.id && row.track_a && row.track_b && row.ends_at) {
 						void activate(row.id, row.track_a, row.track_b, row.ends_at);
 					} else {
-						setBattle(null); // closed → de vuelta al leaderboard
+						// closed → salir del duelo y, si acaba de terminar, celebrar
+						// al ganador al INSTANTE (sin esperar al poll de fallback).
+						setBattle(null);
+						if (row.id && row.ends_at) {
+							void maybeCelebrateWinner(row.id, row.winner_track ?? null, row.ends_at);
+						}
 					}
 				},
 			)
 			.subscribe();
 
 		return () => { void supabase.removeChannel(channel); };
-	}, [enableBattle, eventId]);
+	}, [enableBattle, eventId, maybeCelebrateWinner]);
 
 	// ── Cuenta atrás del duelo (sólo reloj de UI; sin polling de datos) ──
 	useEffect(() => {
@@ -247,6 +324,89 @@ export function Jumbotron({
 		const id = window.setInterval(tick, 250);
 		return () => window.clearInterval(id);
 	}, [battle]);
+
+	// ── FALLBACK de red (12s): reconciliación completa por si el WS cae ─────
+	// El Realtime es la vía primaria (votos, is_played, batalla, fondo).  Este
+	// poll es la RED DE SEGURIDAD: cada 12s reconcilia ranking + canción actual
+	// + batalla + ganador contra la BD, para que la pantalla nunca se congele.
+	const pollTv = useCallback(async () => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !eventId) return;
+		// Si el poll trae datos, estamos "en directo" aunque el WS no conecte.
+		setConnected(true);
+		const cutoff = new Date(Date.now() - HIDE_MS).toISOString();
+
+		// 1) Ranking (excluye la que suena y las sonadas hace <2h).  Incluye
+		//    played_at para que el filtro cliente de `sorted` sea consistente.
+		const { data: top } = await supabase
+			.from("event_tracks")
+			.select("id, title, artist, cover_image_url, total_votes, is_played, played_at")
+			.eq("event_id", eventId)
+			.eq("is_played", false)
+			.or(`played_at.is.null,played_at.lt.${cutoff}`)
+			.order("total_votes", { ascending: false })
+			.order("title", { ascending: true })
+			.limit(MAX_ROWS + 2);
+		if (top) setTracks(top as Track[]);
+
+		// 2) Canción actual (para el panel "Canción actual" del split view).
+		const { data: np } = await supabase
+			.from("event_tracks")
+			.select("id, title, artist, cover_image_url, total_votes, is_played")
+			.eq("event_id", eventId)
+			.eq("is_played", true)
+			.limit(1)
+			.maybeSingle();
+		setNowPlaying((np as Track) ?? null);
+
+		// 3) Batalla más reciente → duelo en vivo (dashboard) o ganador (ambas).
+		const { data: b } = await supabase
+			.from("live_battles")
+			.select("id, track_a, track_b, status, ends_at, winner_track")
+			.eq("event_id", eventId)
+			.order("started_at", { ascending: false })
+			.limit(1)
+			.maybeSingle();
+
+		if (!b) {
+			if (enableBattle) setBattle(null);
+			return;
+		}
+		const row = b as {
+			id: string; track_a: string; track_b: string;
+			status: string; ends_at: string; winner_track: string | null;
+		};
+
+		if (row.status === "live") {
+			if (enableBattle) {
+				const { data: bt } = await supabase
+					.from("event_tracks")
+					.select("id, title, artist, cover_image_url, total_votes, is_played")
+					.in("id", [row.track_a, row.track_b]);
+				const rows = (bt ?? []) as Track[];
+				const a = rows.find((t) => t.id === row.track_a);
+				const bb = rows.find((t) => t.id === row.track_b);
+				if (a && bb) setBattle({ id: row.id, endsAt: row.ends_at, a, b: bb });
+			}
+			return;
+		}
+
+		// Cerrada → salir del duelo y, si acaba de terminar, celebrar ganador
+		// (idempotente vía `maybeCelebrateWinner`; el Realtime pudo hacerlo ya).
+		if (enableBattle) setBattle(null);
+		void maybeCelebrateWinner(row.id, row.winner_track, row.ends_at);
+	}, [eventId, enableBattle, maybeCelebrateWinner]);
+
+	useInterval(() => {
+		void pollTv();
+	}, eventId ? TV_POLL_MS : null);
+
+	// Auto-ocultar el overlay de ganador tras la celebración.
+	useEffect(() => {
+		if (!winner) return;
+		const id = window.setTimeout(() => setWinner(null), WINNER_SHOW_MS);
+		return () => window.clearTimeout(id);
+	}, [winner]);
 
 	// ── GSAP: re-sort del leaderboard ───────────────────────────────────
 	useGSAP(
@@ -315,11 +475,14 @@ export function Jumbotron({
 	// Foto fijada por el DJ (sólo en modo "photo"; null en video/carousel).
 	const pinnedBackdropUrl = backdrop.mode === "photo" ? backdrop.url : null;
 
-	// Visibilidad de capas (toggles del DJ).  Si oculta AMBAS, la pantalla
+	// Visibilidad de capas (toggles del DJ).  Si las oculta TODAS, la pantalla
 	// queda LIMPIA con sólo el fondo (foto / vídeo / carrusel).
 	const displayBattle = enableBattle && !!battle && backdrop.showBattle;
 	const displayRanking = backdrop.showRanking;
-	const cleanMode = !displayBattle && !displayRanking;
+	// V17: "Canción actual" (split).  Se muestra en ambas TVs cuando el DJ lo
+	// activa; ocupa la mitad derecha junto al ranking.
+	const displayNowPlaying = backdrop.showNowPlaying;
+	const cleanMode = !displayBattle && !displayRanking && !displayNowPlaying;
 	const inBattle = displayBattle;
 	const total = aVotes + bVotes;
 	const aPct = total > 0 ? Math.round((aVotes / total) * 100) : 50;
@@ -399,8 +562,9 @@ export function Jumbotron({
 					</p>
 				</main>
 			) : (
-				// ── MODO LEADERBOARD (+ QR) ──────────────────────────────────
+				// ── MODO LEADERBOARD (+ QR / + Canción actual) ───────────────
 				<main className="relative z-10 flex-1 px-12 pb-12 flex gap-10">
+					{displayRanking && (
 					<div className="flex-1 min-w-0">
 						{!eventId ? (
 							<EmptyState reason="no_active_event" />
@@ -442,10 +606,20 @@ export function Jumbotron({
 							</ol>
 						)}
 					</div>
+					)}
 
-					{showQr && <QrBlock url={qrTarget} label={venueHost} fgColor={tenant.theme.primary ?? "#ffffff"} />}
+					{/* V17: mitad derecha con la CANCIÓN ACTUAL (split view). */}
+					{displayNowPlaying && <NowPlayingPanel track={nowPlaying} />}
+
+					{/* QR sólo si NO estamos en split (para no amontonar columnas). */}
+					{!displayNowPlaying && showQr && (
+						<QrBlock url={qrTarget} label={venueHost} fgColor={tenant.theme.primary ?? "#ffffff"} />
+					)}
 				</main>
 			))}
+
+			{/* ── OVERLAY GANADOR DE BATALLA (ambas TVs) ─────────────────── */}
+			{winner && <WinnerOverlay track={winner} />}
 
 			{!cleanMode && (
 			<footer className="relative z-10 px-12 pb-8 text-center">
@@ -520,6 +694,120 @@ function QrBlock({ url, label, fgColor }: { url: string; label: string; fgColor:
 				<p className="text-base text-(--jumbo-primary) font-bold mt-1 break-all">{label}</p>
 			</div>
 		</aside>
+	);
+}
+
+// ── Panel "Canción actual" (mitad derecha del split view · V17) ──────
+function NowPlayingPanel({ track }: { track: Track | null }) {
+	const ref = useRef<HTMLElement>(null);
+	// Animación de entrada + latido sutil cada vez que cambia la canción.
+	useGSAP(
+		() => {
+			if (!track) return;
+			gsap.fromTo(
+				".np-card",
+				{ opacity: 0, scale: 0.94, y: 16 },
+				{ opacity: 1, scale: 1, y: 0, duration: 0.6, ease: "back.out(1.4)" },
+			);
+		},
+		{ scope: ref, dependencies: [track?.id] },
+	);
+
+	return (
+		<aside
+			ref={ref}
+			className="flex-1 min-w-0 flex flex-col items-center justify-center gap-6 rounded-3xl border border-(--jumbo-primary)/40 bg-black/40 backdrop-blur-md p-8 text-center"
+		>
+			<div className="inline-flex items-center gap-2 text-(--jumbo-primary) font-black uppercase tracking-[0.35em] text-base">
+				<span className="w-2.5 h-2.5 rounded-full bg-(--jumbo-primary) animate-pulse" />
+				Sonando ahora
+			</div>
+
+			{track ? (
+				<div className="np-card flex flex-col items-center gap-6 w-full">
+					<div
+						className="w-[22rem] h-[22rem] max-w-[38vw] max-h-[38vw] rounded-[2rem] overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center"
+						style={{ boxShadow: "0 0 70px var(--jumbo-primary)55" }}
+					>
+						{track.cover_image_url ? (
+							<img src={track.cover_image_url} alt="" className="w-full h-full object-cover" />
+						) : (
+							<Disc3 className="w-32 h-32 text-(--jumbo-primary) animate-spin [animation-duration:4s]" aria-hidden="true" />
+						)}
+					</div>
+					<div className="min-w-0 w-full">
+						<p className="text-5xl font-black italic tracking-tighter truncate">{track.title}</p>
+						<p className="text-2xl text-zinc-400 truncate mt-1">{track.artist}</p>
+					</div>
+				</div>
+			) : (
+				<div className="np-card flex flex-col items-center gap-5 opacity-70">
+					<div className="w-[18rem] h-[18rem] max-w-[32vw] max-h-[32vw] rounded-[2rem] bg-zinc-950/60 border border-zinc-800 flex items-center justify-center">
+						<Disc3 className="w-24 h-24 text-zinc-700" aria-hidden="true" />
+					</div>
+					<p className="text-2xl font-black italic tracking-tight text-zinc-500">
+						El DJ aún no ha puesto ninguna canción
+					</p>
+				</div>
+			)}
+		</aside>
+	);
+}
+
+// ── Overlay de celebración del GANADOR de la batalla (ambas TVs · V17) ─
+function WinnerOverlay({ track }: { track: Track }) {
+	const ref = useRef<HTMLDivElement>(null);
+	useGSAP(
+		() => {
+			const tl = gsap.timeline();
+			tl.fromTo(".wo-bg", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" })
+				.fromTo(".wo-crown", { scale: 0, rotate: -30, opacity: 0 }, { scale: 1, rotate: 0, opacity: 1, duration: 0.7, ease: "back.out(2.2)" }, "-=0.1")
+				.fromTo(".wo-card", { scale: 0.7, opacity: 0, y: 40 }, { scale: 1, opacity: 1, y: 0, duration: 0.6, ease: "back.out(1.6)" }, "-=0.4")
+				.fromTo(".wo-label", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, "-=0.3");
+			// Latido continuo de la corona mientras dura la celebración.
+			gsap.to(".wo-crown", { scale: 1.12, duration: 0.9, yoyo: true, repeat: -1, ease: "sine.inOut", delay: 0.7 });
+			// Destellos radiales.
+			gsap.fromTo(".wo-ray", { scale: 0.4, opacity: 0.6 }, { scale: 2.4, opacity: 0, duration: 1.8, repeat: -1, ease: "power2.out", stagger: 0.3 });
+		},
+		{ scope: ref },
+	);
+
+	return (
+		<div ref={ref} className="absolute inset-0 z-50 flex items-center justify-center">
+			<div className="wo-bg absolute inset-0 bg-black/85 backdrop-blur-md" />
+			<div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+				<div className="wo-ray absolute w-[60vw] h-[60vw] rounded-full bg-(--jumbo-accent)/20 blur-2xl" />
+				<div className="wo-ray absolute w-[45vw] h-[45vw] rounded-full bg-(--jumbo-primary)/20 blur-2xl" />
+			</div>
+
+			<div className="relative z-10 flex flex-col items-center text-center gap-6 px-12">
+				<Crown className="wo-crown w-28 h-28 text-(--jumbo-accent) drop-shadow-[0_0_40px_rgba(255,215,0,0.7)]" aria-hidden="true" />
+				<p className="wo-label inline-flex items-center gap-3 text-(--jumbo-accent) font-black uppercase tracking-[0.4em] text-2xl">
+					<Trophy className="w-8 h-8" aria-hidden="true" /> Ganadora de la batalla
+				</p>
+				<div className="wo-card flex flex-col items-center gap-5">
+					<div
+						className="w-72 h-72 rounded-[2rem] overflow-hidden bg-zinc-950 border-2 border-(--jumbo-accent)/70 flex items-center justify-center"
+						style={{ boxShadow: "0 0 90px rgba(255,215,0,0.55)" }}
+					>
+						{track.cover_image_url ? (
+							<img src={track.cover_image_url} alt="" className="w-full h-full object-cover" />
+						) : (
+							<Music2 className="w-28 h-28 text-(--jumbo-accent)" aria-hidden="true" />
+						)}
+					</div>
+					<div className="min-w-0">
+						<p className="text-6xl font-black italic tracking-tighter">{track.title}</p>
+						<p className="text-3xl text-zinc-300 mt-2">{track.artist}</p>
+					</div>
+					<div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-(--jumbo-accent)/15 border border-(--jumbo-accent)/50">
+						<Sparkles className="w-6 h-6 text-(--jumbo-accent)" aria-hidden="true" />
+						<span className="text-2xl font-black tabular-nums text-(--jumbo-accent)">{track.total_votes}</span>
+						<span className="text-sm uppercase tracking-widest text-(--jumbo-accent)/80 font-bold">votos</span>
+					</div>
+				</div>
+			</div>
+		</div>
 	);
 }
 

@@ -56,11 +56,14 @@ export function Hub() {
 
 			<main className="px-6 flex flex-col gap-5">
 				<TokenWalletCard onOpenHistory={() => setHistoryOpen(true)} />
+				{/* V17: los juegos suben al top del Hub (justo bajo el monedero)
+				    para dar protagonismo al Jukebox/Tinder — antes quedaban al
+				    final, por debajo del ranking y la racha. */}
+				<GameLauncherCard />
 				<TierRibbon />
 				<MissionsCard />
 				<LeaderboardCard />
 				<StreakCard />
-				<GameLauncherCard />
 			</main>
 
 			<HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />

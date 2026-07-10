@@ -45,6 +45,9 @@ type AdminBody = {
 	tv_url?: string;
 	tv_show_ranking?: boolean;
 	tv_show_battle?: boolean;
+	// V17: partir la pantalla mostrando la canción que suena ahora (mitad
+	// derecha) junto al ranking (mitad izquierda).
+	tv_show_now_playing?: boolean;
 };
 
 type ParsedTrack = {
@@ -324,7 +327,10 @@ export async function handleAdminAction(
 			// Visibilidad de capas (toggles del DJ).  Default visible (true).
 			const showRanking = body.tv_show_ranking !== false;
 			const showBattle = body.tv_show_battle !== false;
-			const tvBackdrop = { mode, url, showRanking, showBattle };
+			// V17: "Canción actual" (split view).  Default APAGADO (false) para
+			// no alterar el layout clásico salvo que el DJ lo active.
+			const showNowPlaying = body.tv_show_now_playing === true;
+			const tvBackdrop = { mode, url, showRanking, showBattle, showNowPlaying };
 			// Read-modify-write del jsonb (un solo DJ lo toca; sin carrera real).
 			const { data: ev } = await supabase
 				.from("tenant_events")
@@ -364,9 +370,11 @@ export async function handleAdminAction(
 		case "stop_now_playing": {
 			const eventId = String(body.event_id ?? "");
 			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+			// V17: apagamos is_played pero CONSERVAMOS played_at — la canción que
+			// acaba de sonar debe seguir oculta del jumbotron durante 2h.
 			const { error } = await supabase
 				.from("event_tracks")
-				.update({ is_played: false, played_at: null })
+				.update({ is_played: false })
 				.eq("tenant_id", tenant_id)
 				.eq("event_id", eventId)
 				.eq("is_played", true);

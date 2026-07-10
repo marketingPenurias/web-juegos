@@ -35,9 +35,21 @@ import { VoteFooter, type VoteAction } from "../components/live/VoteFooter";
 const DEFAULT_BOOST_COST = 30;
 const DEFAULT_VOTE_REWARD = 10;
 
-// Short-polling de los porcentajes en vivo (sustituye al UPDATE Realtime
-// de event_tracks, que saturaba el WAL).  Auditoría 360º · §2.
+// Short-polling de los porcentajes en vivo DURANTE la batalla (sustituye al
+// UPDATE Realtime de event_tracks, que saturaba el WAL con 500 móviles).
+// Sólo activo en la ventana corta del duelo (minutos).  Auditoría 360º · §2.
 const VOTES_POLL_MS = 2500;
+
+// Fallback de DESCUBRIMIENTO de batalla (V17 · red optimizada).
+// El descubrimiento PRIMARIO es el canal Realtime `live_battles` (INSERT del
+// duelo).  Este poll es la RED DE SEGURIDAD por si el WebSocket cae o pierde
+// el evento.
+//
+// ⚠️ MODO PILOTO: 5s → la batalla aparece casi al instante aunque el realtime
+// falle, y a escala de piloto (decenas de móviles) el coste es ridículo.
+// ANTES DE ESCALAR A CIENTOS/500 CONCURRENTES: subir a 30_000 (a 500 móviles,
+// 5s = 6k req/min sólo para "¿hay batalla ya?", inviable; 30s lo hace nulo).
+const DISCOVERY_FALLBACK_MS = 5_000;
 
 type BTrack = { id: string; title: string; artist: string; total_votes: number };
 type Battle = { id: string; endsAt: string; a: BTrack; b: BTrack };
@@ -130,15 +142,17 @@ export function LiveBattle() {
 		return () => { void supabase.removeChannel(channel); };
 	}, [activeEventId, loadBattle]);
 
-	// ── Porcentajes en vivo por SHORT-POLLING (no Realtime) ─────────────
-	// El UPDATE de event_tracks ya NO se difunde por WebSocket (saturaba el
-	// WAL/Realtime con 250k msg/min por local).  Refrescamos las dos pistas
-	// del duelo cada 2.5s mientras haya batalla y la pestaña esté visible;
-	// `loadBattle` relee `total_votes`.  El cambio de batalla (start/stop)
-	// sigue llegando por el canal `live_battles` (bajo volumen).
+	// ── Red: Realtime primario + polling de apoyo ──────────────────────
+	// · Descubrir/abrir/cerrar la batalla → canal Realtime `live_battles`
+	//   (arriba).  Es la vía PRIMARIA y de bajo volumen (1 fila por duelo).
+	// · Votos en vivo → el UPDATE de event_tracks NO se difunde (saturaría el
+	//   WAL con 500 móviles), así que DURANTE la batalla refrescamos los dos
+	//   temas cada 2.5s.
+	// · Fuera de batalla → poll de SEGURIDAD a 30s por si el WebSocket perdió
+	//   el INSERT del duelo (fallback, no mecanismo principal).
 	useInterval(() => {
 		void loadBattle();
-	}, battle ? VOTES_POLL_MS : null);
+	}, activeEventId ? (battle ? VOTES_POLL_MS : DISCOVERY_FALLBACK_MS) : null);
 
 	// ── Cuenta atrás del duelo ──────────────────────────────────────────
 	useEffect(() => {

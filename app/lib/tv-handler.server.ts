@@ -108,7 +108,7 @@ export async function handleTvAction(
 	// carrusel automático si no se ha fijado nada.
 	const meta = (activeEvent?.metadata as Record<string, unknown> | null) ?? null;
 	const rawBackdrop = (meta?.tv_backdrop ?? null) as
-		| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean }
+		| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean; showNowPlaying?: boolean }
 		| null;
 	const bm = rawBackdrop?.mode;
 	const backdrop = {
@@ -116,9 +116,17 @@ export async function handleTvAction(
 		url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
 		showRanking: rawBackdrop?.showRanking !== false, // default true
 		showBattle: rawBackdrop?.showBattle !== false, // default true
+		showNowPlaying: rawBackdrop?.showNowPlaying === true, // default false
 	};
 
+	// V17: canción sonando (is_played=true) — para el panel "Canción actual"
+	// del jumbotron partido.  Y ventana de ocultación: una pista NO aparece en
+	// el ranking si suena ahora o si sonó en las últimas 2h (played_at).
+	const HIDE_MS = 2 * 60 * 60 * 1000;
+	const playedCutoffIso = new Date(Date.now() - HIDE_MS).toISOString();
+
 	let tracks: TvTrack[] = [];
+	let nowPlaying: TvTrack | null = null;
 	let battle: { id: string; ends_at: string; a: TvTrack; b: TvTrack } | null = null;
 
 	if (event_id) {
@@ -127,10 +135,25 @@ export async function handleTvAction(
 			.select("id, title, artist, cover_image_url, total_votes, is_played")
 			.eq("tenant_id", tenant_id)
 			.eq("event_id", event_id)
+			.eq("is_played", false)
+			// played_at nulo (nunca sonó) o sonó hace más de 2h → visible.
+			.or(`played_at.is.null,played_at.lt.${playedCutoffIso}`)
 			.order("total_votes", { ascending: false })
 			.order("title", { ascending: true })
 			.limit(10);
 		tracks = (data ?? []) as TvTrack[];
+
+		// Canción actual (para el split view).  spotify_id incluido para el
+		// enlace, aunque en la TV normalmente no se usa.
+		const { data: np } = await supabase
+			.from("event_tracks")
+			.select("id, title, artist, cover_image_url, total_votes, is_played")
+			.eq("tenant_id", tenant_id)
+			.eq("event_id", event_id)
+			.eq("is_played", true)
+			.limit(1)
+			.maybeSingle();
+		nowPlaying = (np as TvTrack) ?? null;
 
 		// Batalla viva (si la hay) → resolvemos las dos canciones para arrancar
 		// directamente en modo DUELO sin esperar al WebSocket.
@@ -158,5 +181,5 @@ export async function handleTvAction(
 		}
 	}
 
-	return jsonResponse({ ok: true, tenant_id, event_id, tracks, battle, backdrop }, { request });
+	return jsonResponse({ ok: true, tenant_id, event_id, tracks, nowPlaying, battle, backdrop }, { request });
 }
