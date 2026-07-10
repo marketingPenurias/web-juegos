@@ -36,22 +36,30 @@ export function VoteFooter({
 			</p>
 
 			<div className="grid grid-cols-[1fr_1.4fr] gap-3">
+				{/* Voto GRATIS — SIEMPRE visible como botón (nunca negro sobre
+				    negro).  Habilitado: relleno cian sólido.  Deshabilitado:
+				    gris claro legible (no invisible). */}
 				<button
 					type="button"
 					onClick={() => onConfirm("free")}
 					disabled={cannotConfirm}
 					className={cn(
-						"h-14 rounded-2xl bg-[#0f0f12] border flex flex-col items-center justify-center gap-0.5 transition-colors relative overflow-hidden focus-visible:ring-2 focus-visible:ring-cyan-400",
+						"h-14 rounded-2xl border-2 flex flex-col items-center justify-center gap-0.5 transition-colors relative overflow-hidden focus-visible:ring-2 focus-visible:ring-cyan-400",
 						cannotConfirm
-							? "border-zinc-800 opacity-50 cursor-not-allowed"
-							: "border-cyan-400/60 active:bg-zinc-800",
+							? "bg-zinc-800 border-zinc-600 text-zinc-300 cursor-not-allowed"
+							: "bg-cyan-500 border-cyan-300 text-black shadow-[0_0_22px_rgba(0,212,255,0.55)] active:scale-95",
 					)}
 				>
-					<span className="text-base font-bold text-white tracking-wide flex items-center gap-1.5">
+					<span className="text-base font-black tracking-wide flex items-center gap-1.5">
 						<Check className="w-4 h-4" aria-hidden="true" />
 						{t("live.confirmVote")}
 					</span>
-					<span className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
+					<span
+						className={cn(
+							"text-[11px] font-bold uppercase tracking-widest",
+							cannotConfirm ? "text-zinc-400" : "text-black/70",
+						)}
+					>
 						{t("live.voteFreeSub")}
 					</span>
 				</button>
@@ -63,7 +71,7 @@ export function VoteFooter({
 					className={cn(
 						"h-14 rounded-2xl bg-linear-to-br from-amber-300 via-amber-500 to-amber-700 flex flex-col items-center justify-center gap-0.5 relative overflow-hidden focus-visible:ring-2 focus-visible:ring-amber-300",
 						cannotBoost
-							? "opacity-60 cursor-not-allowed grayscale-[0.5]"
+							? "opacity-80 cursor-not-allowed"
 							: "shadow-[0_0_20px_rgba(245,158,11,0.5)] active:scale-95 transition-transform",
 					)}
 				>
