@@ -71,9 +71,12 @@ const MAX_ROWS = 8;
 const HIDE_MS = 2 * 60 * 60 * 1000;
 // Red de la TV: Realtime PRIMARIO (event_tracks votos + is_played,
 // live_battles ganador, tenant_events fondo) y este poll como FALLBACK de
-// seguridad cada 12s — con 1 pantalla por local el coste es despreciable y
-// garantiza que la TV nunca se quede congelada si el WebSocket cae.
-const TV_POLL_MS = 12_000;
+// seguridad — con 1 pantalla por local el coste es despreciable.
+//
+// ⚠️ MODO PILOTO: 3s → la TV va instantánea aunque el realtime falle.  Como
+// sólo hay 1 pantalla por local, incluso 3s es coste nulo (~80 queries/min).
+// Tras el piloto, si se prioriza el realtime, se puede subir a 10-12s.
+const TV_POLL_MS = 3_000;
 // Sólo celebramos ganadores de batallas que cerraron hace poco (evita
 // disparar la animación por una batalla vieja al arrancar la pantalla).
 const WINNER_FRESH_MS = 45_000;

@@ -42,11 +42,14 @@ const VOTES_POLL_MS = 2500;
 
 // Fallback de DESCUBRIMIENTO de batalla (V17 · red optimizada).
 // El descubrimiento PRIMARIO es el canal Realtime `live_battles` (INSERT del
-// duelo).  Este poll es sólo una RED DE SEGURIDAD por si el WebSocket cae o
-// pierde el evento: 30s en reposo (haya o no batalla).  A 500 móviles, 3s
-// sería inviable (10k req/min sólo para "¿hay batalla ya?"); 30s lo hace
-// despreciable sin perder resiliencia.
-const DISCOVERY_FALLBACK_MS = 30_000;
+// duelo).  Este poll es la RED DE SEGURIDAD por si el WebSocket cae o pierde
+// el evento.
+//
+// ⚠️ MODO PILOTO: 5s → la batalla aparece casi al instante aunque el realtime
+// falle, y a escala de piloto (decenas de móviles) el coste es ridículo.
+// ANTES DE ESCALAR A CIENTOS/500 CONCURRENTES: subir a 30_000 (a 500 móviles,
+// 5s = 6k req/min sólo para "¿hay batalla ya?", inviable; 30s lo hace nulo).
+const DISCOVERY_FALLBACK_MS = 5_000;
 
 type BTrack = { id: string; title: string; artist: string; total_votes: number };
 type Battle = { id: string; endsAt: string; a: BTrack; b: BTrack };
