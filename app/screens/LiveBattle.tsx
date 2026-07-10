@@ -39,6 +39,14 @@ const DEFAULT_VOTE_REWARD = 10;
 // de event_tracks, que saturaba el WAL).  Auditoría 360º · §2.
 const VOTES_POLL_MS = 2500;
 
+// Poll de DESCUBRIMIENTO de batalla (V17 · fix "no salen los botones").
+// El realtime de `live_battles` a veces no entrega el INSERT de inicio →
+// el usuario que ya estaba en la pantalla nunca veía aparecer el duelo ni
+// sus botones de voto.  Sondeamos SIEMPRE (haya batalla o no) cada 3s
+// mientras hay evento activo, así el duelo aparece aunque el WebSocket
+// falle.  Bajo volumen (1 fila) → coste despreciable.
+const DISCOVERY_POLL_MS = 3000;
+
 type BTrack = { id: string; title: string; artist: string; total_votes: number };
 type Battle = { id: string; endsAt: string; a: BTrack; b: BTrack };
 
@@ -130,15 +138,17 @@ export function LiveBattle() {
 		return () => { void supabase.removeChannel(channel); };
 	}, [activeEventId, loadBattle]);
 
-	// ── Porcentajes en vivo por SHORT-POLLING (no Realtime) ─────────────
+	// ── Porcentajes en vivo + DESCUBRIMIENTO por SHORT-POLLING ──────────
 	// El UPDATE de event_tracks ya NO se difunde por WebSocket (saturaba el
-	// WAL/Realtime con 250k msg/min por local).  Refrescamos las dos pistas
-	// del duelo cada 2.5s mientras haya batalla y la pestaña esté visible;
-	// `loadBattle` relee `total_votes`.  El cambio de batalla (start/stop)
-	// sigue llegando por el canal `live_battles` (bajo volumen).
+	// WAL/Realtime con 250k msg/min por local) y el INSERT de `live_battles`
+	// tampoco es 100% fiable.  Por eso `loadBattle` se sondea SIEMPRE que hay
+	// evento activo: si NO hay duelo, cada 3s para DESCUBRIR uno nuevo (así
+	// aparecen los botones al arrancar el DJ); si YA hay duelo, cada 2.5s para
+	// refrescar los `total_votes`.  El realtime `live_battles` sigue como
+	// acelerador (reacción instantánea cuando sí llega).
 	useInterval(() => {
 		void loadBattle();
-	}, battle ? VOTES_POLL_MS : null);
+	}, activeEventId ? (battle ? VOTES_POLL_MS : DISCOVERY_POLL_MS) : null);
 
 	// ── Cuenta atrás del duelo ──────────────────────────────────────────
 	useEffect(() => {

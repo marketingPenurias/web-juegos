@@ -30,6 +30,7 @@ export type TvBackdrop = {
 	url: string | null;
 	showRanking: boolean;
 	showBattle: boolean;
+	showNowPlaying: boolean;
 };
 
 type Boot =
@@ -41,6 +42,7 @@ type Boot =
 			tenantId: string;
 			eventId: string | null;
 			tracks: TvTrack[];
+			nowPlaying: TvTrack | null;
 			battle: TvBattle;
 			backdrop: TvBackdrop;
 	  };
@@ -104,12 +106,14 @@ export function TvScreen({
 				tenantId: String(data.tenant_id ?? ""),
 				eventId: (data.event_id as string | null) ?? null,
 				tracks: (data.tracks as TvTrack[]) ?? [],
+				nowPlaying: (data.nowPlaying as TvTrack | null) ?? null,
 				battle: (data.battle as TvBattle) ?? null,
 				backdrop: {
 					mode: bm === "video" || bm === "photo" ? bm : "carousel",
 					url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
 					showRanking: rawBackdrop?.showRanking !== false,
 					showBattle: rawBackdrop?.showBattle !== false,
+					showNowPlaying: rawBackdrop?.showNowPlaying === true,
 				},
 			});
 		})();
@@ -168,6 +172,7 @@ export function TvScreen({
 			tenantId={boot.tenantId}
 			eventId={boot.eventId}
 			initialTracks={boot.tracks}
+			initialNowPlaying={boot.nowPlaying}
 			showQr={showQr}
 			enableBattle={enableBattle}
 			initialBattle={initialBattle}

@@ -384,6 +384,7 @@ export default function Admin() {
 												tv_url: s.url,
 												tv_show_ranking: s.showRanking,
 												tv_show_battle: s.showBattle,
+												tv_show_now_playing: s.showNowPlaying,
 											},
 											s.mode === "photo"
 												? "📌 Foto fijada en la TV"
@@ -694,6 +695,8 @@ type TvState = {
 	url: string | null;
 	showRanking: boolean;
 	showBattle: boolean;
+	// V17: partir la pantalla mostrando la canción que suena ahora.
+	showNowPlaying: boolean;
 };
 
 function TvControlPanel({ slug, busy, onSet }: {
@@ -710,6 +713,7 @@ function TvControlPanel({ slug, busy, onSet }: {
 		url: null,
 		showRanking: true,
 		showBattle: true,
+		showNowPlaying: false,
 	});
 
 	// Aplica un cambio parcial: actualiza el estado local Y lo envía entero
@@ -766,8 +770,8 @@ function TvControlPanel({ slug, busy, onSet }: {
 				</button>
 			</div>
 
-			{/* Toggles de CAPAS: ranking y batalla (ocultar = sólo fondo) */}
-			<div className="grid grid-cols-2 gap-3">
+			{/* Toggles de CAPAS: ranking, batalla y canción actual */}
+			<div className="grid grid-cols-3 gap-3">
 				<LayerToggle
 					label="Ranking"
 					on={sel.showRanking}
@@ -780,9 +784,16 @@ function TvControlPanel({ slug, busy, onSet }: {
 					busy={busy}
 					onToggle={() => apply({ showBattle: !sel.showBattle })}
 				/>
+				{/* V17: split view — media pantalla ranking, media canción actual. */}
+				<LayerToggle
+					label="Canción actual"
+					on={sel.showNowPlaying}
+					busy={busy}
+					onToggle={() => apply({ showNowPlaying: !sel.showNowPlaying })}
+				/>
 			</div>
 			<p className="text-[10px] text-zinc-600 px-1">
-				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo (foto / vídeo / carrusel).
+				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo. Activa <span className="text-cyan-300 font-bold">Canción actual</span> para partir la pantalla: ranking a la izquierda y la canción que suena a la derecha.
 			</p>
 
 			{/* Fijar una FOTO concreta (mode='photo') */}
