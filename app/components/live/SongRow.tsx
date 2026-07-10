@@ -55,14 +55,23 @@ export function SongRow({
 			disabled={disabled}
 			aria-pressed={selected}
 			className={cn(
-				"relative w-full text-left rounded-2xl p-2 transition-all focus-visible:ring-2 focus-visible:ring-cyan-400",
-				selected ? `ring-2 ${palette.ring}` : "ring-0",
+				// Borde SIEMPRE visible → la fila se lee como tarjeta pulsable
+				// (antes parecía sólo una barra de progreso y nadie la tocaba).
+				"relative w-full text-left rounded-2xl p-2 border-2 transition-all focus-visible:ring-2 focus-visible:ring-cyan-400",
+				selected
+					? `ring-2 ${palette.ring} border-transparent`
+					: "border-zinc-700 bg-zinc-900/30 active:scale-[0.99]",
 				disabled && !confirmed && "opacity-60",
 			)}
 		>
 			<div className="flex justify-between items-end mb-2 px-1">
-				<span className="font-bold text-lg text-white tracking-tight">
+				<span className="font-bold text-lg text-white tracking-tight flex items-center gap-2">
 					{name}
+					{!selected && !disabled && (
+						<span className={cn("text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-white/10", palette.text)}>
+							Toca para votar
+						</span>
+					)}
 				</span>
 				<span
 					ref={pctRef}
