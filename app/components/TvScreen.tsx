@@ -45,6 +45,7 @@ type Boot =
 			nowPlaying: TvTrack | null;
 			battle: TvBattle;
 			backdrop: TvBackdrop;
+			checkinCode: string | null;
 	  };
 
 function tenantSlugFromHost(): string {
@@ -107,6 +108,7 @@ export function TvScreen({
 				eventId: (data.event_id as string | null) ?? null,
 				tracks: (data.tracks as TvTrack[]) ?? [],
 				nowPlaying: (data.nowPlaying as TvTrack | null) ?? null,
+				checkinCode: (data.checkin_code as string | null) ?? null,
 				battle: (data.battle as TvBattle) ?? null,
 				backdrop: {
 					mode: bm === "video" || bm === "photo" ? bm : "carousel",
@@ -173,6 +175,7 @@ export function TvScreen({
 			eventId={boot.eventId}
 			initialTracks={boot.tracks}
 			initialNowPlaying={boot.nowPlaying}
+			checkinCode={boot.checkinCode}
 			showQr={showQr}
 			enableBattle={enableBattle}
 			initialBattle={initialBattle}

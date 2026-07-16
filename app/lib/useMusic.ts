@@ -29,6 +29,8 @@ export type MusicTrack = {
 	total_votes: number;
 	is_played?: boolean;
 	played_at?: string | null;
+	/** Género musical (V18) — para el filtro por géneros del Jukebox. */
+	genre?: string | null;
 };
 
 export type MusicError =

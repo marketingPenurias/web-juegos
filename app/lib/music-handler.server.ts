@@ -144,11 +144,13 @@ export async function handleMusicLoader(
 	if (mode === "catalog") {
 		const { data, error } = await supabase
 			.from("event_tracks")
-			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played")
+			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played, genre")
 			.eq("tenant_id", tenant_id)
 			.eq("event_id", event_id)
 			.eq("is_played", false)
 			.order("total_votes", { ascending: false })
+			// Desempate V18: a igualdad de votos, primero la votada hace más rato.
+			.order("last_vote_at", { ascending: true, nullsFirst: true })
 			.order("title", { ascending: true })
 			.limit(1000);
 
