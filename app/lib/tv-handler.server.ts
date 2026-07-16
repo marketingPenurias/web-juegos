@@ -125,6 +125,21 @@ export async function handleTvAction(
 	const HIDE_MS = 2 * 60 * 60 * 1000;
 	const playedCutoffIso = new Date(Date.now() - HIDE_MS).toISOString();
 
+	// V18: código del QR de CHECK-IN de entrada.  El QR del jumbotron deja de
+	// ser sólo atribución y pasa a registrar la visita (venue_visits) → de ahí
+	// salen el KPI de check-ins y la racha de fidelidad semanal.  Se resuelve
+	// por tenant (nada hardcodeado); si el local no tiene QR de entrada, el
+	// cliente cae al enlace de captación de siempre.
+	const { data: qrEntrada } = await supabase
+		.from("qr_strategies")
+		.select("code")
+		.eq("tenant_id", tenant_id)
+		.eq("kind", "entrada")
+		.eq("is_active", true)
+		.limit(1)
+		.maybeSingle();
+	const checkin_code = (qrEntrada?.code as string | undefined) ?? null;
+
 	let tracks: TvTrack[] = [];
 	let nowPlaying: TvTrack | null = null;
 	let battle: { id: string; ends_at: string; a: TvTrack; b: TvTrack } | null = null;
@@ -181,5 +196,8 @@ export async function handleTvAction(
 		}
 	}
 
-	return jsonResponse({ ok: true, tenant_id, event_id, tracks, nowPlaying, battle, backdrop }, { request });
+	return jsonResponse(
+		{ ok: true, tenant_id, event_id, tracks, nowPlaying, battle, backdrop, checkin_code },
+		{ request },
+	);
 }

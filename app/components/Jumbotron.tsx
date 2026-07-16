@@ -33,6 +33,8 @@ type Track = {
 	// V17: sello temporal para ocultar del ranking 2h tras sonar (permite que
 	// el filtro cliente respete la ventana igual que el poll/servidor).
 	played_at?: string | null;
+	// V18: instante del último voto → desempate por antigüedad en el ranking.
+	last_vote_at?: string | null;
 };
 
 type Battle = { id: string; endsAt: string; a: Track; b: Track };
@@ -57,6 +59,9 @@ type Props = {
 	eventId: string | null;
 	initialTracks: Track[];
 	initialNowPlaying?: Track | null;
+	/** Código del QR de entrada (qr_strategies). Si existe, el QR de la
+	 *  pantalla registra CHECK-IN (visita + fidelidad) además de captar. */
+	checkinCode?: string | null;
 	showQr?: boolean;
 	enableBattle?: boolean;
 	initialBattle?: Battle | null;
@@ -90,6 +95,7 @@ export function Jumbotron({
 	eventId,
 	initialTracks,
 	initialNowPlaying = null,
+	checkinCode = null,
 	showQr = false,
 	enableBattle = false,
 	initialBattle = null,
@@ -155,7 +161,13 @@ export function Jumbotron({
 	// en cookie y lo consume el pipeline de atribución.
 	const venueHost = `${tenant.slug}.nightgraph.io`;
 	const venueUrl = `https://${venueHost}`;
-	const qrTarget = `${venueUrl}/?ref=QR-TV`;
+	// V18: si el local tiene QR de entrada, la pantalla enseña el QR de
+	// CHECK-IN → escanearlo registra la visita (venue_visits), da los tokens
+	// del check-in y sube la racha de fidelidad semanal.  `ref=QR-TV` se
+	// mantiene para no perder la atribución de captación.
+	const qrTarget = checkinCode
+		? `${venueUrl}/checkin?code=${encodeURIComponent(checkinCode)}&ref=QR-TV`
+		: `${venueUrl}/?ref=QR-TV`;
 
 	// Ranking visible: fuera las que suenan ahora (is_played) Y las sonadas
 	// hace <2h (played_at).  El poll ya las excluye en la query, pero como el
@@ -169,7 +181,16 @@ export function Jumbotron({
 					!t.is_played &&
 					(!t.played_at || Date.parse(t.played_at) < cutoff),
 			)
-			.sort((a, b) => b.total_votes - a.total_votes)
+			.sort((a, b) => {
+				if (b.total_votes !== a.total_votes) return b.total_votes - a.total_votes;
+				// Desempate V18: a igualdad de votos, primero la que llegó ANTES a
+				// ese número (last_vote_at más antiguo).  Sin sello (nunca votada)
+				// = 0 → arriba en los empates a cero, y luego alfabético.
+				const av = a.last_vote_at ? Date.parse(a.last_vote_at) : 0;
+				const bv = b.last_vote_at ? Date.parse(b.last_vote_at) : 0;
+				if (av !== bv) return av - bv;
+				return a.title.localeCompare(b.title);
+			})
 			.slice(0, MAX_ROWS);
 	}, [tracks]);
 
@@ -345,11 +366,15 @@ export function Jumbotron({
 		//    played_at para que el filtro cliente de `sorted` sea consistente.
 		const { data: top } = await supabase
 			.from("event_tracks")
-			.select("id, title, artist, cover_image_url, total_votes, is_played, played_at")
+			.select("id, title, artist, cover_image_url, total_votes, is_played, played_at, last_vote_at")
 			.eq("event_id", eventId)
 			.eq("is_played", false)
 			.or(`played_at.is.null,played_at.lt.${cutoff}`)
 			.order("total_votes", { ascending: false })
+			// Desempate V18: a igualdad de votos gana la que llegó ANTES a ese
+			// número (last_vote_at más antiguo).  `nullsFirst` deja arriba las
+			// que aún no tienen sello (empate a 0).
+			.order("last_vote_at", { ascending: true, nullsFirst: true })
 			.order("title", { ascending: true })
 			.limit(MAX_ROWS + 2);
 		if (top) setTracks(top as Track[]);
@@ -626,12 +651,26 @@ export function Jumbotron({
 					</div>
 					)}
 
-					{/* V17: mitad derecha con la CANCIÓN ACTUAL (split view). */}
-					{displayNowPlaying && <NowPlayingPanel track={nowPlaying} />}
-
-					{/* QR sólo si NO estamos en split (para no amontonar columnas). */}
-					{!displayNowPlaying && showQr && (
-						<QrBlock url={qrTarget} label={venueHost} fgColor={tenant.theme.primary ?? "#ffffff"} />
+					{/* Columna derecha: CANCIÓN ACTUAL (split) y/o QR.  V18: el QR
+					    ya NO desaparece al activar "Canción actual" — comparten
+					    columna (canción arriba, QR compacto abajo). */}
+					{(displayNowPlaying || showQr) && (
+						<aside
+							className={cn(
+								"flex flex-col gap-6 min-w-0",
+								displayNowPlaying ? "flex-1" : "w-[26rem] shrink-0",
+							)}
+						>
+							{displayNowPlaying && <NowPlayingPanel track={nowPlaying} />}
+							{showQr && (
+								<QrBlock
+									url={qrTarget}
+									label={venueHost}
+									fgColor={tenant.theme.primary ?? "#ffffff"}
+									compact={displayNowPlaying}
+								/>
+							)}
+						</aside>
 					)}
 				</main>
 			))}
@@ -682,7 +721,14 @@ function DuelSide({ track, pct, side, origin, barRef, leading }: {
 	);
 }
 
-function QrBlock({ url, label, fgColor }: { url: string; label: string; fgColor: string }) {
+function QrBlock({ url, label, fgColor, compact = false }: {
+	url: string; label: string; fgColor: string;
+	/** En split view el QR va debajo de la canción actual → versión reducida. */
+	compact?: boolean;
+}) {
+	// El QR lleva a /checkin cuando el local tiene QR de entrada configurado:
+	// escanear = registrar visita + fidelidad, no sólo captar.
+	const isCheckin = url.includes("/checkin");
 	// QR generado 100% en el CLIENTE (qrcode.react) → SVG vectorial, offline,
 	// sin llamadas de red ni rate-limits.  Siempre escaneable.
 	//
@@ -692,11 +738,22 @@ function QrBlock({ url, label, fgColor }: { url: string; label: string; fgColor:
 	// que lo contiene es oscuro translúcido (alto contraste vs. el fg claro)
 	// en vez del antiguo recuadro blanco.
 	return (
-		<aside className="w-[26rem] shrink-0 flex flex-col items-center justify-center gap-6 rounded-3xl border border-(--jumbo-primary)/40 bg-zinc-900/50 backdrop-blur-md p-8 text-center">
+		<aside
+			className={cn(
+				"flex flex-col items-center justify-center rounded-3xl border border-(--jumbo-primary)/40 bg-zinc-900/50 backdrop-blur-md text-center",
+				compact ? "w-full gap-3 p-5" : "w-full gap-6 p-8",
+			)}
+		>
 			<div className="inline-flex items-center gap-2 text-(--jumbo-primary) font-black uppercase tracking-[0.3em] text-sm">
-				<QrCode className="w-5 h-5" aria-hidden="true" /> Pide tu canción
+				<QrCode className="w-5 h-5" aria-hidden="true" />
+				{isCheckin ? "Escanea y suma" : "Pide tu canción"}
 			</div>
-			<div className="w-72 h-72 rounded-2xl bg-black/40 border border-white/10 p-4 flex items-center justify-center">
+			<div
+				className={cn(
+					"rounded-2xl bg-black/40 border border-white/10 p-4 flex items-center justify-center",
+					compact ? "w-40 h-40" : "w-72 h-72",
+				)}
+			>
 				<QRCodeSVG
 					value={url}
 					level="M"
@@ -708,8 +765,12 @@ function QrBlock({ url, label, fgColor }: { url: string; label: string; fgColor:
 				/>
 			</div>
 			<div>
-				<p className="text-2xl font-black italic tracking-tight text-white">Escanea para pedir tu canción</p>
-				<p className="text-base text-(--jumbo-primary) font-bold mt-1 break-all">{label}</p>
+				<p className={cn("font-black italic tracking-tight text-white", compact ? "text-lg" : "text-2xl")}>
+					{isCheckin ? "Escanea: puntos y racha" : "Escanea para pedir tu canción"}
+				</p>
+				{!compact && (
+					<p className="text-base text-(--jumbo-primary) font-bold mt-1 break-all">{label}</p>
+				)}
 			</div>
 		</aside>
 	);

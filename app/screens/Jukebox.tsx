@@ -36,6 +36,43 @@ import { cn } from "../lib/utils";
 const DEFAULT_BOOST_COST = 50;
 const DEFAULT_REQUEST_REWARD = 20;
 
+/**
+ * Normaliza para buscar: sin acentos/diacríticos, minúsculas, sin puntuación.
+ * Así "regueton" encuentra "Reguetón" y "cafune" encuentra "Cruz Cafuné".
+ */
+function normalize(s: string): string {
+	return s
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "") // fuera tildes/diéresis
+		.toLowerCase()
+		.replace(/[^a-z0-9\s]/g, " ") // fuera puntuación (ñ ya normalizada a n)
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+/**
+ * Búsqueda TOLERANTE (V18): ya no hace falta el nombre exacto.
+ *   · Ignora tildes, mayúsculas y puntuación.
+ *   · Multi-palabra en CUALQUIER orden y sobre título + artista:
+ *     "quevedo graciosa" encuentra "LA GRACIOSA — Quevedo, Elvis Crespo".
+ *   · Ordena por relevancia: primero lo que empieza por lo escrito.
+ * Devuelve null si la canción no matchea; si matchea, su score (menor = mejor).
+ */
+function matchScore(song: { title: string; artist: string }, tokens: string[]): number | null {
+	const title = normalize(song.title);
+	const artist = normalize(song.artist);
+	const hay = `${title} ${artist}`;
+	let score = 0;
+	for (const tk of tokens) {
+		if (!hay.includes(tk)) return null; // todos los términos deben aparecer
+		if (title.startsWith(tk)) score += 0;
+		else if (title.includes(tk)) score += 1;
+		else if (artist.startsWith(tk)) score += 2;
+		else score += 3;
+	}
+	return score;
+}
+
 export function Jukebox() {
 	const { t } = useTranslation();
 	const tokens = useGameState((s) => s.tokens);
@@ -85,6 +122,8 @@ export function Jukebox() {
 	}, [activeEventId, catalog, loading]);
 
 	const [query, setQuery] = useState("");
+	// Filtro por género (V18).  null = todos.
+	const [genre, setGenre] = useState<string | null>(null);
 	const [requested, setRequested] = useState<Set<string>>(new Set());
 	const [boosted, setBoosted] = useState<Set<string>>(new Set());
 	const [busy, setBusy] = useState<string | null>(null);
@@ -117,34 +156,44 @@ export function Jukebox() {
 		{ scope: containerRef, dependencies: [allSongs.length] },
 	);
 
-	// 50 ALEATORIAS para la vista por defecto (Fisher-Yates parcial, sin
-	// sesgo).  Se recalcula sólo cuando cambia el catálogo (carga / evento),
-	// así que el Jukebox "parece nuevo" cada vez que se abre (remontaje) pero
-	// NO se rebaraja al votar.
+	// Géneros disponibles en el catálogo del evento (para los chips).
+	const genres = useMemo(() => {
+		const set = new Set<string>();
+		for (const s of allSongs) if (s.genre) set.add(s.genre);
+		return [...set].sort((a, b) => a.localeCompare(b));
+	}, [allSongs]);
+
+	// Catálogo tras aplicar el filtro de género (base de todo lo demás).
+	const pool = useMemo(
+		() => (genre ? allSongs.filter((s) => s.genre === genre) : allSongs),
+		[allSongs, genre],
+	);
+
+	// 50 ALEATORIAS para la vista por defecto (Fisher-Yates parcial, sin sesgo).
+	// Se recalcula al cambiar el catálogo o el género, no al votar (así el
+	// Jukebox "parece nuevo" al abrirlo pero no se rebaraja bajo el dedo).
 	const randomFifty = useMemo(() => {
-		if (allSongs.length <= 50) return allSongs;
-		const arr = allSongs.slice();
+		if (pool.length <= 50) return pool;
+		const arr = pool.slice();
 		for (let i = arr.length - 1; i > 0; i--) {
 			const j = Math.floor(Math.random() * (i + 1));
 			[arr[i], arr[j]] = [arr[j], arr[i]];
 		}
 		return arr.slice(0, 50);
-	}, [allSongs]);
+	}, [pool]);
 
-	// Búsqueda: filtra sobre el 100% del catálogo (no sólo las 50 visibles).
-	// Cap a 50 resultados renderizados para no reventar el DOM con queries
-	// muy genéricas.
+	// Búsqueda TOLERANTE sobre el 100% del pool (no sólo las 50 visibles).
+	// Cap a 50 resultados renderizados para no reventar el DOM.
 	const filtered = useMemo(() => {
-		const q = query.trim().toLowerCase();
-		if (!q) return randomFifty;
-		return allSongs
-			.filter(
-				(s) =>
-					s.title.toLowerCase().includes(q) ||
-					s.artist.toLowerCase().includes(q),
-			)
-			.slice(0, 50);
-	}, [allSongs, randomFifty, query]);
+		const tokens = normalize(query).split(" ").filter(Boolean);
+		if (tokens.length === 0) return randomFifty;
+		return pool
+			.map((s) => ({ s, score: matchScore(s, tokens) }))
+			.filter((r): r is { s: MusicTrack; score: number } => r.score !== null)
+			.sort((a, b) => a.score - b.score || a.s.title.localeCompare(b.s.title))
+			.slice(0, 50)
+			.map((r) => r.s);
+	}, [pool, randomFifty, query]);
 
 	const flashRow = (id: string, color: "amber" | "cyan") => {
 		const row = rowRefs.current.get(id);
@@ -307,6 +356,25 @@ export function Jukebox() {
 						className="w-full h-12 rounded-2xl bg-zinc-900/80 border border-zinc-800 pl-9 pr-3 text-sm font-bold text-white placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
 					/>
 				</label>
+				{/* V18: filtro por GÉNERO musical.  Chips scrollables horizontales
+				    (thumb-friendly); "Todos" resetea. */}
+				{genres.length > 0 && (
+					<div className="flex gap-2 overflow-x-auto no-scrollbar -mx-6 px-6 mt-3 pb-1">
+						<GenreChip
+							label={t("jukebox.genreAll", "Todos")}
+							active={genre === null}
+							onClick={() => setGenre(null)}
+						/>
+						{genres.map((g) => (
+							<GenreChip
+								key={g}
+								label={g}
+								active={genre === g}
+								onClick={() => setGenre(genre === g ? null : g)}
+							/>
+						))}
+					</div>
+				)}
 				<p className="text-[11px] text-zinc-500 mt-2 px-1">
 					{t("jukebox.subtitle")}
 				</p>
@@ -470,6 +538,27 @@ function JukeboxRow({
 				</button>
 			</div>
 		</li>
+	);
+}
+
+// Chip de filtro por género (V18).
+function GenreChip({ label, active, onClick }: {
+	label: string; active: boolean; onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			aria-pressed={active}
+			className={cn(
+				"shrink-0 h-8 px-3 rounded-full text-[11px] font-black uppercase tracking-widest border whitespace-nowrap active:scale-95 transition-colors focus-visible:ring-2 focus-visible:ring-amber-400",
+				active
+					? "bg-amber-400 border-amber-300 text-black shadow-[0_0_15px_rgba(245,158,11,0.45)]"
+					: "bg-zinc-900 border-zinc-700 text-zinc-300",
+			)}
+		>
+			{label}
+		</button>
 	);
 }
 
