@@ -43,6 +43,7 @@ export type MusicError =
 	| "negative_tokens"
 	| "insufficient_funds"
 	| "already_voted"
+	| "no_free_votes"
 	| "fk_violation"
 	| "duplicate_key"
 	| "service_unavailable"
@@ -71,10 +72,13 @@ async function buildHeaders(): Promise<HeadersInit> {
 class ApiError extends Error {
 	code: string;
 	detail?: string;
-	constructor(code: string, detail?: string) {
+	// V19: coste del voto extra (viaja con `no_free_votes`).
+	extra_cost?: number;
+	constructor(code: string, detail?: string, extra_cost?: number) {
 		super(detail ? `${code}: ${detail}` : code);
 		this.code = code;
 		this.detail = detail;
+		this.extra_cost = extra_cost;
 	}
 }
 
@@ -90,9 +94,14 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 		ok?: boolean;
 		error?: string;
 		detail?: string;
+		extra_cost?: number;
 	};
 	if (!res.ok || payload.ok === false) {
-		throw new ApiError(payload.error ?? `http_${res.status}`, payload.detail);
+		throw new ApiError(
+			payload.error ?? `http_${res.status}`,
+			payload.detail,
+			payload.extra_cost,
+		);
 	}
 	return payload;
 }
@@ -104,6 +113,8 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 	const [deck, setDeck] = useState<MusicTrack[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<MusicError | null>(null);
+	// V19: votos gratis de jukebox restantes esta noche (null = sin dato aún).
+	const [freeVotesLeft, setFreeVotesLeft] = useState<number | null>(null);
 
 	const reload = useCallback(async () => {
 		if (!eventId) return;
@@ -112,7 +123,11 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 		try {
 			// `swipe`  → deck no-votado (Tinder).
 			// `catalog`→ catálogo completo ligero (Jukebox: 50 random + búsqueda).
-			const data = await fetchJson<{ ok: true; tracks: MusicTrack[] }>(
+			const data = await fetchJson<{
+				ok: true;
+				tracks: MusicTrack[];
+				free_votes_left?: number;
+			}>(
 				`${ENDPOINT}?event_id=${encodeURIComponent(eventId)}&mode=${mode}`,
 				{
 					method: "GET",
@@ -120,6 +135,9 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 				},
 			);
 			setDeck(data.tracks ?? []);
+			if (typeof data.free_votes_left === "number") {
+				setFreeVotesLeft(data.free_votes_left);
+			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "network_error";
 			setError((message as MusicError) ?? "network_error");
@@ -137,7 +155,9 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 			track_id: string;
 			vote_type?: TrackVoteType;
 			tokens_spent?: number;
-			boost_context?: "jukebox" | "livebattle";
+			boost_context?: "jukebox" | "livebattle" | "tinder";
+			// V19: aceptar pagar el voto extra de jukebox con tokens.
+			paid_extra?: boolean;
 		}) => {
 			if (!eventId) return { ok: false as const, error: "missing_event" };
 			try {
@@ -146,6 +166,7 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 					vote_id: string;
 					total_votes: number;
 					balance?: number;
+					remaining_free?: number | null;
 				}>(ENDPOINT, {
 					method: "POST",
 					body: JSON.stringify({
@@ -156,23 +177,33 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 						// la BD); se envía sólo por compatibilidad.
 						tokens_spent: params.tokens_spent ?? 0,
 						boost_context: params.boost_context ?? "livebattle",
+						paid_extra: params.paid_extra === true,
 						tenant_slug: tenant.slug,
 					}),
 				});
 				// Optimistically drop the voted track from the deck.
 				setDeck((d) => d.filter((t) => t.id !== params.track_id));
+				if (typeof data.remaining_free === "number") {
+					setFreeVotesLeft(data.remaining_free);
+				}
 				return {
 					ok: true as const,
 					vote_id: data.vote_id,
 					total_votes: data.total_votes,
 					balance: data.balance,
+					remaining_free: data.remaining_free,
 				};
 			} catch (err) {
 				if (err instanceof ApiError) {
+					// Sin votos gratis → reflejamos 0 para que la UI muestre el
+					// coste en tokens al reintentar.
+					if (err.code === "no_free_votes") setFreeVotesLeft(0);
 					return {
 						ok: false as const,
 						error: (err.code as MusicError) ?? "rpc_failed",
 						detail: err.detail,
+						// no_free_votes trae el coste del voto extra.
+						extra_cost: err.extra_cost,
 					};
 				}
 				const message = err instanceof Error ? err.message : "network_error";
@@ -185,7 +216,7 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 		[eventId, tenant.slug],
 	);
 
-	return { deck, loading, error, reload, castVote };
+	return { deck, loading, error, reload, castVote, freeVotesLeft };
 }
 
 // ─── DJ leaderboard (separate so it doesn't fire the swipe deck) ──────────
