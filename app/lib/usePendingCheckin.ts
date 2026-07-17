@@ -67,6 +67,14 @@ export function usePendingCheckin() {
 					string,
 					unknown
 				>;
+				// `profile_not_found` es TRANSITORIO: el perfil se crea JIT en el
+				// primer login con Google y puede no existir aún.  No es un fallo
+				// de negocio → conservamos el código y reintentamos en el próximo
+				// evento de auth, en vez de perder el check-in del usuario.
+				if (data.error === "profile_not_found") {
+					processingRef.current = false;
+					return;
+				}
 				// Respuesta del servidor recibida → es one-shot, limpiamos.
 				try {
 					window.localStorage.removeItem(PENDING_CHECKIN_KEY);
