@@ -8,7 +8,7 @@ import {
 import { getServiceSupabase } from "../lib/supabase.server";
 import {
 	pickTenantSlug,
-	resolveTenantProfile,
+	resolveOrCreateTenantProfile,
 } from "../lib/tenant-resolver.server";
 
 /**
@@ -41,9 +41,11 @@ export async function action({ request, context }: Route.ActionArgs) {
 	}
 
 	let verifiedId: string | null = null;
+	let verifiedEmail: string | null = null;
 	try {
 		const verified = await verifyAuthToken(request, context);
 		verifiedId = verified?.id ?? null;
+		verifiedEmail = verified?.email ?? null;
 	} catch {
 		verifiedId = null;
 	}
@@ -91,10 +93,14 @@ export async function action({ request, context }: Route.ActionArgs) {
 		);
 	}
 
-	const profileResult = await resolveTenantProfile(
+	// JIT: si es su primer login con Google, el perfil puede no existir todavía
+	// (lo crea /api/session en paralelo).  Lo creamos aquí si hace falta para
+	// que el check-in nunca se pierda por llegar antes de tiempo.
+	const profileResult = await resolveOrCreateTenantProfile(
 		supabase,
 		slugResult.slug,
 		verifiedId,
+		verifiedEmail,
 	);
 	if (!profileResult.ok) {
 		return jsonResponse(

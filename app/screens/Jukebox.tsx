@@ -6,12 +6,12 @@ import {
 	Disc3,
 	Music2,
 	Search,
+	Ticket,
 	Zap,
 } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useMusic, type MusicTrack } from "../lib/useMusic";
-import { useClaim } from "../lib/useClaim";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { cn } from "../lib/utils";
@@ -30,11 +30,12 @@ import { cn } from "../lib/utils";
  *   verdad vive en `track_votes` server-side.
  */
 
-// Fallbacks: el coste/premio REAL los fija `tenant_token_rewards` (servido
-// en rewardRules).  Estas constantes sólo cubren el arranque antes de que
+// Fallbacks: el coste REAL lo fija `tenant_token_rewards` (servido en
+// rewardRules).  Estas constantes sólo cubren el arranque antes de que
 // /api/session cargue las reglas.
 const DEFAULT_BOOST_COST = 50;
-const DEFAULT_REQUEST_REWARD = 20;
+// V19: coste en tokens de un voto extra (cuando se agotan los 5 gratis).
+const DEFAULT_EXTRA_COST = 15;
 
 /**
  * Normaliza para buscar: sin acentos/diacríticos, minúsculas, sin puntuación.
@@ -81,21 +82,22 @@ export function Jukebox() {
 	const activeEventId = useGameState((s) => s.activeEventId);
 	const rewardAmount = useGameState((s) => s.rewardAmount);
 
-	// Economía centralizada (single source of truth = backend).  El boost se
-	// guarda como amount negativo, por eso tomamos su valor absoluto.
+	// Economía centralizada (single source of truth = backend).  El boost y el
+	// voto extra se guardan como amount negativo → valor absoluto.
 	const BOOST_COST = Math.abs(rewardAmount("jukebox_boost", -DEFAULT_BOOST_COST));
-	const REQUEST_REWARD = rewardAmount("jukebox_request", DEFAULT_REQUEST_REWARD);
+	const EXTRA_COST = Math.abs(rewardAmount("jukebox_extra_vote", -DEFAULT_EXTRA_COST));
 
 	// CATÁLOGO COMPLETO (ligero) del evento — el Jukebox no usa el deck
 	// "no-votado" de Tinder, sino todas las canciones disponibles para poder
 	// buscar sobre el 100% y mostrar 50 aleatorias por defecto.
-	const { deck: catalog, loading, error, castVote, reload } = useMusic(
+	// `freeVotesLeft` = votos gratis de jukebox que quedan esta noche (V19).
+	const { deck: catalog, loading, error, castVote, reload, freeVotesLeft } = useMusic(
 		activeEventId,
 		"catalog",
 	);
-	const addTokens = useGameState((s) => s.addTokens);
 	const markDaily = useGameState((s) => s.markDaily);
-	const { claim } = useClaim();
+	// V19: el voto libre de jukebox ya NO da tokens (votar es un recurso
+	// limitado, no un grifo) → aquí ya no se reclama ninguna recompensa.
 
 	// ── Snapshot estable del catálogo (mismo patrón anti-rebaraje que
 	// Tinder).  `castVote` hace `setDeck(filter)` al votar; si renderizáramos
@@ -245,6 +247,11 @@ export function Jukebox() {
 		}
 	};
 
+	// ¿Este "Pedir" será de pago?  Cuando ya no quedan votos gratis, pedir
+	// cuesta tokens (V19).  freeVotesLeft null = aún sin dato → tratamos como
+	// gratis (el server decide de todas formas).
+	const payWithTokens = freeVotesLeft !== null && freeVotesLeft <= 0;
+
 	const handleRequest = async (id: string) => {
 		if (busy) return;
 		if (requested.has(id)) {
@@ -259,26 +266,50 @@ export function Jukebox() {
 			);
 			return;
 		}
+		// Sin votos gratis y sin saldo para el voto de pago → aviso, no llamamos.
+		if (payWithTokens && tokens < EXTRA_COST) {
+			setTone("warning");
+			setToast(t("jukebox.toastNoTokens"));
+			return;
+		}
 		setBusy(id);
 		const res = await castVote({
 			track_id: id,
 			vote_type: "free",
-			tokens_spent: 0,
+			boost_context: "jukebox",
+			paid_extra: payWithTokens,
 		});
 		setBusy(null);
 		if (!res.ok) {
+			// Ibas desincronizado: el server dice que ya no hay gratis.  El hook
+			// ya puso freeVotesLeft=0 → el botón pasa a "por N tokens".
+			if (res.error === "no_free_votes") {
+				setTone("default");
+				setToast(
+					t("jukebox.toastNoFreeLeft", {
+						n: res.extra_cost ?? EXTRA_COST,
+						defaultValue: `Se acabaron tus votos gratis · toca de nuevo para pedir por {{n}} tokens`,
+					}),
+				);
+				return;
+			}
 			setTone("warning");
 			setToast(translateError(res.error, res.detail));
 			return;
 		}
 		setRequested((prev) => new Set(prev).add(id));
+		// Voto de pago → reconciliamos el saldo con el que devuelve el server.
+		if (payWithTokens && typeof res.balance === "number") setBalance(res.balance);
 		setTone("success");
-		setToast(t("jukebox.toastRequested"));
+		setToast(
+			payWithTokens
+				? t("jukebox.toastRequestedPaid", {
+						n: EXTRA_COST,
+						defaultValue: `¡Pedida! (-{{n}} tokens)`,
+					})
+				: t("jukebox.toastRequested"),
+		);
 		flashRow(id, "cyan");
-		// Premio por pedir (jukebox_request, 1/noche).  OPTIMISTIC: sumamos el
-		// importe de las reglas ya; el claim reconcilia con el ledger.
-		addTokens(REQUEST_REWARD, "history.tx_jukebox_request");
-		void claim("jukebox_request", activeEventId);
 	};
 
 	const handleBoost = async (id: string) => {
@@ -375,6 +406,33 @@ export function Jukebox() {
 						))}
 					</div>
 				)}
+				{/* V19: votos gratis restantes esta noche.  Cuando se agotan, avisa
+				    de que pedir pasa a costar tokens (o boostear). */}
+				{activeEventId && freeVotesLeft !== null && (
+					<div className="mt-3 px-1">
+						{freeVotesLeft > 0 ? (
+							<div className="inline-flex items-center gap-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 px-3 py-1">
+								<Ticket className="w-3.5 h-3.5 text-cyan-300" aria-hidden="true" />
+								<span className="text-[11px] font-black text-cyan-200 uppercase tracking-widest">
+									{t("jukebox.freeLeft", {
+										n: freeVotesLeft,
+										defaultValue: "{{n}} votos gratis",
+									})}
+								</span>
+							</div>
+						) : (
+							<div className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 px-3 py-1">
+								<Zap className="w-3.5 h-3.5 text-amber-300" aria-hidden="true" />
+								<span className="text-[11px] font-black text-amber-200 uppercase tracking-widest">
+									{t("jukebox.freeEmpty", {
+										n: EXTRA_COST,
+										defaultValue: "Sin votos gratis · pedir cuesta {{n}} tokens",
+									})}
+								</span>
+							</div>
+						)}
+					</div>
+				)}
 				<p className="text-[11px] text-zinc-500 mt-2 px-1">
 					{t("jukebox.subtitle")}
 				</p>
@@ -414,6 +472,7 @@ export function Jukebox() {
 								key={song.id}
 								song={song}
 								boostCost={BOOST_COST}
+								requestCost={payWithTokens ? EXTRA_COST : 0}
 								rowRefSetter={(el) => {
 									if (el) rowRefs.current.set(song.id, el);
 									else rowRefs.current.delete(song.id);
@@ -437,6 +496,7 @@ export function Jukebox() {
 function JukeboxRow({
 	song,
 	boostCost,
+	requestCost,
 	rowRefSetter,
 	isRequested,
 	isBoosted,
@@ -446,6 +506,8 @@ function JukeboxRow({
 }: {
 	song: MusicTrack;
 	boostCost: number;
+	/** Coste en tokens de "Pedir" (0 = gratis; >0 = ya no quedan gratis). */
+	requestCost: number;
 	rowRefSetter: (el: HTMLLIElement | null) => void;
 	isRequested: boolean;
 	isBoosted: boolean;
@@ -516,6 +578,15 @@ function JukeboxRow({
 						<>
 							<CheckCircle2 className="w-3 h-3" aria-hidden="true" />
 							{t("jukebox.requested", "Pedida")}
+						</>
+					) : requestCost > 0 ? (
+						// Sin votos gratis → "Pedir" cuesta tokens (V19).
+						<>
+							<Ticket className="w-3 h-3" aria-hidden="true" />
+							{t("jukebox.requestPaid", {
+								n: requestCost,
+								defaultValue: "Pedir · {{n}}",
+							})}
 						</>
 					) : (
 						t("jukebox.request")

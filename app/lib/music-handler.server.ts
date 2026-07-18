@@ -26,7 +26,12 @@ type VoteBody = {
 	tokens_spent?: number; // IGNORADO server-side para boost (compat)
 	tenant_slug?: string;
 	// Qué boost es, para resolver el coste real desde tenant_token_rewards.
-	boost_context?: "jukebox" | "livebattle";
+	// También sirve de CONTEXTO del voto (jukebox / livebattle / tinder) para
+	// el presupuesto de voto del jukebox (V19).
+	boost_context?: "jukebox" | "livebattle" | "tinder";
+	// V19: consentimiento explícito para pagar un voto extra de jukebox con
+	// tokens cuando ya no quedan votos gratis.
+	paid_extra?: boolean;
 };
 
 // El coste del boost NUNCA lo decide el cliente.  Mapeamos el contexto
@@ -162,7 +167,17 @@ export async function handleMusicLoader(
 			);
 		}
 
-		return jsonResponse({ ok: true, tracks: data ?? [] }, { request });
+		// V19: votos gratis de jukebox que le quedan al usuario esta noche
+		// (para pintar "Te quedan N gratis" y el precio del voto extra).
+		const { data: remaining } = await supabase.rpc("jukebox_votes_remaining", {
+			p_tenant_id: tenant_id,
+			p_user_id: user_profile_id,
+		});
+
+		return jsonResponse(
+			{ ok: true, tracks: data ?? [], free_votes_left: Number(remaining ?? 0) },
+			{ request },
+		);
 	}
 
 	// Swipe deck — unplayed + not yet voted by this user
@@ -319,6 +334,10 @@ export async function handleMusicAction(
 		// p_boost_code.  Cierra la fuga "boost a 0 tokens".
 		p_tokens_spent: tokens_spent,
 		p_boost_code: boostCodeFromContext(body.boost_context),
+		// V19: contexto del voto (para el presupuesto del jukebox) + si el
+		// usuario acepta pagar el voto extra con tokens.
+		p_context: body.boost_context ?? null,
+		p_paid_extra: body.paid_extra === true,
 	});
 
 	if (error) {
@@ -381,6 +400,8 @@ export async function handleMusicAction(
 		vote_id?: string;
 		total_votes?: number;
 		balance?: number;
+		remaining_free?: number | null;
+		extra_cost?: number;
 	};
 
 	if (payload.ok === false) {
@@ -389,12 +410,17 @@ export async function handleMusicAction(
 				? 400
 				: payload.error === "already_voted"
 					? 409
-					: 400;
+					// no_free_votes: sin votos gratis → el cliente ofrece pagar.
+					: payload.error === "no_free_votes"
+						? 402
+						: 400;
 		return jsonResponse(
 			{
 				ok: false,
 				error: payload.error ?? "vote_failed",
 				balance: payload.balance,
+				extra_cost: payload.extra_cost,
+				remaining_free: payload.remaining_free,
 			},
 			{ status, request },
 		);
@@ -406,6 +432,7 @@ export async function handleMusicAction(
 			vote_id: payload.vote_id,
 			total_votes: payload.total_votes,
 			balance: payload.balance,
+			remaining_free: payload.remaining_free,
 		},
 		{ request },
 	);

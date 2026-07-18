@@ -94,6 +94,69 @@ export async function resolveTenantProfile(
 }
 
 /**
+ * Igual que `resolveTenantProfile`, pero CREA el perfil si aún no existe
+ * (JIT), igual que hace `GET /api/session` en el primer login con Google.
+ *
+ *   Por qué existe (V19 · fix "los check-ins no funcionan"):
+ *     El alta con Google OAuth crea la fila de `user_profiles` de forma
+ *     perezosa, y sólo lo hacía `/api/session`.  Tras el login, la app monta
+ *     `useSession()` y `usePendingCheckin()` a la vez → el POST /api/checkin
+ *     podía llegar ANTES de que el perfil existiera y devolvía
+ *     `profile_not_found`.  Como el hook es one-shot, el código pendiente se
+ *     borraba y el check-in del usuario se perdía para siempre.  Resultado:
+ *     ningún usuario nuevo lograba hacer check-in (justo todos los del piloto).
+ *
+ *   Ahora el check-in ya no depende de quién gane la carrera: si el perfil no
+ *   está, lo crea él mismo.  La carrera inversa (que `/api/session` lo cree a
+ *   la vez) se resuelve releyendo tras un insert fallido.
+ */
+export async function resolveOrCreateTenantProfile(
+	supabase: SupabaseClient,
+	slug: string,
+	authUserId: string,
+	email?: string | null,
+): Promise<ResolveProfileResult> {
+	const first = await resolveTenantProfile(supabase, slug, authUserId);
+	if (first.ok || first.error !== "profile_not_found") return first;
+
+	const { data: tenant } = await supabase
+		.from("tenants")
+		.select("id")
+		.eq("slug", slug)
+		.maybeSingle();
+	if (!tenant) return { ok: false, error: "unknown_tenant" };
+	const tenant_id = tenant.id as string;
+
+	const { data: created, error: insertErr } = await supabase
+		.from("user_profiles")
+		.insert({
+			tenant_id,
+			auth_user_id: authUserId,
+			email: email ?? `${authUserId}@anon.nightgraph`,
+			token_balance: 0,
+			lifetime_earned: 0,
+		})
+		.select("id")
+		.single();
+
+	if (insertErr || !created) {
+		// Probable carrera: `/api/session` lo creó primero → releemos.
+		const retry = await resolveTenantProfile(supabase, slug, authUserId);
+		if (retry.ok) return retry;
+		return { ok: false, error: "lookup_failed", detail: insertErr?.message };
+	}
+
+	// Bono de bienvenida (idempotente).  Si falla, NO bloqueamos el check-in.
+	try {
+		await supabase.rpc("grant_signup_bonus", { p_user_id: created.id });
+	} catch {
+		/* el check-in sigue adelante */
+	}
+
+	return resolveTenantProfile(supabase, slug, authUserId);
+}
+
+/**
  * Verify the caller has a given role for the tenant.  Returns true when
  * a matching row exists in tenant_staff with is_active = true.
  */
