@@ -274,7 +274,9 @@ export function Jukebox() {
 		}
 		setBusy(id);
 		const res = await castVote({
-			track_id: id,
+			// V20 · N-a-N: votamos por catálogo; el server materializa la fila del
+			// evento si este tema aún no la tenía.
+			global_track_id: id,
 			vote_type: "free",
 			boost_context: "jukebox",
 			paid_extra: payWithTokens,
@@ -326,7 +328,7 @@ export function Jukebox() {
 		}
 		setBusy(id);
 		const res = await castVote({
-			track_id: id,
+			global_track_id: id,
 			vote_type: "boost",
 			tokens_spent: BOOST_COST, // ignorado server-side; coste real desde la BD
 			boost_context: "jukebox",
