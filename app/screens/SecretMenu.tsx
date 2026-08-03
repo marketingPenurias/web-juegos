@@ -14,7 +14,12 @@ import { useGameState } from "../store/useGameState";
 import { useTenant } from "../lib/tenant";
 import { useCatalog, type CatalogProduct } from "../lib/useCatalog";
 import { useRewards } from "../lib/useRewards";
-import { TIERS, type TierCode } from "../lib/tier";
+import {
+	TIERS,
+	pointsToTier,
+	productVisibility,
+	type TierCode,
+} from "../lib/tier";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { cn } from "../lib/utils";
@@ -72,6 +77,10 @@ export function SecretMenu() {
 	const setScreen = useGameState((s) => s.setScreen);
 	const redeemTutorialSeen = useGameState((s) => s.redeemTutorialSeen);
 	const markRedeemTutorialSeen = useGameState((s) => s.markRedeemTutorialSeen);
+	// Tier real (server-authoritative) y puntos acumulados: deciden qué promos
+	// se ven, cuáles asoman como "próximamente" y cuánto falta para ellas.
+	const userTier = useGameState((s) => s.tier);
+	const lifetimeEarned = useGameState((s) => s.lifetimeEarned);
 
 	const { products, loading, error, reload } = useCatalog();
 	const { purchase, redeem, pending } = useRewards();
@@ -114,7 +123,16 @@ export function SecretMenu() {
 		const lockedTier: CatalogProduct[] = [];
 		const lockedDay: CatalogProduct[] = [];
 		for (const p of products) {
-			if (p.min_tier_required && p.min_tier_required !== "bronce") {
+			// V20 · F3 — Gating por el tier REAL del usuario (antes se asumía
+			// bronce para todos, así que un usuario Oro veía sus propias promos
+			// como "próximamente").  Ves lo tuyo + asomas al siguiente nivel;
+			// lo que está 2 escalones por encima ni se muestra.
+			const visibility = productVisibility(
+				p.min_tier_required as TierCode | null,
+				userTier,
+			);
+			if (visibility === "hidden") continue;
+			if (visibility === "locked_next") {
 				lockedTier.push(p);
 				continue;
 			}
@@ -131,7 +149,7 @@ export function SecretMenu() {
 			}
 		}
 		return { available, lockedTier, lockedDay };
-	}, [products, todayIsoDow]);
+	}, [products, todayIsoDow, userTier]);
 
 	const formatDaysLong = (days: number[] | null | undefined): string => {
 		if (!days || days.length === 0) return "";
@@ -368,7 +386,7 @@ export function SecretMenu() {
 							{t("menu.unlockSoon")}
 						</h2>
 						{groups.lockedTier.map((p) => (
-							<LockedCard key={p.id} product={p} />
+							<LockedCard key={p.id} product={p} lifetimeEarned={lifetimeEarned} />
 						))}
 					</section>
 				)}
@@ -575,12 +593,21 @@ function LockedDayCard({
 	);
 }
 
-function LockedCard({ product }: { product: CatalogProduct }) {
+function LockedCard({
+	product,
+	lifetimeEarned,
+}: {
+	product: CatalogProduct;
+	/** Puntos acumulados, para decir cuánto falta exactamente (V20 · F3). */
+	lifetimeEarned: number;
+}) {
 	const { t } = useTranslation();
 	const tier = (product.min_tier_required ?? "plata") as TierCode;
 	const meta = TIERS[tier];
 	const Icon = tierIcon(tier);
 	const isFree = Number(product.reference_fiat ?? 0) === 0;
+	// "Te faltan N" convierte el bloqueo en objetivo concreto en vez de un muro.
+	const missing = pointsToTier(lifetimeEarned, tier);
 
 	return (
 		<article
@@ -606,6 +633,15 @@ function LockedCard({ product }: { product: CatalogProduct }) {
 				</div>
 				<p className="text-[11px] text-zinc-500 mt-0.5">
 					{t("menu.unlockAt", { tier: meta.displayName })}
+					{missing > 0 && (
+						<span className="text-zinc-400 font-bold">
+							{" · "}
+							{t("menu.unlockMissing", {
+								n: missing,
+								defaultValue: "te faltan {{n}} pts",
+							})}
+						</span>
+					)}
 				</p>
 				<div className="flex flex-wrap items-center gap-2 mt-1.5">
 					<div className="inline-flex items-center gap-1 bg-zinc-950 px-2 py-0.5 rounded-full border border-zinc-800">

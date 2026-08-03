@@ -18,7 +18,7 @@ primero antes de retomar.
 | 0 | Grants de `service_role` | ✅ **hecho** (en producción) | no requiere |
 | 1 | Robustez: no tragarse errores | ✅ **hecho** | sí |
 | 2 | TV: visibilidad, QR de batalla, nube en Live | ✅ **hecho** | sí |
-| 3 | Promociones por tier real | ⬜ pendiente | sí |
+| 3 | Promociones por tier real | ✅ **hecho** | sí |
 | 4 | Modularización (clean code) | ⬜ pendiente | sí |
 | 5 | Refactor N-a-N `event_tracks` ↔ `global_tracks` | ⬜ pendiente | sí |
 
@@ -121,3 +121,42 @@ sólo temas con votos · fuera el que suena · los sonados vuelven si los re-vot
 ### Verificación
 `tsc` limpio · `npm run build` OK · RPC probada contra el evento del sábado:
 759 filas totales → 124 con votos → la tele sólo pinta esas.
+
+Prueba de la regla con 5 casos sintéticos (transacción + rollback, sin rastro):
+
+| Caso | Esperado | Resultado |
+|---|---|---|
+| sin votos | oculto | ✅ |
+| sonando ahora | oculto | ✅ |
+| sonada, sin re-voto | oculto | ✅ |
+| **sonada y RE-VOTADA** | **visible, votos intactos** | ✅ |
+| sonó hace 3 h | visible | ✅ |
+
+## FASE 3 — Promociones por tier real ✅
+
+**Problema.** `SecretMenu` daba por hecho que **todos son bronce**
+(`if (min_tier_required !== "bronce") → bloqueado`), decisión de piloto que se
+quedó fija: un usuario Oro veía sus propias promos como "próximamente". Además
+el store **no guardaba** el `tier` que `/api/session` ya calcula bien.
+
+**Regla de producto.** Ves lo tuyo y **asomas al siguiente nivel** como
+zanahoria; lo que está dos escalones por encima no se muestra (ruido):
+
+| Tu tier | Disponible | "Próximamente" | Oculto |
+|---|---|---|---|
+| Bronce | Bronce | Plata | Oro, Platino |
+| Oro | Bronce, Plata, Oro | Platino | — |
+
+**Cambios**
+- `lib/tier.ts`: `tierRank()`, `productVisibility()` y `pointsToTier()` —
+  funciones **puras**, testeables y reutilizables.
+- `store`: nuevo `tier` (server-authoritative, no se recalcula en cliente para
+  no desincronizarse de `tenant_tier_thresholds`); se resetea al desloguear.
+- `useSession`: propaga `data.tier`.
+- `SecretMenu`: usa `productVisibility(...)` con el tier real; `LockedCard`
+  muestra **"te faltan N pts"** — convierte el muro en objetivo concreto.
+- i18n `menu.unlockMissing`.
+
+> Los umbrales de BD (`0/500/1500/4000`) coinciden con los de `tier.ts`, así que
+> no hubo que migrar nada. La RPC `purchase_reward` sigue validando el tier
+> server-side: esto es sólo presentación.
