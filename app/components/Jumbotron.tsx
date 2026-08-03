@@ -165,22 +165,44 @@ export function Jumbotron({
 	// CHECK-IN → escanearlo registra la visita (venue_visits), da los tokens
 	// del check-in y sube la racha de fidelidad semanal.  `ref=QR-TV` se
 	// mantiene para no perder la atribución de captación.
-	const qrTarget = checkinCode
-		? `${venueUrl}/checkin?code=${encodeURIComponent(checkinCode)}&ref=QR-TV`
-		: `${venueUrl}/?ref=QR-TV`;
+	//
+	// V20: durante un DUELO el QR además lleva `next=live`, así el que escanea
+	// hace check-in Y aterriza directamente en la batalla (un solo escaneo sirve
+	// para fidelidad + conversión).  `ref` distingue ambos orígenes en analítica.
+	const buildQrTarget = (next?: "live"): string => {
+		const ref = next ? "QR-TV-BATALLA" : "QR-TV";
+		if (checkinCode) {
+			const p = new URLSearchParams({ code: checkinCode, ref });
+			if (next) p.set("next", next);
+			return `${venueUrl}/checkin?${p.toString()}`;
+		}
+		// Sin QR de entrada configurado: sólo captación (+ deep-link si procede).
+		const p = new URLSearchParams({ ref });
+		if (next) p.set("screen", next);
+		return `${venueUrl}/?${p.toString()}`;
+	};
+	const qrTarget = buildQrTarget();
 
-	// Ranking visible: fuera las que suenan ahora (is_played) Y las sonadas
-	// hace <2h (played_at).  El poll ya las excluye en la query, pero como el
-	// Realtime es la vía primaria y sus UPDATE traen is_played/played_at,
-	// filtramos también en cliente para que no se cuelen ni un frame.
+	// Ranking visible (V20).  MISMA regla que el RPC `tv_ranking` de la BD —
+	// aquí se replica porque el Realtime entrega filas sueltas y no queremos que
+	// se cuelen ni un frame antes del siguiente poll:
+	//   · sólo temas CON votos (fuera el relleno sin votar);
+	//   · fuera el que suena ahora;
+	//   · un tema ya sonado vuelve SÓLO si lo re-votan (last_vote_at > played_at)
+	//     o si han pasado 2h desde que sonó.
+	// Nada de esto borra datos: total_votes y track_votes quedan intactos, así
+	// que al reaparecer conserva TODOS sus votos.
 	const sorted = useMemo(() => {
 		const cutoff = Date.now() - HIDE_MS;
 		return [...tracks]
-			.filter(
-				(t) =>
-					!t.is_played &&
-					(!t.played_at || Date.parse(t.played_at) < cutoff),
-			)
+			.filter((t) => {
+				if (t.total_votes <= 0) return false;
+				if (t.is_played) return false;
+				if (!t.played_at) return true;
+				const playedAt = Date.parse(t.played_at);
+				const reVoted = t.last_vote_at && Date.parse(t.last_vote_at) > playedAt;
+				return Boolean(reVoted) || playedAt < cutoff;
+			})
 			.sort((a, b) => {
 				if (b.total_votes !== a.total_votes) return b.total_votes - a.total_votes;
 				// Desempate V18: a igualdad de votos, primero la que llegó ANTES a
@@ -360,23 +382,14 @@ export function Jumbotron({
 		if (!supabase || !eventId) return;
 		// Si el poll trae datos, estamos "en directo" aunque el WS no conecte.
 		setConnected(true);
-		const cutoff = new Date(Date.now() - HIDE_MS).toISOString();
 
-		// 1) Ranking (excluye la que suena y las sonadas hace <2h).  Incluye
-		//    played_at para que el filtro cliente de `sorted` sea consistente.
-		const { data: top } = await supabase
-			.from("event_tracks")
-			.select("id, title, artist, cover_image_url, total_votes, is_played, played_at, last_vote_at")
-			.eq("event_id", eventId)
-			.eq("is_played", false)
-			.or(`played_at.is.null,played_at.lt.${cutoff}`)
-			.order("total_votes", { ascending: false })
-			// Desempate V18: a igualdad de votos gana la que llegó ANTES a ese
-			// número (last_vote_at más antiguo).  `nullsFirst` deja arriba las
-			// que aún no tienen sello (empate a 0).
-			.order("last_vote_at", { ascending: true, nullsFirst: true })
-			.order("title", { ascending: true })
-			.limit(MAX_ROWS + 2);
+		// 1) Ranking — RPC `tv_ranking`: la regla de visibilidad vive UNA sola vez
+		//    (en SQL) y la comparte servidor y TV.  Hace falta porque compara dos
+		//    columnas (last_vote_at > played_at) y PostgREST no puede expresarlo.
+		const { data: top } = await supabase.rpc("tv_ranking", {
+			p_event_id: eventId,
+			p_limit: MAX_ROWS + 2,
+		});
 		if (top) setTracks(top as Track[]);
 
 		// 2) Canción actual (para el panel "Canción actual" del split view).
@@ -592,11 +605,32 @@ export function Jumbotron({
 					</div>
 					<div className="flex-1 grid grid-cols-[1fr_auto_1fr] gap-6 items-center">
 						<DuelSide track={battle.a} pct={aPct} side="a" origin="left" barRef={aBarRef} leading={aVotes >= bVotes} />
-						<div className="jb-duel-enter flex flex-col items-center gap-2">
+						<div className="jb-duel-enter flex flex-col items-center gap-3">
 							<div className="w-20 h-20 rounded-full bg-black border-2 border-(--jumbo-accent) flex items-center justify-center shadow-[0_0_40px_rgba(255,215,0,0.5)]">
 								<Swords className="w-10 h-10 text-(--jumbo-accent)" aria-hidden="true" />
 							</div>
 							<span className="text-2xl font-black italic text-(--jumbo-accent)">VS</span>
+							{/* V20: QR del DUELO — escanear = check-in + entrar directo a
+							    la batalla (`next=live`).  Antes el duelo no tenía QR y se
+							    perdía el momento de máxima atención de la sala. */}
+							{showQr && (
+								<div className="mt-2 flex flex-col items-center gap-2 rounded-2xl border border-(--jumbo-primary)/40 bg-black/50 backdrop-blur-md p-4">
+									<div className="w-36 h-36 rounded-xl bg-black/40 border border-white/10 p-2 flex items-center justify-center">
+										<QRCodeSVG
+											value={buildQrTarget("live")}
+											level="M"
+											marginSize={0}
+											fgColor={tenant.theme.primary ?? "#ffffff"}
+											bgColor="transparent"
+											className="w-full h-full"
+											aria-label="QR para votar en la batalla"
+										/>
+									</div>
+									<p className="text-sm font-black italic tracking-tight text-white text-center leading-tight">
+										Escanea y vota
+									</p>
+								</div>
+							)}
 						</div>
 						<DuelSide track={battle.b} pct={100 - aPct} side="b" origin="right" barRef={bBarRef} leading={bVotes > aVotes} />
 					</div>
@@ -895,7 +929,12 @@ function EmptyState({ reason }: { reason: "no_active_event" | "no_tracks" }) {
 		<div className="h-full min-h-[400px] flex flex-col items-center justify-center text-center gap-4">
 			<Music2 className="w-16 h-16 text-zinc-700" aria-hidden="true" />
 			<p className="text-2xl font-black italic tracking-tight text-zinc-400">
-				{reason === "no_active_event" ? "No hay evento activo esta noche" : "Aún no hay canciones en cola"}
+				{reason === "no_active_event"
+					? "No hay evento activo esta noche"
+					: /* V20: el ranking sólo lista temas VOTADOS, así que al empezar la
+					     noche está vacío a propósito → convertimos el hueco en llamada
+					     a la acción. */
+						"Aún no hay votos · escanea el QR y elige la primera"}
 			</p>
 		</div>
 	);

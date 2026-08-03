@@ -119,18 +119,23 @@ export async function handleTvAction(
 		showNowPlaying: rawBackdrop?.showNowPlaying === true, // default false
 	};
 
-	// V17: canción sonando (is_played=true) — para el panel "Canción actual"
-	// del jumbotron partido.  Y ventana de ocultación: una pista NO aparece en
-	// el ranking si suena ahora o si sonó en las últimas 2h (played_at).
-	const HIDE_MS = 2 * 60 * 60 * 1000;
-	const playedCutoffIso = new Date(Date.now() - HIDE_MS).toISOString();
+	// V20 · FASE 1 — Nunca más tragarse un error.  Antes cada query hacía
+	// `const { data } = await …` y descartaba el error, así que un fallo de
+	// permisos se veía como "no hay datos" (así estuvo semanas roto el QR de
+	// check-in).  Ahora acumulamos avisos y los devolvemos al cliente.
+	const warnings: string[] = [];
+	const warn = (scope: string, message?: string) => {
+		const msg = `[api.tv] ${scope}: ${message ?? "unknown error"}`;
+		console.warn(msg);
+		warnings.push(scope);
+	};
 
 	// V18: código del QR de CHECK-IN de entrada.  El QR del jumbotron deja de
 	// ser sólo atribución y pasa a registrar la visita (venue_visits) → de ahí
 	// salen el KPI de check-ins y la racha de fidelidad semanal.  Se resuelve
 	// por tenant (nada hardcodeado); si el local no tiene QR de entrada, el
 	// cliente cae al enlace de captación de siempre.
-	const { data: qrEntrada } = await supabase
+	const { data: qrEntrada, error: qrErr } = await supabase
 		.from("qr_strategies")
 		.select("code")
 		.eq("tenant_id", tenant_id)
@@ -138,6 +143,7 @@ export async function handleTvAction(
 		.eq("is_active", true)
 		.limit(1)
 		.maybeSingle();
+	if (qrErr) warn("qr_strategies", qrErr.message);
 	const checkin_code = (qrEntrada?.code as string | undefined) ?? null;
 
 	let tracks: TvTrack[] = [];
@@ -145,22 +151,20 @@ export async function handleTvAction(
 	let battle: { id: string; ends_at: string; a: TvTrack; b: TvTrack } | null = null;
 
 	if (event_id) {
-		const { data } = await supabase
-			.from("event_tracks")
-			.select("id, title, artist, cover_image_url, total_votes, is_played")
-			.eq("tenant_id", tenant_id)
-			.eq("event_id", event_id)
-			.eq("is_played", false)
-			// played_at nulo (nunca sonó) o sonó hace más de 2h → visible.
-			.or(`played_at.is.null,played_at.lt.${playedCutoffIso}`)
-			.order("total_votes", { ascending: false })
-			.order("title", { ascending: true })
-			.limit(10);
+		// V20 · Ranking visible = RPC `tv_ranking` (regla ÚNICA, ver migración
+		// 25): sólo temas con votos, fuera el que suena, y los ya sonados vuelven
+		// sólo si los re-votan o pasadas 2h.  Va en SQL porque compara dos
+		// columnas (last_vote_at > played_at), algo que PostgREST no expresa.
+		const { data, error: tracksErr } = await supabase.rpc("tv_ranking", {
+			p_event_id: event_id,
+			p_limit: 10,
+		});
+		if (tracksErr) warn("tv_ranking", tracksErr.message);
 		tracks = (data ?? []) as TvTrack[];
 
 		// Canción actual (para el split view).  spotify_id incluido para el
 		// enlace, aunque en la TV normalmente no se usa.
-		const { data: np } = await supabase
+		const { data: np, error: npErr } = await supabase
 			.from("event_tracks")
 			.select("id, title, artist, cover_image_url, total_votes, is_played")
 			.eq("tenant_id", tenant_id)
@@ -168,11 +172,12 @@ export async function handleTvAction(
 			.eq("is_played", true)
 			.limit(1)
 			.maybeSingle();
+		if (npErr) warn("now_playing", npErr.message);
 		nowPlaying = (np as TvTrack) ?? null;
 
 		// Batalla viva (si la hay) → resolvemos las dos canciones para arrancar
 		// directamente en modo DUELO sin esperar al WebSocket.
-		const { data: b } = await supabase
+		const { data: b, error: bErr } = await supabase
 			.from("live_battles")
 			.select("id, track_a, track_b, ends_at")
 			.eq("tenant_id", tenant_id)
@@ -181,6 +186,7 @@ export async function handleTvAction(
 			.order("started_at", { ascending: false })
 			.limit(1)
 			.maybeSingle();
+		if (bErr) warn("live_battles", bErr.message);
 
 		if (b?.id) {
 			const { data: bt } = await supabase
@@ -197,7 +203,13 @@ export async function handleTvAction(
 	}
 
 	return jsonResponse(
-		{ ok: true, tenant_id, event_id, tracks, nowPlaying, battle, backdrop, checkin_code },
+		{
+			ok: true, tenant_id, event_id, tracks, nowPlaying, battle, backdrop,
+			checkin_code,
+			// Vacío = todo bien.  Con contenido, la TV puede avisar en pantalla en
+			// vez de fingir que "no hay datos" (F1).
+			warnings,
+		},
 		{ request },
 	);
 }

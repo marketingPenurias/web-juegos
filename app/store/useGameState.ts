@@ -91,6 +91,12 @@ type GameState = {
 	// ── Estado de canje activo (pantalla camarero) ──────────────────────
 	activeRedemption: ActiveRedemption | null;
 
+	// ¿Hay una batalla de temas EN VIVO ahora mismo?  Lo mantiene
+	// `useActiveBattle` (un único canal Realtime + fallback) y lo consumen el
+	// BottomNav y el lanzador de juegos para el aviso flotante.  Efímero: no se
+	// persiste, siempre se recalcula al arrancar.
+	battleActive: boolean;
+
 	// ── Misiones/economía dinámica (servidor authoritative) ─────────────
 	dailyActivity: DailyActivity;
 	rewardRules: RewardRule[];
@@ -107,6 +113,7 @@ type GameState = {
 	addTokens: (n: number, labelKey?: string) => void;
 	setFriends: (friends: string[]) => void;
 	setBirthDate: (d: string) => void;
+	setBattleActive: (active: boolean) => void;
 	logout: () => void;
 
 	// ── Acciones de sync con backend ───────────────────────────────────
@@ -148,6 +155,7 @@ export const useGameState = create<GameState>()(
 			birthDate: null,
 			sessionLoaded: false,
 			activeRedemption: null,
+			battleActive: false,
 			dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 			rewardRules: [],
 			isNewUser: false,
@@ -164,6 +172,11 @@ export const useGameState = create<GameState>()(
 
 			setBirthDate: (d) => set({ birthDate: d }),
 
+			setBattleActive: (active) =>
+				// Guarda sólo si cambia: evita re-renderizar el nav en cada tick del
+				// poll de la batalla.
+				set((state) => (state.battleActive === active ? state : { battleActive: active })),
+
 			logout: () =>
 				set({
 					currentScreen: "onboarding",
@@ -177,6 +190,7 @@ export const useGameState = create<GameState>()(
 					// Al desloguear, la próxima sesión debe re-resolverse antes de
 					// poder mostrar el gate de cumpleaños.
 					sessionLoaded: false,
+					battleActive: false,
 					dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 					rewardRules: [],
 					// Reset para que el SIGUIENTE usuario en este móvil (otro JIT)

@@ -59,6 +59,8 @@ const GAMES: Game[] = [
 export function GameLauncherCard() {
 	const { t } = useTranslation();
 	const setScreen = useGameState((s) => s.setScreen);
+	// V20: mismo aviso de duelo en vivo que el BottomNav, sobre la card de Live.
+	const battleActive = useGameState((s) => s.battleActive);
 
 	return (
 		<section aria-label={t("hub.gamesInRoom")} className="hub-card">
@@ -84,6 +86,12 @@ export function GameLauncherCard() {
 						)}
 					>
 						<div className="absolute -top-6 -right-6 w-24 h-24 bg-white/5 rounded-full blur-2xl pointer-events-none" />
+						{id === "live" && battleActive && (
+							<span className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full bg-linear-to-r from-rose-500 to-red-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-white shadow-[0_0_14px_rgba(244,63,94,0.7)]">
+								<span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+								{t("nav.battleLive", "¡Batalla!")}
+							</span>
+						)}
 						<Icon
 							className="w-7 h-7 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.45)]"
 							aria-hidden="true"
