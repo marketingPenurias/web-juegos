@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import type { TierCode } from "../lib/tier";
 
 export type Screen =
 	| "onboarding"
@@ -83,6 +84,10 @@ type GameState = {
 	activeEventName: string | null;
 	// Fecha de nacimiento (V1.7).  null = aún no capturada → gate de onboarding.
 	birthDate: string | null;
+	// Tier de fidelidad calculado por el SERVIDOR (`get_user_tier`, umbrales de
+	// `tenant_tier_thresholds`).  Se guarda tal cual para no recalcularlo en
+	// cliente con constantes que podrían desincronizarse (V20 · F3).
+	tier: TierCode;
 	// ¿Se ha resuelto ya /api/session al menos una vez?  El gate de cumpleaños
 	// SÓLO puede mostrarse cuando esto es true — así no parpadea en cada
 	// recarga mientras `birthDate` (no persistido) aún no ha llegado del server.
@@ -128,6 +133,7 @@ type GameState = {
 		streak?: number;
 		isNewUser?: boolean;
 		birthDate?: string | null;
+		tier?: TierCode;
 	}) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
 	setStreak: (streak: number) => void;
@@ -153,6 +159,7 @@ export const useGameState = create<GameState>()(
 			activeEventId: null,
 			activeEventName: null,
 			birthDate: null,
+			tier: "bronce",
 			sessionLoaded: false,
 			activeRedemption: null,
 			battleActive: false,
@@ -187,6 +194,7 @@ export const useGameState = create<GameState>()(
 					activeEventId: null,
 					activeEventName: null,
 					birthDate: null,
+					tier: "bronce",
 					// Al desloguear, la próxima sesión debe re-resolverse antes de
 					// poder mostrar el gate de cumpleaños.
 					sessionLoaded: false,
@@ -212,6 +220,7 @@ export const useGameState = create<GameState>()(
 				streak,
 				isNewUser,
 				birthDate,
+				tier,
 			}) =>
 				set((state) => ({
 					userProfileId,
@@ -223,6 +232,7 @@ export const useGameState = create<GameState>()(
 					// puede decidir con datos reales (evita el parpadeo al recargar).
 					sessionLoaded: true,
 					birthDate: birthDate !== undefined ? birthDate : state.birthDate,
+					tier: tier ?? state.tier,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
 					streak: typeof streak === "number" ? streak : state.streak,

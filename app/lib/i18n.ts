@@ -123,6 +123,7 @@ const resources = {
 				unlockSoon: "Sube de nivel para desbloquear",
 				comingSoon: "Próximamente",
 				unlockAt: "Desbloquea en {{tier}}",
+				unlockMissing: "te faltan {{n}} pts",
 				loading: "Cargando catálogo…",
 				errLoad: "No se pudo cargar el catálogo",
 				retry: "Reintentar",
