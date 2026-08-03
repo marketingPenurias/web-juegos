@@ -4,6 +4,7 @@ import { CheckCircle2, Coins, Flame, MapPin, XCircle, Loader2 } from "lucide-rea
 import { gsap, useGSAP } from "../lib/gsap";
 import { getAccessToken } from "../lib/supabase.client";
 import { PENDING_CHECKIN_KEY } from "../lib/usePendingCheckin";
+import { rememberScreen } from "../lib/useDeepLinkScreen";
 
 /**
  * /checkin?code=POCHA-XXXX — landing del escaneo de QR físico.
@@ -50,6 +51,10 @@ export default function Checkin() {
 		async function run() {
 			const params = new URLSearchParams(window.location.search);
 			const code = (params.get("code") ?? "").trim();
+			// V20: el QR del DUELO trae `next=live` → tras el check-in la app se
+			// abre directamente en la batalla.  Se guarda ya (antes incluso del
+			// login) para que sobreviva al redirect de Google OAuth.
+			rememberScreen(params.get("next"));
 			if (!code) {
 				setState({ phase: "no_code" });
 				return;
