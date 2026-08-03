@@ -21,7 +21,12 @@ import type { TrackVoteType } from "../types/database";
 const ENDPOINT = "/api/music";
 
 export type MusicTrack = {
+	/** V20 · N-a-N: en Jukebox/Tinder es el id del CATÁLOGO (`global_tracks`),
+	 *  estable aunque el tema aún no tenga fila en el evento. */
 	id: string;
+	global_track_id?: string;
+	/** Fila del evento; null hasta que alguien vota el tema (creación lazy). */
+	event_track_id?: string | null;
 	spotify_id?: string;
 	title: string;
 	artist: string;
@@ -152,7 +157,10 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 
 	const castVote = useCallback(
 		async (params: {
-			track_id: string;
+			/** Fila del evento (la Batalla vota así: el DJ enfrenta filas reales). */
+			track_id?: string;
+			/** Catálogo (Jukebox/Tinder): el server crea la fila si hace falta. */
+			global_track_id?: string;
 			vote_type?: TrackVoteType;
 			tokens_spent?: number;
 			boost_context?: "jukebox" | "livebattle" | "tinder";
@@ -172,6 +180,7 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 					body: JSON.stringify({
 						event_id: eventId,
 						track_id: params.track_id,
+						global_track_id: params.global_track_id,
 						vote_type: params.vote_type ?? "free",
 						// El server ignora este coste para boost (lo resuelve de
 						// la BD); se envía sólo por compatibilidad.
@@ -181,8 +190,11 @@ export function useMusic(eventId: string | null, mode: MusicMode = "swipe") {
 						tenant_slug: tenant.slug,
 					}),
 				});
-				// Optimistically drop the voted track from the deck.
-				setDeck((d) => d.filter((t) => t.id !== params.track_id));
+				// Optimistically drop the voted track from the deck.  El id del deck
+				// es el del catálogo en Jukebox/Tinder y el de la fila en la Batalla,
+				// así que comparamos contra el que se haya usado para votar.
+				const votedId = params.global_track_id ?? params.track_id;
+				setDeck((d) => d.filter((t) => t.id !== votedId));
 				if (typeof data.remaining_free === "number") {
 					setFreeVotesLeft(data.remaining_free);
 				}

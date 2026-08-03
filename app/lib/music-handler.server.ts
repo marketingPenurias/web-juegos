@@ -22,6 +22,10 @@ import type { TrackVoteType } from "../types/database";
 type VoteBody = {
 	event_id?: string;
 	track_id?: string;
+	/** V20 · N-a-N: votar por catálogo; el server materializa la fila del evento
+	 *  si aún no existe.  El Jukebox y el Tinder mandan esto; la Batalla sigue
+	 *  mandando `track_id` porque el DJ enfrenta filas ya existentes. */
+	global_track_id?: string;
 	vote_type?: TrackVoteType;
 	tokens_spent?: number; // IGNORADO server-side para boost (compat)
 	tenant_slug?: string;
@@ -43,6 +47,43 @@ function boostCodeFromContext(ctx: unknown): string {
 
 function isValidVoteType(v: unknown): v is TrackVoteType {
 	return v === "free" || v === "boost";
+}
+
+/** Fila cruda de la RPC `event_catalog`. */
+type CatalogRow = {
+	global_track_id: string;
+	event_track_id: string | null;
+	spotify_id: string;
+	title: string;
+	artist: string;
+	cover_image_url: string | null;
+	genre: string | null;
+	total_votes: number;
+	is_played: boolean;
+};
+
+/**
+ * Normaliza el catálogo para el cliente (V20 · N-a-N).
+ *
+ *   `id` pasa a ser el id del CATÁLOGO (`global_tracks.id`), no el de la fila
+ *   del evento: con creación lazy, un tema que nadie ha votado todavía no tiene
+ *   fila en `event_tracks`, así que el id del catálogo es el único estable para
+ *   keys de React, sets de "ya pedida" y para votar.  `event_track_id` viaja
+ *   aparte por si hace falta (queda null hasta el primer voto).
+ */
+function toClientTracks(rows: unknown): Array<Record<string, unknown>> {
+	return ((rows ?? []) as CatalogRow[]).map((r) => ({
+		id: r.global_track_id,
+		global_track_id: r.global_track_id,
+		event_track_id: r.event_track_id,
+		spotify_id: r.spotify_id,
+		title: r.title,
+		artist: r.artist,
+		cover_image_url: r.cover_image_url,
+		genre: r.genre,
+		total_votes: r.total_votes,
+		is_played: r.is_played,
+	}));
 }
 
 export async function handleMusicLoader(
@@ -147,17 +188,13 @@ export async function handleMusicLoader(
 	// vista por defecto y filtra sobre el 100% al buscar.  Cap defensivo a
 	// 1000 para no escupir catálogos absurdos al móvil.
 	if (mode === "catalog") {
-		const { data, error } = await supabase
-			.from("event_tracks")
-			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played, genre")
-			.eq("tenant_id", tenant_id)
-			.eq("event_id", event_id)
-			.eq("is_played", false)
-			.order("total_votes", { ascending: false })
-			// Desempate V18: a igualdad de votos, primero la votada hace más rato.
-			.order("last_vote_at", { ascending: true, nullsFirst: true })
-			.order("title", { ascending: true })
-			.limit(1000);
+		// V20 · N-a-N: el catálogo sale de `global_tracks` con LEFT JOIN al estado
+		// de este evento, así el Jukebox lo ve entero aunque todavía no exista
+		// ninguna fila en `event_tracks` (creación lazy al primer voto).
+		const { data, error } = await supabase.rpc("event_catalog", {
+			p_event_id: event_id,
+			p_limit: 1000,
+		});
 
 		if (error) {
 			console.warn("[api.music] catalog lookup failed", error.message);
@@ -175,44 +212,23 @@ export async function handleMusicLoader(
 		});
 
 		return jsonResponse(
-			{ ok: true, tracks: data ?? [], free_votes_left: Number(remaining ?? 0) },
+			{
+				ok: true,
+				tracks: toClientTracks(data),
+				free_votes_left: Number(remaining ?? 0),
+			},
 			{ request },
 		);
 	}
 
-	// Swipe deck — unplayed + not yet voted by this user
-	const { data: votedRows, error: votedErr } = await supabase
-		.from("track_votes")
-		.select("track_id")
-		.eq("event_id", event_id)
-		.eq("user_id", user_profile_id);
-
-	if (votedErr) {
-		console.warn("[api.music] votes lookup failed", votedErr.message);
-		return jsonResponse(
-			{ ok: false, error: "lookup_failed" },
-			{ status: 500, request },
-		);
-	}
-
-	const votedIds = (votedRows ?? []).map((r) => r.track_id as string);
-
-	let query = supabase
-		.from("event_tracks")
-		.select(
-			"id, spotify_id, title, artist, cover_image_url, total_votes, is_played",
-		)
-		.eq("tenant_id", tenant_id)
-		.eq("event_id", event_id)
-		.eq("is_played", false);
-
-	if (votedIds.length > 0) {
-		query = query.not("id", "in", `(${votedIds.join(",")})`);
-	}
-
-	const { data: tracks, error: tracksErr } = await query
-		.order("total_votes", { ascending: false })
-		.limit(40);
+	// Swipe deck (Tinder) — catálogo del local menos lo que este usuario ya votó.
+	// V20 · N-a-N: antes salía de `event_tracks`, que con creación lazy estaría
+	// vacío en un evento nuevo y dejaría el Tinder SIN CARTAS.
+	const { data: tracks, error: tracksErr } = await supabase.rpc("event_catalog", {
+		p_event_id: event_id,
+		p_limit: 40,
+		p_exclude_voted_by: user_profile_id,
+	});
 
 	if (tracksErr) {
 		console.warn("[api.music] tracks lookup failed", tracksErr.message);
@@ -222,8 +238,9 @@ export async function handleMusicLoader(
 		);
 	}
 
+	const deck = toClientTracks(tracks);
 	return jsonResponse(
-		{ ok: true, tracks: tracks ?? [], voted_count: votedIds.length },
+		{ ok: true, tracks: deck, voted_count: 0 },
 		{ request },
 	);
 }
@@ -260,7 +277,7 @@ export async function handleMusicAction(
 		);
 	}
 
-	if (!body.event_id || !body.track_id) {
+	if (!body.event_id || (!body.track_id && !body.global_track_id)) {
 		return jsonResponse(
 			{ ok: false, error: "event_and_track_required" },
 			{ status: 400, request },
@@ -327,7 +344,8 @@ export async function handleMusicAction(
 		p_tenant_id: tenant_id,
 		p_user_id: user_profile_id,
 		p_event_id: body.event_id,
-		p_track_id: body.track_id,
+		p_track_id: body.track_id ?? null,
+		p_global_track_id: body.global_track_id ?? null,
 		p_vote_type: vote_type,
 		// p_tokens_spent se conserva por compat pero el RPC lo IGNORA para
 		// boost: el coste real se resuelve de tenant_token_rewards vía
