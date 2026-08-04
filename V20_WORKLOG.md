@@ -22,8 +22,8 @@ primero antes de retomar.
 | 4 | Modularización (clean code) | 🟡 **parcial** (ver nota) | sí |
 | 5 | Refactor N-a-N `event_tracks` ↔ `global_tracks` | ✅ **hecho** | sí |
 
-> ⚠️ **Nada de F1–F5 está desplegado todavía.** La BD sí (fases 0/2/5 son
-> migraciones, ya vivas). El código espera al deploy — ver
+> ✅ **Desplegado en producción el 04/08** (BD + código). Ver
+> [validación post-deploy](#validación-post-deploy--0408-1810) y el
 > [plan de pruebas](#plan-de-pruebas-tras-el-deploy).
 
 ## Decisiones tomadas (no volver a discutir)
