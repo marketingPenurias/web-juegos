@@ -202,3 +202,6 @@ dist
 ### React Router ###
 .react-router/
 /build/
+
+### graphify (grafo local regenerable; contiene rutas de máquina) ###
+graphify-out/

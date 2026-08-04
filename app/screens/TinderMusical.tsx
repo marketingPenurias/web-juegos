@@ -191,9 +191,12 @@ export function TinderMusical() {
 				if (dir === "like") {
 					markDaily("tinder_swipe"); // misión reactiva inmediata
 					void castVote({
-						track_id: song.id,
+						// V20 · N-a-N: el deck viene del catálogo, así que `song.id` es
+						// el id de `global_tracks`; el server crea la fila del evento.
+						global_track_id: song.id,
 						vote_type: "free",
 						tokens_spent: 0,
+						boost_context: "tinder",
 					}).then((res) => {
 						if (!res.ok && res.error !== "already_voted") {
 							setTone("warning");

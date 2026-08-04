@@ -88,6 +88,44 @@ export function nextTier(code: TierCode): TierMeta | null {
 	return TIERS[TIER_ORDER[idx + 1]];
 }
 
+/** Posición del tier en la escalera (bronce=0 … platino=3). */
+export function tierRank(code: TierCode | null | undefined): number {
+	const idx = code ? TIER_ORDER.indexOf(code) : -1;
+	return idx < 0 ? 0 : idx; // sin requisito = bronce (accesible a todos)
+}
+
+/**
+ * Visibilidad de un producto según el tier del usuario (V20 · F3).
+ *
+ *   Regla de producto: ves lo tuyo y **asomas al siguiente nivel** como
+ *   zanahoria; lo que está dos escalones por encima ni se muestra (ruido).
+ *
+ *     bronce → ve bronce (disponible) + plata ("próximamente")
+ *     oro    → ve bronce/plata/oro (disponible) + platino ("próximamente")
+ *
+ *   Pura y sin dependencias: fácil de testear y de reutilizar en otras vistas.
+ */
+export type ProductVisibility = "available" | "locked_next" | "hidden";
+
+export function productVisibility(
+	productTier: TierCode | null | undefined,
+	userTier: TierCode,
+): ProductVisibility {
+	const p = tierRank(productTier);
+	const u = tierRank(userTier);
+	if (p <= u) return "available";
+	if (p === u + 1) return "locked_next";
+	return "hidden";
+}
+
+/**
+ * Puntos (lifetime_earned) que faltan para alcanzar un tier.  0 si ya se tiene.
+ * Sirve para el "te faltan N" de las tarjetas bloqueadas.
+ */
+export function pointsToTier(lifetime: number, target: TierCode): number {
+	return Math.max(0, TIERS[target].minLifetime - Math.max(0, lifetime || 0));
+}
+
 /**
  * Progreso 0..1 dentro del tier actual hacia el siguiente.  Devuelve 1
  * si ya está en el tier máximo.

@@ -12,6 +12,7 @@ import {
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useMusic, type MusicTrack } from "../lib/useMusic";
+import { searchTracks } from "../lib/search";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { cn } from "../lib/utils";
@@ -36,43 +37,6 @@ import { cn } from "../lib/utils";
 const DEFAULT_BOOST_COST = 50;
 // V19: coste en tokens de un voto extra (cuando se agotan los 5 gratis).
 const DEFAULT_EXTRA_COST = 15;
-
-/**
- * Normaliza para buscar: sin acentos/diacríticos, minúsculas, sin puntuación.
- * Así "regueton" encuentra "Reguetón" y "cafune" encuentra "Cruz Cafuné".
- */
-function normalize(s: string): string {
-	return s
-		.normalize("NFD")
-		.replace(/[\u0300-\u036f]/g, "") // fuera tildes/diéresis
-		.toLowerCase()
-		.replace(/[^a-z0-9\s]/g, " ") // fuera puntuación (ñ ya normalizada a n)
-		.replace(/\s+/g, " ")
-		.trim();
-}
-
-/**
- * Búsqueda TOLERANTE (V18): ya no hace falta el nombre exacto.
- *   · Ignora tildes, mayúsculas y puntuación.
- *   · Multi-palabra en CUALQUIER orden y sobre título + artista:
- *     "quevedo graciosa" encuentra "LA GRACIOSA — Quevedo, Elvis Crespo".
- *   · Ordena por relevancia: primero lo que empieza por lo escrito.
- * Devuelve null si la canción no matchea; si matchea, su score (menor = mejor).
- */
-function matchScore(song: { title: string; artist: string }, tokens: string[]): number | null {
-	const title = normalize(song.title);
-	const artist = normalize(song.artist);
-	const hay = `${title} ${artist}`;
-	let score = 0;
-	for (const tk of tokens) {
-		if (!hay.includes(tk)) return null; // todos los términos deben aparecer
-		if (title.startsWith(tk)) score += 0;
-		else if (title.includes(tk)) score += 1;
-		else if (artist.startsWith(tk)) score += 2;
-		else score += 3;
-	}
-	return score;
-}
 
 export function Jukebox() {
 	const { t } = useTranslation();
@@ -187,14 +151,8 @@ export function Jukebox() {
 	// Búsqueda TOLERANTE sobre el 100% del pool (no sólo las 50 visibles).
 	// Cap a 50 resultados renderizados para no reventar el DOM.
 	const filtered = useMemo(() => {
-		const tokens = normalize(query).split(" ").filter(Boolean);
-		if (tokens.length === 0) return randomFifty;
-		return pool
-			.map((s) => ({ s, score: matchScore(s, tokens) }))
-			.filter((r): r is { s: MusicTrack; score: number } => r.score !== null)
-			.sort((a, b) => a.score - b.score || a.s.title.localeCompare(b.s.title))
-			.slice(0, 50)
-			.map((r) => r.s);
+		if (!query.trim()) return randomFifty;
+		return searchTracks(pool, query, 50);
 	}, [pool, randomFifty, query]);
 
 	const flashRow = (id: string, color: "amber" | "cyan") => {
@@ -274,7 +232,9 @@ export function Jukebox() {
 		}
 		setBusy(id);
 		const res = await castVote({
-			track_id: id,
+			// V20 · N-a-N: votamos por catálogo; el server materializa la fila del
+			// evento si este tema aún no la tenía.
+			global_track_id: id,
 			vote_type: "free",
 			boost_context: "jukebox",
 			paid_extra: payWithTokens,
@@ -326,7 +286,7 @@ export function Jukebox() {
 		}
 		setBusy(id);
 		const res = await castVote({
-			track_id: id,
+			global_track_id: id,
 			vote_type: "boost",
 			tokens_spent: BOOST_COST, // ignorado server-side; coste real desde la BD
 			boost_context: "jukebox",

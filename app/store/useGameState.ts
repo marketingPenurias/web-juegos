@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import type { TierCode } from "../lib/tier";
 
 export type Screen =
 	| "onboarding"
@@ -83,6 +84,10 @@ type GameState = {
 	activeEventName: string | null;
 	// Fecha de nacimiento (V1.7).  null = aún no capturada → gate de onboarding.
 	birthDate: string | null;
+	// Tier de fidelidad calculado por el SERVIDOR (`get_user_tier`, umbrales de
+	// `tenant_tier_thresholds`).  Se guarda tal cual para no recalcularlo en
+	// cliente con constantes que podrían desincronizarse (V20 · F3).
+	tier: TierCode;
 	// ¿Se ha resuelto ya /api/session al menos una vez?  El gate de cumpleaños
 	// SÓLO puede mostrarse cuando esto es true — así no parpadea en cada
 	// recarga mientras `birthDate` (no persistido) aún no ha llegado del server.
@@ -90,6 +95,12 @@ type GameState = {
 
 	// ── Estado de canje activo (pantalla camarero) ──────────────────────
 	activeRedemption: ActiveRedemption | null;
+
+	// ¿Hay una batalla de temas EN VIVO ahora mismo?  Lo mantiene
+	// `useActiveBattle` (un único canal Realtime + fallback) y lo consumen el
+	// BottomNav y el lanzador de juegos para el aviso flotante.  Efímero: no se
+	// persiste, siempre se recalcula al arrancar.
+	battleActive: boolean;
 
 	// ── Misiones/economía dinámica (servidor authoritative) ─────────────
 	dailyActivity: DailyActivity;
@@ -107,6 +118,7 @@ type GameState = {
 	addTokens: (n: number, labelKey?: string) => void;
 	setFriends: (friends: string[]) => void;
 	setBirthDate: (d: string) => void;
+	setBattleActive: (active: boolean) => void;
 	logout: () => void;
 
 	// ── Acciones de sync con backend ───────────────────────────────────
@@ -121,6 +133,7 @@ type GameState = {
 		streak?: number;
 		isNewUser?: boolean;
 		birthDate?: string | null;
+		tier?: TierCode;
 	}) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
 	setStreak: (streak: number) => void;
@@ -146,8 +159,10 @@ export const useGameState = create<GameState>()(
 			activeEventId: null,
 			activeEventName: null,
 			birthDate: null,
+			tier: "bronce",
 			sessionLoaded: false,
 			activeRedemption: null,
+			battleActive: false,
 			dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 			rewardRules: [],
 			isNewUser: false,
@@ -164,6 +179,11 @@ export const useGameState = create<GameState>()(
 
 			setBirthDate: (d) => set({ birthDate: d }),
 
+			setBattleActive: (active) =>
+				// Guarda sólo si cambia: evita re-renderizar el nav en cada tick del
+				// poll de la batalla.
+				set((state) => (state.battleActive === active ? state : { battleActive: active })),
+
 			logout: () =>
 				set({
 					currentScreen: "onboarding",
@@ -174,9 +194,11 @@ export const useGameState = create<GameState>()(
 					activeEventId: null,
 					activeEventName: null,
 					birthDate: null,
+					tier: "bronce",
 					// Al desloguear, la próxima sesión debe re-resolverse antes de
 					// poder mostrar el gate de cumpleaños.
 					sessionLoaded: false,
+					battleActive: false,
 					dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 					rewardRules: [],
 					// Reset para que el SIGUIENTE usuario en este móvil (otro JIT)
@@ -198,6 +220,7 @@ export const useGameState = create<GameState>()(
 				streak,
 				isNewUser,
 				birthDate,
+				tier,
 			}) =>
 				set((state) => ({
 					userProfileId,
@@ -209,6 +232,7 @@ export const useGameState = create<GameState>()(
 					// puede decidir con datos reales (evita el parpadeo al recargar).
 					sessionLoaded: true,
 					birthDate: birthDate !== undefined ? birthDate : state.birthDate,
+					tier: tier ?? state.tier,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
 					streak: typeof streak === "number" ? streak : state.streak,

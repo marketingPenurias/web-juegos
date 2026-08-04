@@ -1,6 +1,8 @@
 import { useGameState, type Screen } from "../store/useGameState";
 import { useSession } from "../lib/useSession";
 import { usePendingCheckin } from "../lib/usePendingCheckin";
+import { useDeepLinkScreen } from "../lib/useDeepLinkScreen";
+import { useActiveBattle } from "../lib/useActiveBattle";
 import { useRewards } from "../lib/useRewards";
 import { AppFrame } from "./AppFrame";
 import { BottomNav } from "./BottomNav";
@@ -24,6 +26,10 @@ const SCREENS_WITH_NAV = new Set<Screen>(["hub", "live", "menu", "ticket"]);
 export default function LaPochaApp() {
 	useSession();
 	usePendingCheckin();
+	// Deep-link `?screen=` / `next=` del QR de la batalla (V20).
+	useDeepLinkScreen();
+	// Un único canal para saber si hay duelo en vivo → aviso flotante en el nav.
+	useActiveBattle();
 	const currentScreen = useGameState((s) => s.currentScreen);
 	const activeRedemption = useGameState((s) => s.activeRedemption);
 	const closeRedemption = useGameState((s) => s.closeRedemption);

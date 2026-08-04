@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Disc3, Flame, Music2, Radio, Sparkles, Swords, Timer, QrCode, Trophy, Crown } from "lucide-react";
+import { Disc3, Flame, Music2, Radio, Sparkles, Swords, Timer } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
@@ -8,6 +8,12 @@ import { useTenant } from "../lib/tenant";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { VenueBackdrop } from "./VenueBackdrop";
 import { cn } from "../lib/utils";
+import type { Track } from "./tv/types";
+import { DuelSide } from "./tv/DuelSide";
+import { QrBlock } from "./tv/QrBlock";
+import { NowPlayingPanel } from "./tv/NowPlayingPanel";
+import { WinnerOverlay } from "./tv/WinnerOverlay";
+import { EmptyState } from "./tv/EmptyState";
 
 /**
  * Jumbotron — vista de proyector del evento en directo.
@@ -22,20 +28,6 @@ import { cn } from "../lib/utils";
  *   - QR gigante (opt-in `showQr`): bloque permanente "Escanea para pedir
  *     tu canción" → URL del tenant.
  */
-
-type Track = {
-	id: string;
-	title: string;
-	artist: string;
-	cover_image_url: string | null;
-	total_votes: number;
-	is_played: boolean;
-	// V17: sello temporal para ocultar del ranking 2h tras sonar (permite que
-	// el filtro cliente respete la ventana igual que el poll/servidor).
-	played_at?: string | null;
-	// V18: instante del último voto → desempate por antigüedad en el ranking.
-	last_vote_at?: string | null;
-};
 
 type Battle = { id: string; endsAt: string; a: Track; b: Track };
 
@@ -165,22 +157,44 @@ export function Jumbotron({
 	// CHECK-IN → escanearlo registra la visita (venue_visits), da los tokens
 	// del check-in y sube la racha de fidelidad semanal.  `ref=QR-TV` se
 	// mantiene para no perder la atribución de captación.
-	const qrTarget = checkinCode
-		? `${venueUrl}/checkin?code=${encodeURIComponent(checkinCode)}&ref=QR-TV`
-		: `${venueUrl}/?ref=QR-TV`;
+	//
+	// V20: durante un DUELO el QR además lleva `next=live`, así el que escanea
+	// hace check-in Y aterriza directamente en la batalla (un solo escaneo sirve
+	// para fidelidad + conversión).  `ref` distingue ambos orígenes en analítica.
+	const buildQrTarget = (next?: "live"): string => {
+		const ref = next ? "QR-TV-BATALLA" : "QR-TV";
+		if (checkinCode) {
+			const p = new URLSearchParams({ code: checkinCode, ref });
+			if (next) p.set("next", next);
+			return `${venueUrl}/checkin?${p.toString()}`;
+		}
+		// Sin QR de entrada configurado: sólo captación (+ deep-link si procede).
+		const p = new URLSearchParams({ ref });
+		if (next) p.set("screen", next);
+		return `${venueUrl}/?${p.toString()}`;
+	};
+	const qrTarget = buildQrTarget();
 
-	// Ranking visible: fuera las que suenan ahora (is_played) Y las sonadas
-	// hace <2h (played_at).  El poll ya las excluye en la query, pero como el
-	// Realtime es la vía primaria y sus UPDATE traen is_played/played_at,
-	// filtramos también en cliente para que no se cuelen ni un frame.
+	// Ranking visible (V20).  MISMA regla que el RPC `tv_ranking` de la BD —
+	// aquí se replica porque el Realtime entrega filas sueltas y no queremos que
+	// se cuelen ni un frame antes del siguiente poll:
+	//   · sólo temas CON votos (fuera el relleno sin votar);
+	//   · fuera el que suena ahora;
+	//   · un tema ya sonado vuelve SÓLO si lo re-votan (last_vote_at > played_at)
+	//     o si han pasado 2h desde que sonó.
+	// Nada de esto borra datos: total_votes y track_votes quedan intactos, así
+	// que al reaparecer conserva TODOS sus votos.
 	const sorted = useMemo(() => {
 		const cutoff = Date.now() - HIDE_MS;
 		return [...tracks]
-			.filter(
-				(t) =>
-					!t.is_played &&
-					(!t.played_at || Date.parse(t.played_at) < cutoff),
-			)
+			.filter((t) => {
+				if (t.total_votes <= 0) return false;
+				if (t.is_played) return false;
+				if (!t.played_at) return true;
+				const playedAt = Date.parse(t.played_at);
+				const reVoted = t.last_vote_at && Date.parse(t.last_vote_at) > playedAt;
+				return Boolean(reVoted) || playedAt < cutoff;
+			})
 			.sort((a, b) => {
 				if (b.total_votes !== a.total_votes) return b.total_votes - a.total_votes;
 				// Desempate V18: a igualdad de votos, primero la que llegó ANTES a
@@ -360,23 +374,14 @@ export function Jumbotron({
 		if (!supabase || !eventId) return;
 		// Si el poll trae datos, estamos "en directo" aunque el WS no conecte.
 		setConnected(true);
-		const cutoff = new Date(Date.now() - HIDE_MS).toISOString();
 
-		// 1) Ranking (excluye la que suena y las sonadas hace <2h).  Incluye
-		//    played_at para que el filtro cliente de `sorted` sea consistente.
-		const { data: top } = await supabase
-			.from("event_tracks")
-			.select("id, title, artist, cover_image_url, total_votes, is_played, played_at, last_vote_at")
-			.eq("event_id", eventId)
-			.eq("is_played", false)
-			.or(`played_at.is.null,played_at.lt.${cutoff}`)
-			.order("total_votes", { ascending: false })
-			// Desempate V18: a igualdad de votos gana la que llegó ANTES a ese
-			// número (last_vote_at más antiguo).  `nullsFirst` deja arriba las
-			// que aún no tienen sello (empate a 0).
-			.order("last_vote_at", { ascending: true, nullsFirst: true })
-			.order("title", { ascending: true })
-			.limit(MAX_ROWS + 2);
+		// 1) Ranking — RPC `tv_ranking`: la regla de visibilidad vive UNA sola vez
+		//    (en SQL) y la comparte servidor y TV.  Hace falta porque compara dos
+		//    columnas (last_vote_at > played_at) y PostgREST no puede expresarlo.
+		const { data: top } = await supabase.rpc("tv_ranking", {
+			p_event_id: eventId,
+			p_limit: MAX_ROWS + 2,
+		});
 		if (top) setTracks(top as Track[]);
 
 		// 2) Canción actual (para el panel "Canción actual" del split view).
@@ -592,11 +597,32 @@ export function Jumbotron({
 					</div>
 					<div className="flex-1 grid grid-cols-[1fr_auto_1fr] gap-6 items-center">
 						<DuelSide track={battle.a} pct={aPct} side="a" origin="left" barRef={aBarRef} leading={aVotes >= bVotes} />
-						<div className="jb-duel-enter flex flex-col items-center gap-2">
+						<div className="jb-duel-enter flex flex-col items-center gap-3">
 							<div className="w-20 h-20 rounded-full bg-black border-2 border-(--jumbo-accent) flex items-center justify-center shadow-[0_0_40px_rgba(255,215,0,0.5)]">
 								<Swords className="w-10 h-10 text-(--jumbo-accent)" aria-hidden="true" />
 							</div>
 							<span className="text-2xl font-black italic text-(--jumbo-accent)">VS</span>
+							{/* V20: QR del DUELO — escanear = check-in + entrar directo a
+							    la batalla (`next=live`).  Antes el duelo no tenía QR y se
+							    perdía el momento de máxima atención de la sala. */}
+							{showQr && (
+								<div className="mt-2 flex flex-col items-center gap-2 rounded-2xl border border-(--jumbo-primary)/40 bg-black/50 backdrop-blur-md p-4">
+									<div className="w-36 h-36 rounded-xl bg-black/40 border border-white/10 p-2 flex items-center justify-center">
+										<QRCodeSVG
+											value={buildQrTarget("live")}
+											level="M"
+											marginSize={0}
+											fgColor={tenant.theme.primary ?? "#ffffff"}
+											bgColor="transparent"
+											className="w-full h-full"
+											aria-label="QR para votar en la batalla"
+										/>
+									</div>
+									<p className="text-sm font-black italic tracking-tight text-white text-center leading-tight">
+										Escanea y vota
+									</p>
+								</div>
+							)}
 						</div>
 						<DuelSide track={battle.b} pct={100 - aPct} side="b" origin="right" barRef={bBarRef} leading={bVotes > aVotes} />
 					</div>
@@ -685,218 +711,6 @@ export function Jumbotron({
 				</p>
 			</footer>
 			)}
-		</div>
-	);
-}
-
-function DuelSide({ track, pct, side, origin, barRef, leading }: {
-	track: Track; pct: number; side: "a" | "b"; origin: "left" | "right"; barRef: React.RefObject<HTMLDivElement | null>; leading: boolean;
-}) {
-	const color = side === "a" ? "var(--jumbo-primary)" : "var(--jumbo-accent)";
-	return (
-		<div className={cn("jb-duel-enter rounded-3xl border p-6 flex flex-col items-center text-center gap-4", leading ? "border-(--jumbo-accent)/70 bg-(--jumbo-accent)/5" : "border-zinc-800 bg-zinc-900/40")}>
-			<div className="w-40 h-40 rounded-3xl overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center" style={{ boxShadow: `0 0 50px ${color}55` }}>
-				{track.cover_image_url ? <img src={track.cover_image_url} alt="" className="w-full h-full object-cover" /> : <Music2 className="w-16 h-16 text-zinc-700" aria-hidden="true" />}
-			</div>
-			<div className="min-w-0 w-full">
-				<p className="text-3xl font-black italic tracking-tight truncate">{track.title}</p>
-				<p className="text-base text-zinc-400 truncate">{track.artist}</p>
-			</div>
-			<div className="w-full">
-				{/* La barra del bando B crece desde la DERECHA para que ambas
-				    choquen en el centro (impacto visual de duelo). */}
-				<div className="h-5 w-full rounded-full bg-zinc-800 overflow-hidden">
-					<div
-						ref={barRef}
-						className={cn("h-full rounded-full", origin === "right" ? "origin-right" : "origin-left")}
-						style={{ background: color, transform: "scaleX(0.5)" }}
-					/>
-				</div>
-				<div className="flex items-center justify-between mt-2">
-					<span className="text-5xl font-black tabular-nums" style={{ color }}>{pct}%</span>
-					<span className="text-2xl font-black tabular-nums text-zinc-400">{track.total_votes} <span className="text-sm uppercase tracking-widest">votos</span></span>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function QrBlock({ url, label, fgColor, compact = false }: {
-	url: string; label: string; fgColor: string;
-	/** En split view el QR va debajo de la canción actual → versión reducida. */
-	compact?: boolean;
-}) {
-	// El QR lleva a /checkin cuando el local tiene QR de entrada configurado:
-	// escanear = registrar visita + fidelidad, no sólo captar.
-	const isCheckin = url.includes("/checkin");
-	// QR generado 100% en el CLIENTE (qrcode.react) → SVG vectorial, offline,
-	// sin llamadas de red ni rate-limits.  Siempre escaneable.
-	//
-	// Branding (V1.6 Premium): los módulos se pintan con el color primario del
-	// local (`fgColor`) y el fondo es TRANSPARENTE para fundirse con el panel.
-	// Para mantener la legibilidad/escaneabilidad con colores claros, el panel
-	// que lo contiene es oscuro translúcido (alto contraste vs. el fg claro)
-	// en vez del antiguo recuadro blanco.
-	return (
-		<aside
-			className={cn(
-				"flex flex-col items-center justify-center rounded-3xl border border-(--jumbo-primary)/40 bg-zinc-900/50 backdrop-blur-md text-center",
-				compact ? "w-full gap-3 p-5" : "w-full gap-6 p-8",
-			)}
-		>
-			<div className="inline-flex items-center gap-2 text-(--jumbo-primary) font-black uppercase tracking-[0.3em] text-sm">
-				<QrCode className="w-5 h-5" aria-hidden="true" />
-				{isCheckin ? "Escanea y suma" : "Pide tu canción"}
-			</div>
-			<div
-				className={cn(
-					"rounded-2xl bg-black/40 border border-white/10 p-4 flex items-center justify-center",
-					compact ? "w-40 h-40" : "w-72 h-72",
-				)}
-			>
-				<QRCodeSVG
-					value={url}
-					level="M"
-					marginSize={0}
-					fgColor={fgColor || "#ffffff"}
-					bgColor="transparent"
-					className="w-full h-full"
-					aria-label={`QR para ${url}`}
-				/>
-			</div>
-			<div>
-				<p className={cn("font-black italic tracking-tight text-white", compact ? "text-lg" : "text-2xl")}>
-					{isCheckin ? "Escanea: puntos y racha" : "Escanea para pedir tu canción"}
-				</p>
-				{!compact && (
-					<p className="text-base text-(--jumbo-primary) font-bold mt-1 break-all">{label}</p>
-				)}
-			</div>
-		</aside>
-	);
-}
-
-// ── Panel "Canción actual" (mitad derecha del split view · V17) ──────
-function NowPlayingPanel({ track }: { track: Track | null }) {
-	const ref = useRef<HTMLElement>(null);
-	// Animación de entrada + latido sutil cada vez que cambia la canción.
-	useGSAP(
-		() => {
-			if (!track) return;
-			gsap.fromTo(
-				".np-card",
-				{ opacity: 0, scale: 0.94, y: 16 },
-				{ opacity: 1, scale: 1, y: 0, duration: 0.6, ease: "back.out(1.4)" },
-			);
-		},
-		{ scope: ref, dependencies: [track?.id] },
-	);
-
-	return (
-		<aside
-			ref={ref}
-			className="flex-1 min-w-0 flex flex-col items-center justify-center gap-6 rounded-3xl border border-(--jumbo-primary)/40 bg-black/40 backdrop-blur-md p-8 text-center"
-		>
-			<div className="inline-flex items-center gap-2 text-(--jumbo-primary) font-black uppercase tracking-[0.35em] text-base">
-				<span className="w-2.5 h-2.5 rounded-full bg-(--jumbo-primary) animate-pulse" />
-				Sonando ahora
-			</div>
-
-			{track ? (
-				<div className="np-card flex flex-col items-center gap-6 w-full">
-					<div
-						className="w-[22rem] h-[22rem] max-w-[38vw] max-h-[38vw] rounded-[2rem] overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center"
-						style={{ boxShadow: "0 0 70px var(--jumbo-primary)55" }}
-					>
-						{track.cover_image_url ? (
-							<img src={track.cover_image_url} alt="" className="w-full h-full object-cover" />
-						) : (
-							<Disc3 className="w-32 h-32 text-(--jumbo-primary) animate-spin [animation-duration:4s]" aria-hidden="true" />
-						)}
-					</div>
-					<div className="min-w-0 w-full">
-						<p className="text-5xl font-black italic tracking-tighter truncate">{track.title}</p>
-						<p className="text-2xl text-zinc-400 truncate mt-1">{track.artist}</p>
-					</div>
-				</div>
-			) : (
-				<div className="np-card flex flex-col items-center gap-5 opacity-70">
-					<div className="w-[18rem] h-[18rem] max-w-[32vw] max-h-[32vw] rounded-[2rem] bg-zinc-950/60 border border-zinc-800 flex items-center justify-center">
-						<Disc3 className="w-24 h-24 text-zinc-700" aria-hidden="true" />
-					</div>
-					<p className="text-2xl font-black italic tracking-tight text-zinc-500">
-						El DJ aún no ha puesto ninguna canción
-					</p>
-				</div>
-			)}
-		</aside>
-	);
-}
-
-// ── Overlay de celebración del GANADOR de la batalla (ambas TVs · V17) ─
-function WinnerOverlay({ track }: { track: Track }) {
-	const ref = useRef<HTMLDivElement>(null);
-	useGSAP(
-		() => {
-			const tl = gsap.timeline();
-			tl.fromTo(".wo-bg", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" })
-				.fromTo(".wo-crown", { scale: 0, rotate: -30, opacity: 0 }, { scale: 1, rotate: 0, opacity: 1, duration: 0.7, ease: "back.out(2.2)" }, "-=0.1")
-				.fromTo(".wo-card", { scale: 0.7, opacity: 0, y: 40 }, { scale: 1, opacity: 1, y: 0, duration: 0.6, ease: "back.out(1.6)" }, "-=0.4")
-				.fromTo(".wo-label", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }, "-=0.3");
-			// Latido continuo de la corona mientras dura la celebración.
-			gsap.to(".wo-crown", { scale: 1.12, duration: 0.9, yoyo: true, repeat: -1, ease: "sine.inOut", delay: 0.7 });
-			// Destellos radiales.
-			gsap.fromTo(".wo-ray", { scale: 0.4, opacity: 0.6 }, { scale: 2.4, opacity: 0, duration: 1.8, repeat: -1, ease: "power2.out", stagger: 0.3 });
-		},
-		{ scope: ref },
-	);
-
-	return (
-		<div ref={ref} className="absolute inset-0 z-50 flex items-center justify-center">
-			<div className="wo-bg absolute inset-0 bg-black/85 backdrop-blur-md" />
-			<div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-				<div className="wo-ray absolute w-[60vw] h-[60vw] rounded-full bg-(--jumbo-accent)/20 blur-2xl" />
-				<div className="wo-ray absolute w-[45vw] h-[45vw] rounded-full bg-(--jumbo-primary)/20 blur-2xl" />
-			</div>
-
-			<div className="relative z-10 flex flex-col items-center text-center gap-6 px-12">
-				<Crown className="wo-crown w-28 h-28 text-(--jumbo-accent) drop-shadow-[0_0_40px_rgba(255,215,0,0.7)]" aria-hidden="true" />
-				<p className="wo-label inline-flex items-center gap-3 text-(--jumbo-accent) font-black uppercase tracking-[0.4em] text-2xl">
-					<Trophy className="w-8 h-8" aria-hidden="true" /> Ganadora de la batalla
-				</p>
-				<div className="wo-card flex flex-col items-center gap-5">
-					<div
-						className="w-72 h-72 rounded-[2rem] overflow-hidden bg-zinc-950 border-2 border-(--jumbo-accent)/70 flex items-center justify-center"
-						style={{ boxShadow: "0 0 90px rgba(255,215,0,0.55)" }}
-					>
-						{track.cover_image_url ? (
-							<img src={track.cover_image_url} alt="" className="w-full h-full object-cover" />
-						) : (
-							<Music2 className="w-28 h-28 text-(--jumbo-accent)" aria-hidden="true" />
-						)}
-					</div>
-					<div className="min-w-0">
-						<p className="text-6xl font-black italic tracking-tighter">{track.title}</p>
-						<p className="text-3xl text-zinc-300 mt-2">{track.artist}</p>
-					</div>
-					<div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-(--jumbo-accent)/15 border border-(--jumbo-accent)/50">
-						<Sparkles className="w-6 h-6 text-(--jumbo-accent)" aria-hidden="true" />
-						<span className="text-2xl font-black tabular-nums text-(--jumbo-accent)">{track.total_votes}</span>
-						<span className="text-sm uppercase tracking-widest text-(--jumbo-accent)/80 font-bold">votos</span>
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function EmptyState({ reason }: { reason: "no_active_event" | "no_tracks" }) {
-	return (
-		<div className="h-full min-h-[400px] flex flex-col items-center justify-center text-center gap-4">
-			<Music2 className="w-16 h-16 text-zinc-700" aria-hidden="true" />
-			<p className="text-2xl font-black italic tracking-tight text-zinc-400">
-				{reason === "no_active_event" ? "No hay evento activo esta noche" : "Aún no hay canciones en cola"}
-			</p>
 		</div>
 	);
 }

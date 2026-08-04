@@ -624,10 +624,20 @@ async function bootstrap(
 	supabase: ReturnType<typeof getServiceSupabase>,
 	tenant_id: string,
 ) {
+	// V20 · FASE 1 — Nunca más listas vacías por un error tragado.  Antes cada
+	// query hacía `const { data } = await …` y descartaba el error: cuando a
+	// `service_role` le faltaban los GRANT, el panel mostraba "Plantillas" y
+	// "Almacén global" VACÍOS en lugar de un fallo.  Ahora se registran avisos y
+	// viajan al cliente, que puede distinguir "no hay datos" de "falló la carga".
+	const warnings: string[] = [];
+	const warn = (scope: string, message?: string) => {
+		console.warn(`[api.admin] bootstrap ${scope}: ${message ?? "unknown error"}`);
+		warnings.push(scope);
+	};
 	// Evento activo (si lo hay).  El cierre de eventos vencidos lo gestiona
 	// EXCLUSIVAMENTE el job pg_cron (cada minuto) — los loaders se mantienen
 	// rápidos, sin RPCs de mantenimiento en el camino crítico.
-	const { data: event } = await supabase
+	const { data: event, error: eventErr } = await supabase
 		.from("tenant_events")
 		.select("id, name, start_time, end_time, status")
 		.eq("tenant_id", tenant_id)
@@ -635,23 +645,26 @@ async function bootstrap(
 		.order("start_time", { ascending: false })
 		.limit(1)
 		.maybeSingle();
+	if (eventErr) warn("active_event", eventErr.message);
 
 	// Histórico de eventos (cualquier estado, recientes primero) — para el
 	// manager: ver fiestas pasadas + programadas y activarlas.
-	const { data: eventsHistory } = await supabase
+	const { data: eventsHistory, error: historyErr } = await supabase
 		.from("tenant_events")
 		.select("id, name, start_time, end_time, status")
 		.eq("tenant_id", tenant_id)
 		.order("start_time", { ascending: false })
 		.limit(50);
+	if (historyErr) warn("events_history", historyErr.message);
 
 	// Plantillas de setlist (con nº de temas vía conteo embebido).
-	const { data: templatesRaw } = await supabase
+	const { data: templatesRaw, error: tplErr } = await supabase
 		.from("event_templates")
 		.select("id, name, created_at, event_template_tracks(count)")
 		.eq("tenant_id", tenant_id)
 		.order("created_at", { ascending: false })
 		.limit(50);
+	if (tplErr) warn("event_templates", tplErr.message);
 	const templates = (templatesRaw ?? []).map((t) => {
 		const row = t as { id: string; name: string; created_at: string; event_template_tracks?: { count: number }[] };
 		return {
@@ -663,26 +676,28 @@ async function bootstrap(
 	});
 
 	// Biblioteca global
-	const { data: globalTracks } = await supabase
+	const { data: globalTracks, error: globalErr } = await supabase
 		.from("global_tracks")
-		.select("id, spotify_id, title, artist, cover_image_url")
+		.select("id, spotify_id, title, artist, cover_image_url, genre")
 		.eq("tenant_id", tenant_id)
 		.order("created_at", { ascending: false })
 		.limit(500);
+	if (globalErr) warn("global_tracks", globalErr.message);
 
 	let eventTracks: unknown[] = [];
 	let battle: unknown = null;
 	if (event) {
-		const { data: et } = await supabase
+		const { data: et, error: etErr } = await supabase
 			.from("event_tracks")
-			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played")
+			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played, genre")
 			.eq("tenant_id", tenant_id)
 			.eq("event_id", event.id)
 			.order("total_votes", { ascending: false })
 			.order("title", { ascending: true });
+		if (etErr) warn("event_tracks", etErr.message);
 		eventTracks = et ?? [];
 
-		const { data: b } = await supabase
+		const { data: b, error: bErr } = await supabase
 			.from("live_battles")
 			.select("id, track_a, track_b, status, started_at, ends_at, winner_track")
 			.eq("tenant_id", tenant_id)
@@ -691,6 +706,7 @@ async function bootstrap(
 			.order("started_at", { ascending: false })
 			.limit(1)
 			.maybeSingle();
+		if (bErr) warn("live_battles", bErr.message);
 		battle = b ?? null;
 	}
 
@@ -704,5 +720,8 @@ async function bootstrap(
 		global_tracks: globalTracks ?? [],
 		event_tracks: eventTracks,
 		battle,
+		// Vacío = todo cargó bien.  Con contenido, el panel avisa en vez de
+		// mostrar secciones vacías como si no hubiera datos (F1).
+		warnings,
 	};
 }

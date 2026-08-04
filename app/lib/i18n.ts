@@ -12,7 +12,7 @@ const resources = {
 				cancel: "Cancelar",
 			},
 			lang: { es: "ES", en: "EN", switch: "Cambiar idioma" },
-			nav: { hub: "Hub", live: "Live", menu: "Menú", ticket: "Ticket" },
+			nav: { hub: "Hub", live: "Live", menu: "Menú", ticket: "Ticket", battleLive: "¡Batalla!" },
 			birthGate: {
 				title: "¿Cuándo es tu cumple?",
 				subtitle:
@@ -123,6 +123,7 @@ const resources = {
 				unlockSoon: "Sube de nivel para desbloquear",
 				comingSoon: "Próximamente",
 				unlockAt: "Desbloquea en {{tier}}",
+				unlockMissing: "te faltan {{n}} pts",
 				loading: "Cargando catálogo…",
 				errLoad: "No se pudo cargar el catálogo",
 				retry: "Reintentar",
@@ -366,7 +367,7 @@ const resources = {
 				cancel: "Cancel",
 			},
 			lang: { es: "ES", en: "EN", switch: "Change language" },
-			nav: { hub: "Hub", live: "Live", menu: "Menu", ticket: "Ticket" },
+			nav: { hub: "Hub", live: "Live", menu: "Menu", ticket: "Ticket", battleLive: "Battle!" },
 			birthGate: {
 				title: "When's your birthday?",
 				subtitle:

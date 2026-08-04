@@ -114,6 +114,9 @@ export function useSession() {
 					streak: data.streak,
 					isNewUser: data.is_new_user,
 					birthDate: data.profile.birth_date ?? null,
+					// Tier server-authoritative (get_user_tier + tenant_tier_thresholds):
+					// el cliente ya no lo recalcula, sólo lo pinta (V20 · F3).
+					tier: data.tier,
 				});
 			} catch (err) {
 				// TODO: CLEANUP SESSION DEBUG

@@ -11,6 +11,7 @@ import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { useTenant } from "../lib/tenant";
 import { cn } from "../lib/utils";
+import { VENUE_TZ, toLocalInput, fromLocalInput } from "../lib/madrid-time";
 
 /**
  * /admin — Consola del DJ / Staff (Bloque 4).
@@ -48,6 +49,8 @@ type Boot =
 			globalTracks: GlobalTrack[];
 			eventTracks: EventTrack[];
 			battle: Battle;
+			/** Secciones que fallaron al cargar (V20 · F1).  Vacío = todo OK. */
+			warnings: string[];
 	  };
 
 function tenantSlugFromHost(): string {
@@ -56,50 +59,6 @@ function tenantSlugFromHost(): string {
 	const sub = host.split(".")[0];
 	if (!sub || sub === "localhost" || sub === "www" || host.includes("pages.dev")) return "lapocha";
 	return sub;
-}
-
-// ── Timezone: SIEMPRE Europe/Madrid (no el reloj del dispositivo del DJ) ──
-const VENUE_TZ = "Europe/Madrid";
-
-/** Offset (ms) que Madrid lleva sobre UTC en el instante `utcMs` (maneja DST). */
-function madridOffsetMs(utcMs: number): number {
-	const dtf = new Intl.DateTimeFormat("en-US", {
-		timeZone: VENUE_TZ, year: "numeric", month: "2-digit", day: "2-digit",
-		hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-	});
-	const p: Record<string, string> = {};
-	for (const part of dtf.formatToParts(new Date(utcMs))) p[part.type] = part.value;
-	const asUtcFromMadridWall = Date.UTC(
-		Number(p.year), Number(p.month) - 1, Number(p.day),
-		Number(p.hour === "24" ? "0" : p.hour), Number(p.minute), Number(p.second),
-	);
-	return asUtcFromMadridWall - utcMs;
-}
-
-/** ISO (UTC) almacenado → valor `datetime-local` mostrado en hora de Madrid. */
-function toLocalInput(iso?: string | null): string {
-	if (!iso) return "";
-	const d = new Date(iso);
-	if (Number.isNaN(d.getTime())) return "";
-	// sv-SE da formato ISO "YYYY-MM-DD HH:mm" ya en la TZ pedida.
-	const s = new Intl.DateTimeFormat("sv-SE", {
-		timeZone: VENUE_TZ, year: "numeric", month: "2-digit", day: "2-digit",
-		hour: "2-digit", minute: "2-digit", hour12: false,
-	}).format(d);
-	return s.replace(" ", "T");
-}
-
-/** Valor `datetime-local` (hora-pared de Madrid) → ISO UTC correcto. */
-function fromLocalInput(local: string): string | undefined {
-	if (!local) return undefined;
-	const m = local.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-	if (!m) return undefined;
-	const [, y, mo, d, h, mi] = m.map(Number);
-	// Interpretamos la hora-pared como UTC y restamos el offset de Madrid
-	// para obtener el instante real (DST incluido).
-	const wallAsUtc = Date.UTC(y, mo - 1, d, h, mi);
-	const offset = madridOffsetMs(wallAsUtc);
-	return new Date(wallAsUtc - offset).toISOString();
 }
 
 export default function Admin() {
@@ -155,6 +114,7 @@ export default function Admin() {
 			globalTracks: (data.global_tracks as GlobalTrack[]) ?? [],
 			eventTracks: (data.event_tracks as EventTrack[]) ?? [],
 			battle: (data.battle as Battle) ?? null,
+			warnings: (data.warnings as string[]) ?? [],
 		});
 	}, [call]);
 
@@ -327,7 +287,7 @@ export default function Admin() {
 		return <Center><Lock className="w-12 h-12 text-rose-500" /><h1 className="text-2xl font-black italic text-white mt-3">Acceso restringido</h1><p className="text-zinc-400 mt-1">Tu cuenta no tiene rol de staff en este local.</p></Center>;
 	}
 
-	const { event, eventsHistory, templates, globalTracks, eventTracks, battle } = boot;
+	const { event, eventsHistory, templates, globalTracks, eventTracks, battle, warnings } = boot;
 	const eventSpotifyIds = new Set(eventTracks.map((t) => t.spotify_id));
 
 	return (
@@ -340,6 +300,18 @@ export default function Admin() {
 						<p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Consola de Staff</p>
 					</div>
 				</header>
+
+				{/* V20 · F1 — Si algo NO cargó, se dice.  Antes un fallo de permisos
+				    se veía como "no hay nada" y estuvo semanas oculto. */}
+				{warnings.length > 0 && (
+					<div className="rounded-2xl border border-amber-500/50 bg-amber-500/10 p-4 text-amber-200">
+						<p className="font-black text-sm">⚠️ Algunas secciones no se pudieron cargar</p>
+						<p className="text-xs mt-1 opacity-90">
+							Fallaron: <span className="font-mono">{warnings.join(", ")}</span>. Lo que ves
+							puede estar incompleto (no es que esté vacío).
+						</p>
+					</div>
+				)}
 
 				{!event ? (
 					// Sin fiesta activa: abrir la de hoy o programar/activar otra.
