@@ -302,3 +302,26 @@ select * from tv_ranking('<event_id>', 10);
 -- Cuánto ocupa un evento (antes 759)
 select count(*) from event_tracks where event_id='<event_id>';
 ```
+
+---
+
+## Validación post-deploy · 04/08 18:10
+
+**Desplegado y confirmado** (marcadores presentes en los bundles de producción):
+`ng_pending_screen`, `battleLive`, `unlockMissing`, `global_track_id` (app) ·
+`tv_ranking`, `QR-TV-BATALLA`, "Escanea y vota", `checkin?` (TV).
+
+| Prueba | Cómo | Resultado |
+|---|---|---|
+| Deep-link del QR de batalla (**flujo frío**, el más frágil) | abrir `/checkin?code=…&next=live` sin sesión | ✅ guarda `ng_pending_screen=live` y `ng_pending_checkin=POCHA-ENTRADA-01`, y manda al login |
+| Worker sano | `POST /api/tv`, `/api/session`, `/api/music` sin auth | ✅ 401 limpio (no 500) |
+| Grants | `has_table_privilege` en las 7 tablas | ✅ |
+| Regla de visibilidad | 5 casos sintéticos + rollback | ✅ |
+| N-a-N lazy | evento vacío → 1 voto → 1 fila | ✅ |
+
+**Pendiente de prueba humana** (requiere sesión y evento activo): `/admin`
+(plantillas + almacén), check-in real con cuenta Google, tele, batalla, tiers,
+jukebox/tinder. Ver el [plan de pruebas](#plan-de-pruebas-tras-el-deploy).
+
+> Contexto: el 04/08 no había evento activo (todos `ended`), así que los flujos
+> de juego no se pudieron ejercitar en vivo.
