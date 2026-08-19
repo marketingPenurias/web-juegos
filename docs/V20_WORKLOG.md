@@ -6,7 +6,7 @@ primero antes de retomar.
 
 - **Rama de integración:** `feat/v20` → una sola PR a `main` al final.
 - **Ramas por fase:** `feat/v20-fN-...`, se mergean a `feat/v20` al terminar.
-- **Referencias:** modelo de BD en [`database/DB_MODEL.md`](database/DB_MODEL.md) ·
+- **Referencias:** modelo de BD en [`docs/DB_MODEL.md`](DB_MODEL.md) ·
   grafo de código en `graphify-out/` (`graphify query "..."`).
 
 ---
@@ -61,7 +61,7 @@ Tablas afectadas: `global_tracks`, `event_templates`, `event_template_tracks`,
 **Cambio:** `GRANT SELECT/INSERT/UPDATE/DELETE` a `service_role` en las 7 tablas
 + `ALTER DEFAULT PRIVILEGES` para tablas futuras.
 Migración `v20_fix_service_role_grants` · espejo:
-[`database/24_v20_service_role_grants.sql`](database/24_v20_service_role_grants.sql).
+[`database/24_v20_service_role_grants.sql`](../database/24_v20_service_role_grants.sql).
 
 **Verificado:** `has_table_privilege('service_role', …, 'SELECT') = true` en las 7.
 **Pendiente de confirmación visual:** que `/admin` liste Plantillas y Almacén.
@@ -86,7 +86,7 @@ oculto el bug de grants.
 
 ### 2.1 Regla de visibilidad del ranking
 Nueva RPC **`tv_ranking(p_event_id, p_limit)`**
-([`database/25_v20_tv_ranking.sql`](database/25_v20_tv_ranking.sql)):
+([`database/25_v20_tv_ranking.sql`](../database/25_v20_tv_ranking.sql)):
 sólo temas con votos · fuera el que suena · los sonados vuelven si los re-votan
 **o** pasadas 2 h · empate → gana el que lleva más tiempo con esos votos.
 
@@ -176,7 +176,7 @@ título obligaba a tocarlo evento por evento y el género vivía duplicado.
 `global_track_id`. La fila **sólo se crea cuando hace falta** (primer voto o
 inyección del DJ) → un evento pasa de 759 filas a las que de verdad se usan.
 
-**Cambios** ([`database/26_v20_event_tracks_n_to_n.sql`](database/26_v20_event_tracks_n_to_n.sql))
+**Cambios** ([`database/26_v20_event_tracks_n_to_n.sql`](../database/26_v20_event_tracks_n_to_n.sql))
 - Migración **aditiva**: `global_track_id` + backfill + `unique(event_id, global_track_id)`.
   Verificado: **0 huérfanos, 9.108/9.108 mapeadas**. No se borró ninguna columna,
   así que los eventos ya creados siguen comportándose igual.

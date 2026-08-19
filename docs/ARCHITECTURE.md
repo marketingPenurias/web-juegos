@@ -1357,7 +1357,7 @@ AND expires_at < now()`.
 ## 8. Esquema de Base de Datos y RLS
 
 Esta sección documenta el modelo de datos completo y el contrato de
-seguridad. Las migraciones viven en [database/](database/) y se
+seguridad. Las migraciones viven en [database/](../database/) y se
 ejecutan en orden numérico.
 
 ### 8.1 Migraciones (orden de ejecución)
@@ -1642,7 +1642,7 @@ secret en la siguiente request.
 4. Si es `JWT_INVALID_OR_EXPIRED`: el cliente debe refrescar sesión.
 5. Si es `getServiceSupabase threw`: falta `SUPABASE_SECRET_KEY`.
 
-Detalles completos en [AUTH_VERIFY_DEBUG.md](AUTH_VERIFY_DEBUG.md).
+Detalles completos en [AUTH_VERIFY_DEBUG.md](historico/AUTH_VERIFY_DEBUG.md).
 
 ### 10.4 Inspeccionar el historial de un usuario
 

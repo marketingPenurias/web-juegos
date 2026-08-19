@@ -53,7 +53,7 @@ nuevo seguirá necesitando trabajo manual** — justo la fricción que impide es
 
 | Semana | Tarea | Hecho cuando |
 |---|---|---|
-| S1 | Leer [`database/DB_MODEL.md`](database/DB_MODEL.md) + definir KPIs | 5-6 KPIs con su fórmula SQL |
+| S1 | Leer [`docs/DB_MODEL.md`](DB_MODEL.md) + definir KPIs | 5-6 KPIs con su fórmula SQL |
 | S1 | **Arreglar `fact_rewards` en el ETL** (ver bug abajo) | Los canjes comprados aparecen en el BI |
 | S1 | Informe del piloto con datos reales | Documento con lo que pasó en julio |
 | S2 | Mergear `feat/analytics-integration` y **sacarlo del bundle público** | `/dashboard` con su entrada y auth propias |
