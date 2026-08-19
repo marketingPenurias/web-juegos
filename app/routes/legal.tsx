@@ -44,7 +44,7 @@ const SECTIONS: Array<{ heading: string; body: string }> = [
 	},
 	{
 		heading: "Para qué usamos tus datos",
-		body: "Exclusivamente para crear tu monedero virtual de tokens y gestionar tu sesión en La Pocha durante la duración de este piloto.",
+		body: "Exclusivamente para crear tu monedero virtual de tokens y gestionar tu sesión en el local durante la duración de este piloto.",
 	},
 	{
 		heading: "Tus derechos",

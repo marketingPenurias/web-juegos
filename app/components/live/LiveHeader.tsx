@@ -1,14 +1,17 @@
 import { useTranslation } from "react-i18next";
 import { Target } from "lucide-react";
 import { TokenBadge } from "../TokenBadge";
+import { useTenant } from "../../lib/tenant";
 
 export function LiveHeader() {
 	const { t } = useTranslation();
+	// Cabecera con el nombre del LOCAL, no con una marca fija.
+	const tenant = useTenant();
 	return (
 		<header className="px-6 pt-12 sm:pt-8 pb-4 relative z-20 flex flex-col gap-5">
 			<div className="live-fade flex justify-between items-center">
 				<h1 className="text-xl font-black tracking-[0.2em] text-white uppercase drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]">
-					{t("live.brand")}
+					{t("live.brand", { name: tenant.name })}
 				</h1>
 				<TokenBadge />
 			</div>

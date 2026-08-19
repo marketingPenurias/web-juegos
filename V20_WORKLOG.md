@@ -22,8 +22,8 @@ primero antes de retomar.
 | 4 | Modularización (clean code) | 🟡 **parcial** (ver nota) | sí |
 | 5 | Refactor N-a-N `event_tracks` ↔ `global_tracks` | ✅ **hecho** | sí |
 
-> ⚠️ **Nada de F1–F5 está desplegado todavía.** La BD sí (fases 0/2/5 son
-> migraciones, ya vivas). El código espera al deploy — ver
+> ✅ **Desplegado en producción el 04/08** (BD + código). Ver
+> [validación post-deploy](#validación-post-deploy--0408-1810) y el
 > [plan de pruebas](#plan-de-pruebas-tras-el-deploy).
 
 ## Decisiones tomadas (no volver a discutir)
@@ -302,3 +302,59 @@ select * from tv_ranking('<event_id>', 10);
 -- Cuánto ocupa un evento (antes 759)
 select count(*) from event_tracks where event_id='<event_id>';
 ```
+
+---
+
+## Validación post-deploy · 04/08 18:10
+
+**Desplegado y confirmado** (marcadores presentes en los bundles de producción):
+`ng_pending_screen`, `battleLive`, `unlockMissing`, `global_track_id` (app) ·
+`tv_ranking`, `QR-TV-BATALLA`, "Escanea y vota", `checkin?` (TV).
+
+| Prueba | Cómo | Resultado |
+|---|---|---|
+| Deep-link del QR de batalla (**flujo frío**, el más frágil) | abrir `/checkin?code=…&next=live` sin sesión | ✅ guarda `ng_pending_screen=live` y `ng_pending_checkin=POCHA-ENTRADA-01`, y manda al login |
+| Worker sano | `POST /api/tv`, `/api/session`, `/api/music` sin auth | ✅ 401 limpio (no 500) |
+| Grants | `has_table_privilege` en las 7 tablas | ✅ |
+| Regla de visibilidad | 5 casos sintéticos + rollback | ✅ |
+| N-a-N lazy | evento vacío → 1 voto → 1 fila | ✅ |
+
+**Pendiente de prueba humana** (requiere sesión y evento activo): `/admin`
+(plantillas + almacén), check-in real con cuenta Google, tele, batalla, tiers,
+jukebox/tinder. Ver el [plan de pruebas](#plan-de-pruebas-tras-el-deploy).
+
+> Contexto: el 04/08 no había evento activo (todos `ended`), así que los flujos
+> de juego no se pudieron ejercitar en vivo.
+
+## FASE 6 — Marca por local (multi-tenant real) ✅
+
+**Problema.** "La Pocha" estaba escrito a fuego en 9 sitios: título de pestaña,
+splash, panel del DJ, bienvenida, nombre de la app instalada, textos legales y
+cabecera del directo. **Cualquier cliente nuevo habría visto el nombre de otra
+discoteca.** Además `theme` estaba vacío en los dos locales, así que la
+personalización de color existía pero nunca se había usado.
+
+**Cambios**
+- `tenant.tsx`: contrato de marca ampliado con `logoUrl`, `faviconUrl` y
+  `welcomeText`. Al ser `theme` un **jsonb**, ampliarlo **no requiere migración**.
+- `FALLBACK_TENANT` pasa a llamarse **NightGraph** (neutro): mientras el loader
+  resuelve el tenant, ya no se viste con la marca de un cliente concreto.
+- `home.tsx`: título, descripción y splash salen de `tenant.name`.
+- `root.tsx`: nombre de la app instalada vía `useRouteLoaderData` (funciona
+  también en pantallas de error, donde el loader puede no haber corrido).
+- `admin.tsx`, `WelcomeModal`, `LiveHeader`, `legal.tsx`: sin marca fija.
+- `i18n`: `live.brand` → `{{name}}`; textos sin nombre de local.
+
+**Demostrado en producción, sin desplegar** (los colores viven en BD):
+
+| | `lapocha.nightgraph.io` | `prueba.nightgraph.io` |
+|---|---|---|
+| Color principal | `#7DF9FF` cian | `#C084FC` morado |
+| Fondo | `#050505` | `#0B0616` |
+
+> Regla útil que queda clara: **marca visual (colores, logo) = BD → efecto
+> inmediato**; **textos y estructura = código → requieren deploy**.
+
+**Pendiente menor:** quedan literales en `i18n.ts` (`onboarding.brand`,
+nombres de productos de ejemplo) que **no se usan** en ninguna pantalla; se
+limpiarán al tocar i18n, sin prisa.
