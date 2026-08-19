@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Sparkles, Coins } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
+import { useTenant } from "../lib/tenant";
 
 /**
  * WelcomeModal — celebración ONE-SHOT del registro (+100 tokens del JIT).
@@ -22,6 +23,13 @@ export function WelcomeModal() {
 	const welcomeSeen = useGameState((s) => s.welcomeSeen);
 	const dismissWelcome = useGameState((s) => s.dismissWelcome);
 	const rewardAmount = useGameState((s) => s.rewardAmount);
+
+	// Saludo por local: `theme.welcomeText` permite un texto propio ({name} se
+	// sustituye); si no lo hay, se compone con el nombre del tenant.
+	const tenant = useTenant();
+	const welcomeTitle = (tenant.theme?.welcomeText?.trim()
+		? tenant.theme.welcomeText.replace(/\{name\}/g, tenant.name)
+		: t("welcome.title", "¡Bienvenido a {{name}}!", { name: tenant.name }));
 
 	const open = isNewUser && !welcomeSeen;
 	const bonus = rewardAmount("signup_bonus", 100);
@@ -75,7 +83,7 @@ export function WelcomeModal() {
 					{t("welcome.tag", "Regalo de bienvenida")}
 				</p>
 				<h2 className="text-2xl font-black italic tracking-tight text-white mb-3">
-					{t("welcome.title", "¡Bienvenido a La Pocha!")}
+					{welcomeTitle}
 				</h2>
 				<div className="flex items-center justify-center gap-2 my-5">
 					<Coins className="w-8 h-8 text-amber-300" aria-hidden="true" />

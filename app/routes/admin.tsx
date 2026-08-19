@@ -62,6 +62,8 @@ function tenantSlugFromHost(): string {
 }
 
 export default function Admin() {
+	// El panel se rotula con el local resuelto por subdominio (multi-marca).
+	const tenant = useTenant();
 	const [boot, setBoot] = useState<Boot>({ phase: "loading" });
 	const [metrics, setMetrics] = useState<Metrics | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -296,7 +298,7 @@ export default function Admin() {
 				<header className="flex items-center gap-3">
 					<Radio className="w-7 h-7 text-cyan-400" />
 					<div>
-						<h1 className="text-2xl font-black italic tracking-tight">Panel DJ · La Pocha</h1>
+						<h1 className="text-2xl font-black italic tracking-tight">Panel DJ · {tenant.name}</h1>
 						<p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Consola de Staff</p>
 					</div>
 				</header>

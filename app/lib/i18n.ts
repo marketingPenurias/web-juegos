@@ -90,7 +90,7 @@ const resources = {
 				streakHint: "Vuelve cada noche para sumar a tu racha",
 			},
 			live: {
-				brand: "La Pocha",
+				brand: "{{name}}",
 				level: "Nivel 4",
 				ptsToFreeShot: "50 pts para chupito gratis",
 				liveBadge: "🔴 EN VIVO",
@@ -210,7 +210,7 @@ const resources = {
 				loading: "Cargando canciones…",
 				retry: "Reintentar",
 				noEventTitle: "Aún no hay evento activo",
-				noEventSub: "Vuelve cuando empiece la noche en La Pocha.",
+				noEventSub: "Vuelve cuando empiece la noche.",
 				deckEmptyTitle: "Ya votaste todas",
 				deckEmptySub: "Vuelve cuando el DJ cargue canciones nuevas.",
 				errTitle: "No se pudieron cargar las canciones",
@@ -439,7 +439,7 @@ const resources = {
 				mission_vote: "Vote in 3 song battles",
 			},
 			live: {
-				brand: "La Pocha",
+				brand: "{{name}}",
 				level: "Level 4",
 				ptsToFreeShot: "50 pts to free shot",
 				liveBadge: "🔴 LIVE",

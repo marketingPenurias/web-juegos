@@ -325,3 +325,36 @@ jukebox/tinder. Ver el [plan de pruebas](#plan-de-pruebas-tras-el-deploy).
 
 > Contexto: el 04/08 no había evento activo (todos `ended`), así que los flujos
 > de juego no se pudieron ejercitar en vivo.
+
+## FASE 6 — Marca por local (multi-tenant real) ✅
+
+**Problema.** "La Pocha" estaba escrito a fuego en 9 sitios: título de pestaña,
+splash, panel del DJ, bienvenida, nombre de la app instalada, textos legales y
+cabecera del directo. **Cualquier cliente nuevo habría visto el nombre de otra
+discoteca.** Además `theme` estaba vacío en los dos locales, así que la
+personalización de color existía pero nunca se había usado.
+
+**Cambios**
+- `tenant.tsx`: contrato de marca ampliado con `logoUrl`, `faviconUrl` y
+  `welcomeText`. Al ser `theme` un **jsonb**, ampliarlo **no requiere migración**.
+- `FALLBACK_TENANT` pasa a llamarse **NightGraph** (neutro): mientras el loader
+  resuelve el tenant, ya no se viste con la marca de un cliente concreto.
+- `home.tsx`: título, descripción y splash salen de `tenant.name`.
+- `root.tsx`: nombre de la app instalada vía `useRouteLoaderData` (funciona
+  también en pantallas de error, donde el loader puede no haber corrido).
+- `admin.tsx`, `WelcomeModal`, `LiveHeader`, `legal.tsx`: sin marca fija.
+- `i18n`: `live.brand` → `{{name}}`; textos sin nombre de local.
+
+**Demostrado en producción, sin desplegar** (los colores viven en BD):
+
+| | `lapocha.nightgraph.io` | `prueba.nightgraph.io` |
+|---|---|---|
+| Color principal | `#7DF9FF` cian | `#C084FC` morado |
+| Fondo | `#050505` | `#0B0616` |
+
+> Regla útil que queda clara: **marca visual (colores, logo) = BD → efecto
+> inmediato**; **textos y estructura = código → requieren deploy**.
+
+**Pendiente menor:** quedan literales en `i18n.ts` (`onboarding.brand`,
+nombres de productos de ejemplo) que **no se usan** en ninguna pantalla; se
+limpiarán al tocar i18n, sin prisa.
