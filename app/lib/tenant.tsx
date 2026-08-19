@@ -7,6 +7,12 @@ export type TenantTheme = {
 	secondary?: string;
 	accent?: string;
 	background?: string;
+	/** Logotipo del local (bucket `tenant-assets`).  Sin él se usa el de marca. */
+	logoUrl?: string | null;
+	/** Icono de pestaña/PWA propio del local. */
+	faviconUrl?: string | null;
+	/** Saludo de bienvenida.  `{name}` se sustituye por el nombre del local. */
+	welcomeText?: string | null;
 };
 
 export type Tenant = {
@@ -24,6 +30,10 @@ export const DEFAULT_THEME: Required<TenantTheme> = {
 	secondary: "#39FF14",
 	accent: "#FFD700",
 	background: "#050505",
+	// Sin marca propia se cae al branding de NightGraph, nunca al de otro local.
+	logoUrl: null,
+	faviconUrl: null,
+	welcomeText: null,
 };
 
 /**
@@ -34,7 +44,10 @@ export const DEFAULT_THEME: Required<TenantTheme> = {
 export const FALLBACK_TENANT: Tenant = {
 	id: "00000000-0000-0000-0000-000000000000",
 	slug: "lapocha",
-	name: "La Pocha",
+	// Nombre NEUTRO a propósito: este fallback se usa mientras el loader aún no
+	// ha resuelto el tenant.  Si pusiéramos aquí el nombre de un cliente, otro
+	// local vería la marca ajena durante el primer render.
+	name: "NightGraph",
 	theme: { ...DEFAULT_THEME },
 	status: "active",
 };

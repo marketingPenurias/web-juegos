@@ -6,6 +6,7 @@ import {
 	Scripts,
 	ScrollRestoration,
 	useLoaderData,
+	useRouteLoaderData,
 } from "react-router";
 
 import type { Route } from "./+types/root";
@@ -157,6 +158,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
+	// `useRouteLoaderData` (y no `useLoaderData`) porque Layout también se
+	// renderiza en pantallas de error, donde el loader puede no haber corrido.
+	const rootData = useRouteLoaderData("root") as { tenant?: Tenant } | undefined;
+	const appTitle = rootData?.tenant?.name?.trim() || "NightGraph";
 	return (
 		<html lang="es" className="bg-black">
 			<head>
@@ -172,7 +177,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 					name="apple-mobile-web-app-status-bar-style"
 					content="black-translucent"
 				/>
-				<meta name="apple-mobile-web-app-title" content="La Pocha" />
+				<meta name="apple-mobile-web-app-title" content={appTitle} />
 				<meta name="format-detection" content="telephone=no" />
 				<Meta />
 				<Links />
