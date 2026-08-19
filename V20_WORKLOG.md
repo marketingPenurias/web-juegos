@@ -389,7 +389,17 @@ habría roto la app):
   `requireTenantRole` no los importaba nadie. (`serializeCookie`, que sí se usa,
   vive en `api.server.ts` — por eso parecía vivo.)
 - **`app/types/env.d.ts`**: falso positivo, los `.d.ts` no se importan por diseño.
-- **`app/components/_future/`** (`MissionRow`, `ViralLoopCard`): **NO se borra sin
-  decisión de producto.** No es un resto: hay un README que documenta qué
-  necesita cada uno para revivir (tabla `missions`, RPC `redeem_referral`).
-  Pendiente de decidir: borrar (git los conserva) o mantener.
+- **Eliminada `app/components/_future/`** (`MissionRow`, `ViralLoopCard`, README)
+  tras revisarlos uno a uno:
+  - `MissionRow`: una barra de progreso N/M. No aparece en el roadmap y se
+    rehace en minutos cuando exista la tabla `missions`.
+  - `ViralLoopCard`: maqueta del bucle viral. Botones **sin handlers** y el
+    "4 amigos / ronda de chupitos" escrito a fuego (debe venir de la economía).
+    Cuando se haga el loop de invitación de verdad (S4) la UI se rehará contra
+    el contador y el código de invitación reales.
+  - Efecto secundario detectado: estos dos ficheros **mantenían vivas
+    artificialmente 6 claves i18n** (`hub.viralTitle`, `hub.packLeader`…) que
+    las auditorías contaban como usadas. Borradas también.
+  - Git conserva ambos si algún día se quieren recuperar como referencia visual.
+
+**Total i18n tras la limpieza completa: 298 → 224 claves en ES** (−25 %).
