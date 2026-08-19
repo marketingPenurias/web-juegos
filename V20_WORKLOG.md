@@ -358,3 +358,38 @@ personalización de color existía pero nunca se había usado.
 **Pendiente menor:** quedan literales en `i18n.ts` (`onboarding.brand`,
 nombres de productos de ejemplo) que **no se usan** en ninguna pantalla; se
 limpiarán al tocar i18n, sin prisa.
+
+## FASE 7 — Limpieza de código muerto ✅
+
+**Criterio: cero restos.** Auditoría con script (no a ojo), verificando cada
+candidato antes de borrar.
+
+### i18n — 68 claves muertas eliminadas (de 298 → 230 en ES)
+Restos de la maqueta que quedaron cuando la funcionalidad pasó a otro sitio:
+
+| Grupo | Qué era | Dónde vive ahora |
+|---|---|---|
+| `menu.items.*` (18) | productos inventados (Carajillo, Camiseta, Gorra) | catálogo real en `tenant_products` |
+| `ticket.*` (13) | textos del ticket de la maqueta | el ticket real es `RedemptionScreen` → `redemption.*` |
+| `hub.profileName` ("Alejandro"), `hub.levelStatus` | datos de usuario inventados | perfil real desde `/api/session` |
+| `music.*`, `live.*`, `history.tx_*` … | pantallas/flujos que cambiaron | — |
+
+**Preservadas pese a parecer muertas** (se resuelven en runtime; borrarlas
+habría roto la app):
+- `lang.es` / `lang.en` → se llaman con `` t(`lang.${current}`) ``.
+- `tinder.swipesLeft_one` / `_other` → plurales de i18next vía `t(..., {count})`.
+
+**Verificación:** las 29 claves que el código usa sin definir **todas tienen
+`defaultValue`**, así que no rompen. La desincronización ES/EN **mejoró**
+(65 → 61 claves sin traducir); no se introdujo ninguna nueva.
+
+### Módulos huérfanos
+- **Eliminado** `lib/cookie-auth.server.ts`: resto de cuando la TV se
+  autenticaba por cookie. Desde V1.6 usa Bearer, así que `verifyCookieAuth` y
+  `requireTenantRole` no los importaba nadie. (`serializeCookie`, que sí se usa,
+  vive en `api.server.ts` — por eso parecía vivo.)
+- **`app/types/env.d.ts`**: falso positivo, los `.d.ts` no se importan por diseño.
+- **`app/components/_future/`** (`MissionRow`, `ViralLoopCard`): **NO se borra sin
+  decisión de producto.** No es un resto: hay un README que documenta qué
+  necesita cada uno para revivir (tabla `missions`, RPC `redeem_referral`).
+  Pendiente de decidir: borrar (git los conserva) o mantener.
