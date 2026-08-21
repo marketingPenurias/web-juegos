@@ -5,13 +5,14 @@ import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
 	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
 	Square, Search, CalendarClock, CalendarPlus, Play, ListMusic, Copy,
-	Library, FolderPlus, Tv, Images, Eye, EyeOff,
+	Library, FolderPlus, Tv, Images, Eye, EyeOff, Zap,
 } from "lucide-react";
 import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { useTenant } from "../lib/tenant";
 import { cn } from "../lib/utils";
 import { VENUE_TZ, toLocalInput, fromLocalInput } from "../lib/madrid-time";
+import { FlashDropPanel } from "../components/admin/FlashDropPanel";
 
 /**
  * /admin — Consola del DJ / Staff (Bloque 4).
@@ -34,7 +35,7 @@ type Metrics = { total_votes: number; tokens_spent_today: number; checkins_today
 type Template = { id: string; name: string; created_at: string; track_count: number };
 
 // V1.7: navegación por pestañas estilo Rekordbox/Traktor.
-type AdminTab = "live" | "templates" | "global";
+type AdminTab = "live" | "promos" | "templates" | "global";
 
 type Boot =
 	| { phase: "loading" }
@@ -426,6 +427,11 @@ export default function Admin() {
 						)}
 
 						{/* ── PESTAÑA 2 · GESTIÓN DE PLANTILLAS ──────────────── */}
+						{/* ── PESTAÑA 2 · PROMOCIONES ────────────────────────── */}
+						{activeTab === "promos" && (
+							<FlashDropPanel call={call} onToast={flash} />
+						)}
+
 						{activeTab === "templates" && (
 							<TemplatesPanel
 								templates={templates}
@@ -438,7 +444,7 @@ export default function Admin() {
 							/>
 						)}
 
-						{/* ── PESTAÑA 3 · ALMACÉN GLOBAL ─────────────────────── */}
+						{/* ── PESTAÑA 4 · ALMACÉN GLOBAL ─────────────────────── */}
 						{activeTab === "global" && (
 							<LibraryPanel
 								tracks={globalTracks}
@@ -1292,6 +1298,7 @@ function TabBar({ active, onChange, templateCount }: {
 }) {
 	const tabs: { id: AdminTab; label: string; Icon: typeof Radio }[] = [
 		{ id: "live", label: "Sesión en vivo", Icon: Radio },
+		{ id: "promos", label: "Promos", Icon: Zap },
 		{ id: "templates", label: "Plantillas", Icon: ListMusic },
 		{ id: "global", label: "Almacén global", Icon: Library },
 	];

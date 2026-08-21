@@ -48,6 +48,13 @@ type AdminBody = {
 	// V17: partir la pantalla mostrando la canción que suena ahora (mitad
 	// derecha) junto al ranking (mitad izquierda).
 	tv_show_now_playing?: boolean;
+	// V21: Flash Drops — promoción con caducidad y stock lanzada por el DJ.
+	product_id?: string;
+	promo_price_eur?: number;
+	stock?: number;
+	label?: string;
+	tokens_per_euro?: number;
+	rule_id?: string;
 };
 
 type ParsedTrack = {
@@ -613,6 +620,95 @@ export async function handleAdminAction(
 				table_name: "event_templates", record_id: id, new_data: { name },
 			});
 			return jsonResponse({ ok: true }, { request });
+		}
+
+		// ── Flash Drops ────────────────────────────────────────────────
+		// La palanca de la noche: el DJ ve que la sala está fría y suelta una
+		// promoción agresiva con caducidad y stock.  No es una feature aparte,
+		// es una regla de disponibilidad con vigencia corta — pero SÍ lleva
+		// `campaign_code` propio para poder medir cada activación por separado.
+		case "promo_panel": {
+			const [{ data: products, error: prodErr }, { data: campaigns, error: campErr }] =
+				await Promise.all([
+					supabase
+						.from("tenant_products")
+						.select("id, name, list_price_eur, promo_price_eur")
+						.eq("tenant_id", tenant_id)
+						.eq("is_active", true)
+						.eq("redemption_type", "discount")
+						.order("list_price_eur", { ascending: true }),
+					supabase
+						.from("product_availability")
+						.select(
+							"id, campaign_code, label, promo_price_eur, tokens_per_euro, " +
+								"valid_from, valid_to, stock_total, stock_used, is_active, " +
+								"product:tenant_products(name)",
+						)
+						.eq("tenant_id", tenant_id)
+						.eq("kind", "flash_drop")
+						.order("valid_from", { ascending: false })
+						.limit(20),
+				]);
+			// Igual que en `bootstrap`: un error tragado aquí pintaría un panel
+			// vacío que parece "no hay nada" cuando en realidad falló la carga.
+			const warnings: string[] = [];
+			if (prodErr) { console.warn("[api.admin] promo products", prodErr.message); warnings.push("products"); }
+			if (campErr) { console.warn("[api.admin] promo campaigns", campErr.message); warnings.push("campaigns"); }
+			return jsonResponse(
+				{ ok: true, products: products ?? [], campaigns: campaigns ?? [], warnings },
+				{ request },
+			);
+		}
+
+		case "create_flash_drop": {
+			const productId = String(body.product_id ?? "");
+			const price = Number(body.promo_price_eur);
+			const minutes = Number(body.minutes);
+			if (!productId) return jsonResponse({ ok: false, error: "product_required" }, { status: 400, request });
+			if (!Number.isFinite(price) || price < 0) return jsonResponse({ ok: false, error: "invalid_price" }, { status: 400, request });
+			if (!Number.isInteger(minutes) || minutes < 1 || minutes > 480) {
+				return jsonResponse({ ok: false, error: "invalid_minutes" }, { status: 400, request });
+			}
+			const stock = Number.isInteger(body.stock) && Number(body.stock) > 0 ? Number(body.stock) : null;
+			const { data, error } = await supabase.rpc("create_flash_drop", {
+				p_tenant_id: tenant_id,
+				p_product_id: productId,
+				p_promo_price_eur: price,
+				p_minutes: minutes,
+				p_stock: stock,
+				p_tier_code: null,
+				p_label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 80) : null,
+				p_tokens_per_euro: Number.isInteger(body.tokens_per_euro) ? Number(body.tokens_per_euro) : null,
+			});
+			if (error) {
+				return jsonResponse({ ok: false, error: "rpc_failed", detail: error.message }, { status: 400, request });
+			}
+			// Un drop regala dinero: queda en el registro de auditoría con quién
+			// lo lanzó, igual que cualquier otra decisión de la sala.
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "create_flash_drop",
+				table_name: "product_availability",
+				record_id: (data as { rule_id?: string } | null)?.rule_id ?? null,
+				new_data: data as Record<string, unknown>,
+			});
+			return jsonResponse({ ok: true, ...(data as object) }, { request });
+		}
+
+		case "end_flash_drop": {
+			const ruleId = String(body.rule_id ?? "");
+			if (!ruleId) return jsonResponse({ ok: false, error: "rule_id_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("end_flash_drop", {
+				p_tenant_id: tenant_id, p_rule_id: ruleId,
+			});
+			if (error) {
+				return jsonResponse({ ok: false, error: "rpc_failed", detail: error.message }, { status: 400, request });
+			}
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "end_flash_drop",
+				table_name: "product_availability", record_id: ruleId,
+				new_data: data as Record<string, unknown>,
+			});
+			return jsonResponse({ ok: true, ...(data as object) }, { request });
 		}
 
 		default:
