@@ -15,7 +15,7 @@ import {
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useAuthUser } from "../lib/useAuthUser";
-import { TIERS, tierFromLifetime, tierProgressFraction } from "../lib/tier";
+import { TIERS } from "../lib/tier";
 import { getBrowserSupabase } from "../lib/supabase.client";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { Toast } from "../components/Toast";
@@ -27,7 +27,8 @@ import { Toast } from "../components/Toast";
  *     muestra etiqueta "Invitado" en vez de un mock que parezca real.
  *   · tokens disponibles ← `useGameState.tokens` (sincronizado por
  *     useSession).
- *   · tier + progreso ← `lifetimeEarned` vía helpers en `lib/tier`.
+ *   · tier + progreso ← el nivel lo resuelve el SERVIDOR y los umbrales
+ *     vienen en `tiers` (configurables por sala); aquí solo se dibuja.
  *   · "Cerrar sesión" cierra la sesión Supabase Y limpia el store
  *     (logout).  Sin eso, el SIGNED_OUT no llega y el usuario se queda
  *     con balance de la sesión anterior persistido en sessionStorage.
@@ -47,12 +48,23 @@ export function Profile() {
 
 	const containerRef = useRef<HTMLDivElement>(null);
 
-	const tier = useMemo(() => tierFromLifetime(lifetime), [lifetime]);
+	const tier = useGameState((s) => s.tier);
+	const tiers = useGameState((s) => s.tiers);
 	const tierMeta = TIERS[tier];
-	const progress = useMemo(
-		() => tierProgressFraction(lifetime, tier),
-		[lifetime, tier],
-	);
+
+	// Progreso hacia el nivel siguiente con los umbrales REALES de la sala.
+	// Sin ellos (sesión aún cargando) no se inventa un porcentaje: se deja a 0.
+	const progress = useMemo(() => {
+		const current = tiers.find((tr) => tr.tier_code === tier);
+		if (!current) return 0;
+		const next = tiers
+			.filter((tr) => tr.sort_order > current.sort_order)
+			.sort((a, b) => a.sort_order - b.sort_order)[0];
+		if (!next) return 1; // ya está en lo más alto
+		const range = next.min_lifetime - current.min_lifetime;
+		if (range <= 0) return 1;
+		return Math.min(1, Math.max(0, (lifetime - current.min_lifetime) / range));
+	}, [tiers, tier, lifetime]);
 
 	const displayName =
 		authUser?.displayName?.trim() ||

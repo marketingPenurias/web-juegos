@@ -108,10 +108,34 @@ así que el check-in está garantizado.
 `id`, `tenant_id`, `product_id`, `tier_code` (null = todos),
 `days` smallint[] (ISO dow), `hour_from`, `hour_to` (null = toda la noche),
 `valid_from`, `valid_to` (campañas), `max_per_night`, `max_per_week`,
-`stock_total`, `stock_used` (Flash Drops), `is_active`.
+`stock_total`, `stock_used` (Flash Drops), `is_active`,
+`promo_price_eur` y `tokens_per_euro` (sobrescriben producto/nivel),
+`kind`, `campaign_code`, `label`.
+
+> `hour_from > hour_to` significa que la ventana **cruza medianoche** (22 → 02
+> es "hasta las dos"), que es el caso normal en una discoteca.  Y el día se
+> compara contra `business_night()`, no contra el reloj: a las 02:00 del sábado
+> se sigue estando en la noche del viernes.
+
+`promo_price_eur` y `tokens_per_euro` en la regla **sobrescriben** los del
+producto y del nivel.  Sin el segundo, un Flash Drop sale *más caro*: más
+descuento × la misma tasa = más tokens y el mismo valor por token, o sea
+ninguna oferta.  Con él, un drop es literalmente *"durante 30 minutos todos
+pagáis como un Platino"*.
 
 > **Un Flash Drop no es una feature aparte**: es una fila de disponibilidad con
 > `valid_from/valid_to` cortos y `stock_total`.
+
+### Campañas medibles
+`kind` (`base` | `flash_drop` | `happy_hour` | `campaign`) y `campaign_code`
+(`FD-20260821-01`) le dan identidad propia a cada activación.  El canje copia
+`availability_id`, `campaign_code` y `discount_eur` a `user_rewards`, así que
+la atribución sobrevive aunque después se borre la regla.
+
+La vista `campaign_performance` responde *"¿mereció la pena?"*: canjes,
+usuarios, € de descuento regalado, **tasa de consumo en barra** e ingreso real.
+Sin esto se sabría que hubo canjes, pero no bajo qué oferta — y una campaña que
+no se puede medir no se puede repetir ni cortar.
 
 ## 7. Qué ve el usuario
 
@@ -132,7 +156,7 @@ promoción activa en algún tramo de la noche, avisar:
 
 ## 9. Migración (sin perder datos)
 
-1. Fusionar los 22 productos actuales en **11 únicos** (hoy están duplicados por
+1. Fusionar los 22 productos actuales en **13 únicos** (hoy están duplicados por
    nivel: "Copa Nacional 6€" y "— Oro" son la misma).
 2. Rellenar `list_price_eur` con los precios reales de barra (hoy
    `reference_fiat` guarda el precio ya promocionado: 6 € en vez de 9 €).
@@ -140,10 +164,27 @@ promoción activa en algún tramo de la noche, avisar:
    `available_days` actuales.
 4. `purchase_reward` pasa a calcular el coste (descuento × tasa) y a validar
    franja horaria, vigencia y stock.
-5. `user_rewards` guarda el coste real cobrado (ya lo hace con
-   `price_tokens_at_time`).
+5. `user_rewards` guarda el coste cobrado, el descuento y la campaña.
 
-## 10. Calibración
+**Estado: aplicado el 2026-08-21** en las dos salas (`prueba` y `lapocha`).
+Migraciones en `database/27..29_v21_*.sql`.  `seed_default_catalog(tenant_id)`
+quedó como función reutilizable: da de alta el catálogo de una discoteca nueva
+de una sola llamada.
+
+## 10. Verificación de la regla de oro
+
+Se barrieron los 4 niveles × 5 noches × 8 horas de apertura (160 combinaciones)
+contra `matching_rules`: **0 huecos**.  El bronce nunca baja de 7 promociones
+activas; lo que pierde a medianoche el fin de semana es la copa, no el menú.
+
+| Viernes | 🥉 Bronce | 🥈 Plata | 🥇 Oro | 💎 Platino |
+|---|---|---|---|---|
+| 22:00 | 9 (con copa) | 10 | 13 | 14 |
+| 00:00 | **7** (sin copa) | 10 | 13 | 14 |
+| 02:00 | 7 | **8** (sin copa) | 13 | 14 |
+| 04:00 | 7 | 8 | **11** (sin copa) | 14 |
+
+## 11. Calibración
 Los números son un **punto de partida coherente**, no la verdad. La tasa
 (150 tk/€) y los umbrales se recalibran con la primera noche real de septiembre,
 cuando se vea cuántos tokens gana la gente con el check-in ya arreglado.

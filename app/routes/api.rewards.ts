@@ -142,60 +142,25 @@ export async function action({ request, context }: Route.ActionArgs) {
 			});
 
 			if (error) {
-				const msg = (error.message || "").toLowerCase();
 				const detail = error.message;
-				// Orden: matches más específicos primero.  Las RAISE
-				// EXCEPTION del RPC `purchase_reward` cubren 8 escenarios
-				// distintos; cada uno se traduce a un código accionable
-				// + status HTTP para que el cliente decida qué toast
-				// mostrar (saldo, día, nivel, límite, etc.) en lugar de
-				// caer todo a un 500 genérico.
-				if (msg.includes("saldo")) {
+				// `purchase_reward` marca cada motivo de rechazo con su propio
+				// SQLSTATE, así que el mapeo es por CÓDIGO y no por el texto del
+				// mensaje: reescribir el copy en español ya no rompe nada.
+				const BY_CODE: Record<string, { error: string; status: number }> = {
+					NG001: { error: "insufficient_funds", status: 400 },
+					NG002: { error: "profile_not_found", status: 404 },
+					NG003: { error: "product_unavailable", status: 409 },
+					NG004: { error: "promo_sold_out", status: 409 },
+					NG005: { error: "night_limit_reached", status: 429 },
+					NG006: { error: "night_limit_reached", status: 429 },
+					NG007: { error: "week_limit_reached", status: 429 },
+					NG008: { error: "product_unavailable", status: 404 },
+				};
+				const mapped = BY_CODE[(error as { code?: string }).code ?? ""];
+				if (mapped) {
 					return jsonResponse(
-						{ ok: false, error: "insufficient_funds", detail },
-						{ status: 400, request },
-					);
-				}
-				if (msg.includes("perfil")) {
-					return jsonResponse(
-						{ ok: false, error: "profile_not_found", detail },
-						{ status: 404, request },
-					);
-				}
-				if (msg.includes("nivel insuficiente")) {
-					return jsonResponse(
-						{ ok: false, error: "tier_required", detail },
-						{ status: 403, request },
-					);
-				}
-				if (msg.includes("no disponible hoy")) {
-					return jsonResponse(
-						{ ok: false, error: "product_wrong_day", detail },
-						{ status: 400, request },
-					);
-				}
-				if (msg.includes("límite por noche") || msg.includes("limite por noche")) {
-					return jsonResponse(
-						{ ok: false, error: "night_limit_reached", detail },
-						{ status: 429, request },
-					);
-				}
-				if (msg.includes("límite semanal") || msg.includes("limite semanal")) {
-					return jsonResponse(
-						{ ok: false, error: "week_limit_reached", detail },
-						{ status: 429, request },
-					);
-				}
-				if (msg.includes("límite mensual") || msg.includes("limite mensual")) {
-					return jsonResponse(
-						{ ok: false, error: "month_limit_reached", detail },
-						{ status: 429, request },
-					);
-				}
-				if (msg.includes("producto")) {
-					return jsonResponse(
-						{ ok: false, error: "product_unavailable", detail },
-						{ status: 404, request },
+						{ ok: false, error: mapped.error, detail },
+						{ status: mapped.status, request },
 					);
 				}
 				console.warn("[api.rewards] purchase_reward error", error.message);
@@ -392,8 +357,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	const { data, error } = await supabase
 		.from("user_rewards")
 		.select(
-			"id, status, expires_at, created_at, " +
-				"product:tenant_products(name, reference_fiat, price_tokens)",
+			"id, status, expires_at, created_at, discount_eur, campaign_code, " +
+				"product:tenant_products(name, list_price_eur, promo_price_eur)",
 		)
 		.eq("tenant_id", tenant_id)
 		.eq("user_id", user_profile_id)
@@ -409,28 +374,41 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		);
 	}
 
+	type ProductEmbed = {
+		name: string;
+		list_price_eur: number | null;
+		promo_price_eur: number | null;
+	};
 	type Joined = {
 		id: string;
 		status: string;
 		expires_at: string | null;
 		created_at: string;
-		product:
-			| { name: string; reference_fiat: number | null; price_tokens: number }
-			| { name: string; reference_fiat: number | null; price_tokens: number }[]
-			| null;
+		discount_eur: number | null;
+		campaign_code: string | null;
+		product: ProductEmbed | ProductEmbed[] | null;
 	};
 
 	const rows = ((data ?? []) as unknown as Joined[]).map((r) => {
 		// El embed to-one puede llegar como objeto o array de 1 según el cliente.
 		const p = Array.isArray(r.product) ? r.product[0] : r.product;
+		// Lo que el camarero tiene que cobrar es lo que se pactó EN LA COMPRA:
+		// precio de barra menos el descuento que se llevó ese canje.  Leerlo del
+		// producto daría un importe equivocado en cuanto una campaña hubiera
+		// aplicado un precio distinto o la sala cambiara la carta después.
+		const list = Number(p?.list_price_eur ?? 0);
+		const priceEur =
+			r.discount_eur !== null
+				? Math.max(0, list - Number(r.discount_eur))
+				: Number(p?.promo_price_eur ?? 0);
 		return {
 			id: r.id,
 			status: r.status,
 			expires_at: r.expires_at,
 			created_at: r.created_at,
 			product_name: p?.name ?? "Recompensa",
-			price_eur: Number(p?.reference_fiat ?? 0),
-			price_tokens: Number(p?.price_tokens ?? 0),
+			price_eur: priceEur,
+			campaign_code: r.campaign_code,
 		};
 	});
 

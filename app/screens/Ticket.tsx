@@ -4,7 +4,6 @@ import {
 	Ticket as TicketIcon,
 	GlassWater,
 	Gift,
-	Coins,
 	Loader2,
 	RefreshCw,
 	ChevronRight,
@@ -196,13 +195,11 @@ export function Ticket() {
 									{reward.product_name}
 								</p>
 								<div className="flex items-center gap-2 mt-1">
-									<span className="inline-flex items-center gap-1 text-cyan-300 font-black text-[11px] tabular-nums">
-										<Coins className="w-3 h-3" aria-hidden="true" />
-										{reward.price_tokens}
-									</span>
+									{/* El ticket ya está pagado en tokens: lo único que
+									    importa aquí es cuánto se cobra en barra. */}
 									{!isFree && (
 										<span className="text-amber-300 font-black text-[11px] tabular-nums">
-											€{reward.price_eur.toFixed(2)}
+											{reward.price_eur.toFixed(0)}€
 										</span>
 									)}
 									{reward.status === "redeeming" && (

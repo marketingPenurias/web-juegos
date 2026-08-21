@@ -3,27 +3,45 @@ import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { gsap, useGSAP } from "../../lib/gsap";
 import { useGameState } from "../../store/useGameState";
-import { TIERS, TIER_ORDER, tierFromLifetime } from "../../lib/tier";
+import { TIERS, TIER_ORDER, isTierCode, type TierCode } from "../../lib/tier";
 import { cn } from "../../lib/utils";
 
 /**
- * TierRibbon — banda visual con los 4 niveles para el Hub.
+ * TierRibbon — banda visual con los niveles de la sala para el Hub.
  *
- *   Piloto MVP: el tier "actual" se calcula desde `lifetimeEarned` con
- *   `tierFromLifetime`.  Para el piloto donde casi nadie pasará de
- *   500 tokens, el badge Bronce es el normal y los superiores aparecen
- *   con candado y "Próximamente".  En Fase 2 se sustituye por el
- *   estado real (incluyendo riesgo / downgrade Platino).
+ *   Tanto el nivel actual como los umbrales vienen del SERVIDOR: cada
+ *   discoteca configura su propia escalera (nombres, emojis y puntos), así que
+ *   calcularlos aquí con constantes obligaría a mantener dos verdades.  Si la
+ *   sesión aún no ha respondido, se cae a los cuatro niveles por defecto solo
+ *   para no dejar el hueco vacío en el primer render.
  *
- *   Cero lógica de bloqueos en otras vistas — esta cinta es la única
- *   pista visual de progresión para el piloto.
+ *   Es la única pista visual de progresión: ninguna otra vista bloquea nada.
  */
 
 export function TierRibbon() {
 	const { t } = useTranslation();
 	const lifetime = useGameState((s) => s.lifetimeEarned);
 	const tokens = useGameState((s) => s.tokens);
-	const currentTier = tierFromLifetime(lifetime);
+	const currentTier = useGameState((s) => s.tier);
+	const tiers = useGameState((s) => s.tiers);
+
+	// Escalera real de la sala; respaldo visual mientras carga la sesión.
+	const ladder =
+		tiers.length > 0
+			? tiers
+					.filter((tr) => isTierCode(tr.tier_code))
+					.map((tr) => ({
+						code: tr.tier_code as TierCode,
+						displayName: tr.display_name || TIERS[tr.tier_code as TierCode].displayName,
+						emoji: tr.badge_emoji || TIERS[tr.tier_code as TierCode].emoji,
+						minLifetime: tr.min_lifetime,
+					}))
+			: TIER_ORDER.map((code) => ({
+					code,
+					displayName: TIERS[code].displayName,
+					emoji: TIERS[code].emoji,
+					minLifetime: 0,
+				}));
 	const containerRef = useRef<HTMLDivElement>(null);
 
 	useGSAP(
@@ -56,10 +74,11 @@ export function TierRibbon() {
 			</div>
 
 			<div className="grid grid-cols-4 gap-2">
-				{TIER_ORDER.map((code) => {
+				{ladder.map((step) => {
+					const code = step.code;
 					const meta = TIERS[code];
 					const isCurrent = code === currentTier;
-					const isUnlocked = lifetime >= meta.minLifetime;
+					const isUnlocked = lifetime >= step.minLifetime;
 					return (
 						<div
 							key={code}
@@ -85,7 +104,7 @@ export function TierRibbon() {
 									filter: isUnlocked ? undefined : "grayscale(0.7)",
 								}}
 							>
-								{meta.emoji}
+								{step.emoji}
 							</span>
 							<span
 								className={cn(
@@ -96,7 +115,7 @@ export function TierRibbon() {
 									color: isCurrent ? meta.colorPrimary : undefined,
 								}}
 							>
-								{meta.displayName}
+								{step.displayName}
 							</span>
 							{!isUnlocked && (
 								<Lock

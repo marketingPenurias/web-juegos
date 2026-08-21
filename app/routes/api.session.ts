@@ -347,6 +347,36 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		}
 	}
 
+	// ── Niveles de la sala ────────────────────────────────────────────
+	// Los umbrales y la tasa tk/€ son configurables POR DISCOTECA, así que no
+	// pueden vivir cableados en el cliente: dos salas tienen escaleras
+	// distintas.  Se mandan con la sesión igual que `reward_rules`.
+	type TierRule = {
+		tier_code: string;
+		display_name: string;
+		min_lifetime: number;
+		tokens_per_euro: number | null;
+		max_redemptions_per_night: number | null;
+		badge_emoji: string | null;
+		sort_order: number;
+	};
+	let tiers: TierRule[] = [];
+	{
+		const { data, error } = await supabase
+			.from("tenant_tier_thresholds")
+			.select(
+				"tier_code, display_name, min_lifetime, tokens_per_euro, " +
+					"max_redemptions_per_night, badge_emoji, sort_order",
+			)
+			.eq("tenant_id", tenant_id)
+			.order("sort_order", { ascending: true });
+		if (error) {
+			console.warn("[api.session] tier lookup failed", error.message);
+		} else if (data) {
+			tiers = data as unknown as TierRule[];
+		}
+	}
+
 	return jsonResponse(
 		{
 			ok: true,
@@ -359,6 +389,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			auth_email: verified.email,
 			active_event,
 			tier,
+			tiers,
 			daily_activity: dailyActivity,
 			reward_rules,
 			streak,

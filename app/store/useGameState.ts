@@ -29,6 +29,21 @@ export type DailyActivity = {
 	jukebox_boost: boolean;
 };
 
+/**
+ * Un nivel de la escalera de fidelidad, tal y como lo configura CADA sala.
+ * Llega en `/api/session`; el cliente no calcula umbrales ni precios.
+ */
+export type TierRule = {
+	tier_code: string;
+	display_name: string;
+	min_lifetime: number;
+	/** Tokens por cada € de descuento en este nivel (menos = mejor). */
+	tokens_per_euro: number | null;
+	max_redemptions_per_night: number | null;
+	badge_emoji: string | null;
+	sort_order: number;
+};
+
 export type RewardRule = {
 	event_code: string;
 	amount: number;
@@ -88,6 +103,10 @@ type GameState = {
 	// `tenant_tier_thresholds`).  Se guarda tal cual para no recalcularlo en
 	// cliente con constantes que podrían desincronizarse (V20 · F3).
 	tier: TierCode;
+	// La escalera de niveles de ESTA sala (umbrales, tasa tk/€, canjes por
+	// noche).  Es configurable por discoteca, así que llega del servidor en vez
+	// de estar cableada en el cliente.  Vacío = aún no ha respondido la sesión.
+	tiers: TierRule[];
 	// ¿Se ha resuelto ya /api/session al menos una vez?  El gate de cumpleaños
 	// SÓLO puede mostrarse cuando esto es true — así no parpadea en cada
 	// recarga mientras `birthDate` (no persistido) aún no ha llegado del server.
@@ -134,6 +153,7 @@ type GameState = {
 		isNewUser?: boolean;
 		birthDate?: string | null;
 		tier?: TierCode;
+		tiers?: TierRule[];
 	}) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
 	setStreak: (streak: number) => void;
@@ -160,6 +180,7 @@ export const useGameState = create<GameState>()(
 			activeEventName: null,
 			birthDate: null,
 			tier: "bronce",
+			tiers: [],
 			sessionLoaded: false,
 			activeRedemption: null,
 			battleActive: false,
@@ -195,6 +216,7 @@ export const useGameState = create<GameState>()(
 					activeEventName: null,
 					birthDate: null,
 					tier: "bronce",
+					tiers: [],
 					// Al desloguear, la próxima sesión debe re-resolverse antes de
 					// poder mostrar el gate de cumpleaños.
 					sessionLoaded: false,
@@ -221,6 +243,7 @@ export const useGameState = create<GameState>()(
 				isNewUser,
 				birthDate,
 				tier,
+				tiers,
 			}) =>
 				set((state) => ({
 					userProfileId,
@@ -233,6 +256,7 @@ export const useGameState = create<GameState>()(
 					sessionLoaded: true,
 					birthDate: birthDate !== undefined ? birthDate : state.birthDate,
 					tier: tier ?? state.tier,
+					tiers: tiers && tiers.length > 0 ? tiers : state.tiers,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
 					streak: typeof streak === "number" ? streak : state.streak,
