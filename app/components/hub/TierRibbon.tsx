@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { gsap, useGSAP } from "../../lib/gsap";
@@ -57,6 +57,47 @@ export function TierRibbon() {
 		},
 		{ scope: containerRef, dependencies: [currentTier] },
 	);
+
+	// Qué le falta para el siguiente nivel y qué gana con él.  Todo sale de la
+	// configuración de la sala, así que el mensaje es cierto en cualquier
+	// discoteca sin tocarlo.
+	const nextStep = useMemo(() => {
+		if (tiers.length === 0) return null;
+		const current = tiers.find((tr) => tr.tier_code === currentTier);
+		if (!current) return null;
+		const next = tiers
+			.filter((tr) => tr.sort_order > current.sort_order)
+			.sort((a, b) => a.sort_order - b.sort_order)[0];
+		if (!next) return null;
+
+		const perks: string[] = [];
+		const rateNow = current.tokens_per_euro;
+		const rateNext = next.tokens_per_euro;
+		if (rateNow && rateNext && rateNext < rateNow) {
+			perks.push(
+				t("hub.perkCheaper", {
+					pct: Math.round(((rateNow - rateNext) / rateNow) * 100),
+				}),
+			);
+		}
+		// null = sin límite, que es una mejora aunque no sea un número mayor.
+		if (next.max_redemptions_per_night === null) {
+			perks.push(t("hub.perkUnlimited"));
+		} else if (
+			current.max_redemptions_per_night !== null &&
+			next.max_redemptions_per_night > current.max_redemptions_per_night
+		) {
+			perks.push(
+				t("hub.perkRedemptions", { count: next.max_redemptions_per_night }),
+			);
+		}
+
+		return {
+			displayName: next.display_name,
+			missing: Math.max(0, next.min_lifetime - lifetime),
+			perks,
+		};
+	}, [tiers, currentTier, lifetime, t]);
 
 	return (
 		<section
@@ -138,13 +179,29 @@ export function TierRibbon() {
 				})}
 			</div>
 
-			<p className="text-[10px] text-zinc-500 mt-3 text-center px-1 leading-relaxed">
-				{t(
-					"hub.tierFooter",
-					"Sube de nivel ganando tokens en los juegos · disponible {{n}}",
-					{ n: tokens },
-				)}
-			</p>
+			{/* El gancho de retención: que alguien nuevo quiera volver una
+			    SEGUNDA noche.  Un "sube de nivel" genérico no mueve a nadie;
+			    decirle cuánto le falta y qué gana exactamente, sí. */}
+			{nextStep ? (
+				<p className="text-[10px] text-zinc-400 mt-3 text-center px-1 leading-relaxed">
+					{t("hub.tierNext", {
+						n: nextStep.missing,
+						tier: nextStep.displayName,
+					})}
+					{nextStep.perks.length > 0 && (
+						<span className="text-zinc-500">
+							{" · "}
+							{nextStep.perks.join(" · ")}
+						</span>
+					)}
+				</p>
+			) : (
+				<p className="text-[10px] text-zinc-500 mt-3 text-center px-1 leading-relaxed">
+					{t("hub.tierTop", "Estás en el nivel máximo · disponible {{n}}", {
+						n: tokens,
+					})}
+				</p>
+			)}
 		</section>
 	);
 }

@@ -20,6 +20,7 @@ Se actualiza a medida que avanza la implementación.
 | Consola de Flash Drops (`/admin` → Promos) | ✅ ciclo probado en BD · 🧪 falta usarla |
 | Panel de configuración (`/admin` → Promos) | ✅ efecto probado en BD · 🧪 falta usarlo |
 | Aviso de la regla de oro al guardar | ✅ probado (detecta y no falsea) |
+| Mensaje de ambición en el Hub | ✅ cifras verificadas · 🧪 falta verlo |
 | Retirada de las columnas obsoletas | ⏸ tras desplegar |
 
 ---
@@ -49,10 +50,13 @@ Se actualiza a medida que avanza la implementación.
 - [ ] Cortarlo: desaparece del móvil y el precio vuelve al normal.
 - [ ] El código (`FD-…`) se ve en el panel y queda en el histórico.
 
-### 4. Niveles 🧪
+### 4. Niveles y gancho de retención 🧪
 - [ ] La cinta del Hub pinta los niveles **de la sala** (no los cableados).
 - [ ] El progreso al siguiente nivel usa los umbrales reales (Plata = 300).
 - [ ] El badge del perfil coincide con el nivel que dice el servidor.
+- [ ] Un bronce nuevo lee *"Te faltan 50 puntos para Plata · todo un 17% más
+      barato · 2 canjes por noche"*.
+- [ ] Un platino lee *"Estás en el nivel máximo"*, no un mensaje roto.
 
 ### 5. Configuración por sala (`/admin` → Promos) 🧪
 - [ ] **Carta**: cambiar 9 → 10 € en una copa sube su coste en tokens en el móvil.
@@ -86,6 +90,8 @@ Se actualiza a medida que avanza la implementación.
 - **Validador de cobertura** en los dos sentidos: con la configuración buena
   da 0 huecos, y al desactivar las promos abiertas detecta 12 y señala
   *"Bronce el día 5 a las 0:00"* — justo el caso que no queremos.
+- **Mensaje de ambición** con los números reales de la sala: Bronce→Plata 17 %
+  más barato y 2 canjes; Plata→Oro 20 % y 3; Oro→Platino 25 % y sin límite.
 - **Configuración con efecto real**: barra 9→10 € sube la copa de 450 a 600 tk;
   tasa bronce 150→100 la baja a 400 tk; ampliar la ventana de 22→00 a 22→06
   hace que un bronce sí pueda pedir copa a las 03:00 del sábado.
