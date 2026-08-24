@@ -16,12 +16,13 @@ Se actualiza a medida que avanza la implementación.
 | Catálogo fusionado (22 → 13 productos reales) | ✅ aplicado en las dos salas |
 | Motor (`get_promo_catalog`, `purchase_reward`) | ✅ probado |
 | Flash Drops + medición de campañas | ✅ probado |
-| App: menú, sesión, niveles | ✅ compila · 🧪 falta verlo |
-| Consola de Flash Drops (`/admin` → Promos) | ✅ ciclo probado en BD · 🧪 falta usarla |
-| Panel de configuración (`/admin` → Promos) | ✅ efecto probado en BD · 🧪 falta usarlo |
+| App: menú, sesión, niveles | ✅ **probado en producción con sesión real** |
+| Consola de Flash Drops (`/admin` → Promos) | ✅ drop lanzado y visto en el móvil |
+| Panel de configuración (`/admin` → Promos) | ✅ probado en vivo |
 | Aviso de la regla de oro al guardar | ✅ probado (detecta y no falsea) |
-| Mensaje de ambición en el Hub | ✅ cifras verificadas · 🧪 falta verlo |
-| Retirada de las columnas obsoletas | ⏸ tras desplegar |
+| Mensaje de ambición en el Hub | ✅ visto en pantalla |
+| Retirada de las columnas obsoletas | ⏸ tras redesplegar (ver Riesgos) |
+| ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
 
 ---
 
@@ -98,12 +99,94 @@ Se actualiza a medida que avanza la implementación.
 
 ---
 
+## Verificado en producción (2026-08-21, tras el despliegue)
+
+Sin sesión iniciada no se puede entrar al menú, la TV ni `/admin`, así que se
+comprobó todo lo que no la necesita:
+
+- **El build desplegado es el de V21**, no el anterior. En el bundle del cliente
+  están `cheaperAtNextTier`, `redemptionsLeft`, `unlock_hint`, `cost_tokens`,
+  `promo_price_eur`, `tierNext`, `perkCheaper`, `list_price_eur`… y **han
+  desaparecido** `min_tier_required`, `available_days`, `price_tokens`,
+  `tierFromLifetime` y `productVisibility`.
+- **Contrato cliente ↔ servidor idéntico**: las 9 claves de la raíz y las 15 de
+  producto que emite `get_promo_catalog` coinciden exactamente con los tipos de
+  `useCatalog.ts`. Ni falta ni sobra ninguna — era el fallo de integración más
+  probable y queda descartado.
+- `/api/catalog`, `/api/session` y `/api/rewards` responden **401** sin token.
+- Las dos salas quedan coherentes: 13 productos, 0 sin precio de barra,
+  37 reglas, **0 huecos** de cobertura, misma escalera de niveles.
+- La app carga sin errores de consola.
+
+---
+
+## Prueba de humo con sesión real (2026-08-24, sala `prueba`)
+
+Conducida con el Chrome del usuario, ya autenticado. Todo lo marcado 🧪 en las
+secciones 1-5 queda cubierto salvo donde se indica.
+
+### Fallo grave encontrado y corregido: una cuenta no podía estar en dos salas
+`/api/session` devolvía **500 `profile_create_failed`** y `/api/catalog` **404**,
+así que la app caía a los valores por defecto del store: saldo mock 450,
+histórico 0, sin escalera de niveles, y el pie de la cinta diciendo *"Estás en
+el nivel máximo"* a un usuario Bronce.
+
+Causa: `user_profiles` tenía **dos índices únicos contradictorios** —
+`(tenant_id, auth_user_id)`, correcto, y `(auth_user_id)` a secas, que limita
+cada cuenta a UNA discoteca. Quien ya tenía perfil en La Pocha no podía
+registrarse en otra sala. `api.auth-sync` intentaba recuperarse del 23505
+releyendo el perfil **acotado por sala**, así que con una colisión de otra sala
+tampoco lo encontraba; el síntoma se había atribuido a una carrera de React
+StrictMode. Corregido en `database/30_v21_fix_cross_tenant_profile.sql`.
+Verificado: la misma cuenta existe ya en `prueba` y `lapocha` a la vez.
+
+### Lo que se vio funcionando
+- **Menú**: dos precios (`~~3€~~ 2€`), coste en tokens por nivel, *"Con plata te
+  costaría 125 tokens"*, y la cabecera *"Te queda 1 canje esta noche"* en
+  singular.
+- **Compra real**: chupito por 150 tk, saldo 250 → 100, descuento 1 € y regla
+  atribuida en `user_rewards`. El **ticket del camarero mostró "COBRAR AL
+  CLIENTE 2 €"** — el precio promocional, sin decimales.
+- **Límite de noche**: el segundo canje devolvió **429 · `night_limit_reached` ·
+  "Ya has usado tu canje de esta noche"**, confirmando el mapeo por SQLSTATE.
+- **Flash Drop**: lanzado desde `/admin` (`FD-20260824-01`, copa a 4 €, 20
+  unidades). El panel previsualizó *"Regalas 5€ por copa y les cuesta 375
+  tokens"*. En el móvil apareció **el primero**, en fucsia, con etiqueta y sin
+  la línea de "con Plata" (durante la campaña la tasa ya es la mejor).
+- **Configuración**: la escalera con la columna «Copa» (450/375/300/225) y la
+  carta con sus precios; aviso verde de cobertura correcto.
+- **Cinta del Hub**: *"Te faltan 200 puntos para Plata · todo un 17% más barato ·
+  2 canjes por noche"*.
+
+### Tres defectos menores corregidos (pendientes de redesplegar)
+1. **La configuración de promociones era inalcanzable sin fiesta activa**: todo
+   el panel colgaba del `else` de "¿hay evento?". La carta se prepara un martes
+   por la tarde, no a las tres de la mañana. Ahora se muestra también sin fiesta;
+   los Flash Drops siguen dentro de la sesión, que es donde tienen sentido.
+2. **Con 0 canjes restantes los botones seguían activos**, así que el usuario
+   chocaba contra un 429 en vez de saberlo antes. Ahora se deshabilitan.
+3. **La cuenta atrás marcaba "31 min" en un drop de 30** (redondeo hacia
+   arriba). Ahora redondea hacia abajo sin bajar de 1 mientras siga vivo.
+
+### Sin cubrir todavía
+- Agotar el stock de un drop (haría falta otra cuenta con saldo).
+- Regresión de jukebox, batalla, ruleta y TV.
+
+---
+
 ## Riesgos abiertos
 
-- **`price_tokens` es un puente**: la app desplegada aún lo pinta, así que se
-  rellenó con el coste de bronce. El cobro real ya no lo usa. Se elimina —
-  junto a `min_tier_required` y `available_days` — cuando esta versión esté
-  arriba.
-- **La Pocha ya tiene el catálogo nuevo** aunque el frontend viejo siga en
-  producción. Es seguro porque `purchase_reward` valida con el modelo nuevo,
-  pero conviene no dejar la ventana abierta más de lo necesario.
+- **Las columnas obsoletas ya se pueden borrar.** El humo confirmó que el
+  worker desplegado es el nuevo (`/api/catalog` devuelve el catálogo resuelto,
+  no la tabla cruda), así que nada lee `min_tier_required`, `available_days`,
+  `max_per_month` ni los `max_per_*` de `tenant_products`. Se hará justo
+  después de redesplegar los tres arreglos menores, para no encadenar dos
+  cambios sin verificar entre medias.
+- **`price_tokens` y `reference_fiat` NO se borran**: las siguen usando
+  `purchase_reward` y `get_promo_catalog` para los productos de canje directo
+  (Reserva Prioritaria, Pack Leyenda) y `analytics.run_etl`.
+- **El ETL de BI está ciego a las campañas.** `analytics.run_etl` sigue
+  filtrando por `redeemed_at` —o sea, solo cuenta lo consumido en barra, no lo
+  comprado— y no conoce `discount_eur` ni `campaign_code`. Mientras siga así,
+  el panel de tu compañera no podrá medir un Flash Drop aunque los datos ya
+  estén ahí.
