@@ -25,6 +25,8 @@ Se actualiza a medida que avanza la implementación.
 | Nombre de usuario elegible | ✅ probado en BD · 🧪 falta verlo desplegado |
 | Moderación de nombres (`/admin` → Sesión en vivo) | ✅ probado en BD · 🧪 falta usarla |
 | Flash Drop anunciado en la TV | ✅ consulta probada · 🧪 falta verlo en pantalla |
+| Check-in educativo ("ya te da para X") | ✅ probado en BD · 🧪 falta verlo |
+| Prueba social en la TV (canjes en vivo) | ✅ construido · 🧪 falta verlo |
 | ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
 
 ---
@@ -97,7 +99,17 @@ Se actualiza a medida que avanza la implementación.
 - [ ] Cortarlo desde `/admin` la retira sola.
 - [ ] Con una batalla en curso, la banda **no tapa** el duelo ni el ganador.
 
-### 8. Regresión (que no se haya roto nada) 🧪
+### 8. Economía visible 🧪
+- [ ] Hacer check-in con saldo suficiente → *"Ya te da para Chupito por 2€"*.
+- [ ] Con saldo corto → *"Te faltan 50 para Chupito"*, con la cifra exacta.
+- [ ] Lo que promete el modal **coincide** con lo que deja el menú (mismo
+      producto, mismo precio) — no puede ofrecer algo que luego le nieguen.
+- [ ] Canjear desde el móvil hace saltar el aviso verde en la TV con el nombre
+      del producto, **sin nombre de persona**.
+- [ ] Varios canjes seguidos salen de uno en uno, no apilados.
+- [ ] El aviso no tapa el ranking, ni la banda del drop, ni al ganador.
+
+### 9. Regresión (que no se haya roto nada) 🧪
 - [ ] Check-in con QR sigue sumando tokens.
 - [ ] Jukebox, batalla y ruleta intactos.
 - [ ] La TV sigue pintando ranking y batalla.

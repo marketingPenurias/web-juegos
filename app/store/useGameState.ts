@@ -59,6 +59,18 @@ export type CheckinResult = {
 	streak?: number;
 	milestoneWeek?: number;
 	milestoneAmount?: number;
+	/**
+	 * A qué equivalen sus tokens ahora mismo.  `affordable` = lo mejor que ya
+	 * puede pedir; `next` = lo más cerca que le queda y cuánto le falta.  Lo
+	 * calcula el servidor con las MISMAS reglas del menú, para no prometer algo
+	 * que luego el menú le niegue.
+	 */
+	hint?: {
+		balance: number;
+		affordable: { name: string; promo_price_eur: number; cost_tokens: number } | null;
+		next: { name: string; promo_price_eur: number; cost_tokens: number; missing: number } | null;
+		redemptions_left: number | null;
+	} | null;
 	error?: string;
 };
 

@@ -108,7 +108,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 			{ status: 404, request },
 		);
 	}
-	const { user_profile_id } = profileResult.data;
+	const { tenant_id, user_profile_id } = profileResult.data;
 
 	const { data, error } = await supabase.rpc("process_checkin", {
 		p_user_id: user_profile_id,
@@ -134,7 +134,23 @@ export async function action({ request, context }: Route.ActionArgs) {
 		return jsonResponse(payload, { status, request });
 	}
 
-	return jsonResponse(payload, { request });
+	// ── "¿Y esto para qué me da?" ─────────────────────────────────────
+	// El check-in celebra "+50 tokens", y un número suelto no significa nada
+	// para quien acaba de entrar.  Se adjunta a qué producto equivale YA, o
+	// cuánto le falta para el más cercano — que es lo que convierte tokens en
+	// ganas de gastar.  Va después del check-in a propósito: el saldo tiene que
+	// incluir lo que se acaba de ganar.
+	//
+	// Si falla, el check-in NO se resiente: es un extra, no parte del premio.
+	const { data: hint, error: hintErr } = await supabase.rpc("redeem_hint", {
+		p_tenant_id: tenant_id,
+		p_user_id: user_profile_id,
+	});
+	if (hintErr) {
+		console.warn("[api.checkin] redeem_hint failed", hintErr.message);
+	}
+
+	return jsonResponse({ ...payload, hint: hint ?? null }, { request });
 }
 
 export function loader({ request }: Route.LoaderArgs) {

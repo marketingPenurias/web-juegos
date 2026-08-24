@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { CheckCircle2, Coins, Flame, XCircle } from "lucide-react";
+import { CheckCircle2, Coins, Flame, GlassWater, XCircle } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 
@@ -9,6 +9,10 @@ import { useGameState } from "../store/useGameState";
  *   Se alimenta de `store.checkinResult`, que rellena `usePendingCheckin`
  *   (flujo frío: QR escaneado sin sesión y procesado tras el login) o
  *   cualquier check-in in-app futuro.  Muestra recompensa + racha + hito.
+ *
+ *   Y, sobre todo, TRADUCE los tokens a producto.  Celebrar "+50" no significa
+ *   nada para quien acaba de entrar: la economía se recalibró para que se pueda
+ *   canjear algo la primera noche, pero eso solo sirve si alguien se lo cuenta.
  */
 
 export function CheckinResultModal() {
@@ -73,6 +77,39 @@ export function CheckinResultModal() {
 								{(result.streak ?? 0) === 1 ? "semana" : "semanas"}
 							</span>
 						</div>
+
+						{/* Qué se lleva con lo que acaba de ganar. */}
+						{result.hint?.affordable ? (
+							<div className="mt-3 rounded-2xl bg-cyan-500/10 border border-cyan-400/50 p-3 flex items-center gap-2.5 text-left">
+								<GlassWater
+									className="w-5 h-5 text-cyan-300 shrink-0"
+									aria-hidden="true"
+								/>
+								<p className="text-sm text-white font-bold leading-snug">
+									Ya te da para{" "}
+									<span className="text-cyan-300">
+										{result.hint.affordable.name}
+									</span>{" "}
+									por {Math.round(result.hint.affordable.promo_price_eur)}€
+								</p>
+							</div>
+						) : result.hint?.next ? (
+							// Aún no llega: se le dice CUÁNTO falta, no un "sigue jugando"
+							// genérico. Un objetivo concreto se persigue; uno vago, no.
+							<div className="mt-3 rounded-2xl bg-zinc-800/60 border border-zinc-700 p-3 flex items-center gap-2.5 text-left">
+								<GlassWater
+									className="w-5 h-5 text-zinc-400 shrink-0"
+									aria-hidden="true"
+								/>
+								<p className="text-sm text-zinc-300 font-bold leading-snug">
+									Te faltan{" "}
+									<span className="text-amber-300 tabular-nums">
+										{result.hint.next.missing}
+									</span>{" "}
+									para {result.hint.next.name}
+								</p>
+							</div>
+						) : null}
 
 						{result.milestoneWeek && result.milestoneWeek > 0 ? (
 							<div className="mt-3 rounded-2xl bg-amber-500/10 border border-amber-400/50 p-3">

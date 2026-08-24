@@ -6,6 +6,10 @@ import { getBrowserSupabase } from "../lib/supabase.client";
 import { useInterval } from "../lib/useInterval";
 import { useTenant } from "../lib/tenant";
 import { FlashDropBanner, type TvFlashDrop } from "./tv/FlashDropBanner";
+import {
+	RedemptionTicker,
+	type RedemptionEvent,
+} from "./tv/RedemptionTicker";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { VenueBackdrop } from "./VenueBackdrop";
 import { cn } from "../lib/utils";
@@ -101,6 +105,10 @@ export function Jumbotron({
 	const venuePhotos = useVenuePhotos(tenant.slug);
 	// Preferencia de fondo controlada por el DJ desde /admin (realtime).
 	const [flashDrop, setFlashDrop] = useState<TvFlashDrop | null>(initialFlashDrop);
+	// Último canje anunciado. Solo el último y un contador: la pantalla está
+	// encendida toda la noche y una lista acumulada crecería sin techo.
+	const [lastRedemption, setLastRedemption] = useState<RedemptionEvent | null>(null);
+	const redemptionSeq = useRef(0);
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
 		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true, showNowPlaying: false },
 	);
@@ -353,6 +361,43 @@ export function Jumbotron({
 				"postgres_changes",
 				{ event: "*", schema: "public", table: "product_availability", filter: `tenant_id=eq.${_tenantId}` },
 				(payload) => apply((payload.new ?? null) as Record<string, unknown> | null),
+			)
+			.subscribe();
+
+		return () => { void supabase.removeChannel(channel); };
+	}, [_tenantId]);
+
+	// ── Realtime de canjes (prueba social) ──────────────────────────────
+	// Se escucha `wallet_ledger` y no `user_rewards` por dos motivos: ya está
+	// en la publicación de Realtime, y su fila trae el nombre del producto
+	// congelado en el momento de la compra (`product_name_at_time`), así que no
+	// hace falta ir a buscarlo.
+	//
+	// La TV entra con cuenta de staff, y `wallet_ledger_staff_read` le deja ver
+	// el ledger de toda la sala; con una cuenta normal la RLS solo dejaría
+	// pasar los canjes propios y esto no anunciaría nada.
+	useEffect(() => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !_tenantId) return;
+
+		const channel = supabase
+			.channel(`tv:redemptions:${_tenantId}`)
+			.on(
+				"postgres_changes",
+				{ event: "INSERT", schema: "public", table: "wallet_ledger", filter: `tenant_id=eq.${_tenantId}` },
+				(payload) => {
+					const row = payload.new as {
+						reason?: string;
+						product_name_at_time?: string | null;
+					};
+					// El ledger recoge TODO el movimiento de tokens (premios, boosts,
+					// ajustes); aquí solo interesan las compras del menú.
+					if (row?.reason !== "reward_purchase") return;
+					const name = row.product_name_at_time?.trim();
+					if (!name) return;
+					redemptionSeq.current += 1;
+					setLastRedemption({ seq: redemptionSeq.current, name });
+				},
 			)
 			.subscribe();
 
@@ -766,6 +811,7 @@ export function Jumbotron({
 			{/* Debajo del overlay del ganador: la celebración manda durante sus
 			    segundos, la promoción sigue ahí después. */}
 			<FlashDropBanner drop={flashDrop} />
+			<RedemptionTicker latest={lastRedemption} />
 
 			{winner && <WinnerOverlay track={winner} />}
 
