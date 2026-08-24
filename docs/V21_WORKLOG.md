@@ -267,6 +267,14 @@ anuncio, que además es mejor comportamiento.
 
 ## Riesgos abiertos
 
+- **El aviso de canje en la TV sigue SIN VERIFICAR en pantalla.** El servidor
+  está comprobado: `/api/tv` devuelve `recentRedemptions` con el canje correcto,
+  y el bundle desplegado lleva el código. Lo que no he podido observar es el
+  render final, porque todas las pestañas del navegador que conduzco están
+  `hidden` (la ventana no tiene foco del sistema) y el sondeo es un
+  `setInterval`, que Chrome estrangula hasta un tick por minuto. **Requiere que
+  una persona mire la pantalla con la ventana en primer plano.**
+
 - **La moderación de nombres es reactiva, no preventiva.** El staff puede
   retirar un nombre desde `/admin` → Sesión en vivo, pero alguien tiene que
   mirar. No hay lista de palabras prohibidas y no creo que merezca la pena:
