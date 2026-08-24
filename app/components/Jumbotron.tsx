@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Disc3, Flame, Music2, Radio, Sparkles, Swords, Timer } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { gsap, useGSAP } from "../lib/gsap";
-import { getBrowserSupabase } from "../lib/supabase.client";
+import { getAccessToken, getBrowserSupabase } from "../lib/supabase.client";
 import { useInterval } from "../lib/useInterval";
 import { useTenant } from "../lib/tenant";
 import { FlashDropBanner, type TvFlashDrop } from "./tv/FlashDropBanner";
@@ -80,9 +80,10 @@ const HIDE_MS = 2 * 60 * 60 * 1000;
 // sólo hay 1 pantalla por local, incluso 3s es coste nulo (~80 queries/min).
 // Tras el piloto, si se prioriza el realtime, se puede subir a 10-12s.
 const TV_POLL_MS = 3_000;
-// Respaldo del Flash Drop: Realtime es el primario, esto solo cubre la caída
-// de wifi.  20s basta para que una promoción de 30 minutos no se pierda.
-const FLASH_DROP_POLL_MS = 20_000;
+// Respaldo de la pantalla (drop + canjes): Realtime es el primario, esto cubre
+// la caída de wifi.  10s mantiene el "acaban de canjear" creíble sin coste:
+// hay una sola pantalla por local.
+const SCREEN_POLL_MS = 10_000;
 // Sólo celebramos ganadores de batallas que cerraron hace poco (evita
 // disparar la animación por una batalla vieja al arrancar la pantalla).
 // 120s: el cron de cierre puede tardar hasta ~60s tras `ends_at`, así que la
@@ -112,6 +113,9 @@ export function Jumbotron({
 	// encendida toda la noche y una lista acumulada crecería sin techo.
 	const [lastRedemption, setLastRedemption] = useState<RedemptionEvent | null>(null);
 	const redemptionSeq = useRef(0);
+	// Identificadores de apunte ya anunciados, para que el sondeo y el Realtime
+	// no dupliquen el mismo canje.
+	const announcedRef = useRef<Set<string>>(new Set());
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
 		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true, showNowPlaying: false },
 	);
@@ -390,6 +394,7 @@ export function Jumbotron({
 				{ event: "INSERT", schema: "public", table: "wallet_ledger", filter: `tenant_id=eq.${_tenantId}` },
 				(payload) => {
 					const row = payload.new as {
+						id?: string;
 						reason?: string;
 						product_name_at_time?: string | null;
 					};
@@ -398,6 +403,13 @@ export function Jumbotron({
 					if (row?.reason !== "reward_purchase") return;
 					const name = row.product_name_at_time?.trim();
 					if (!name) return;
+					// Mismo registro que el sondeo: el que llegue primero manda y
+					// el otro lo ignora, así nadie anuncia el canje dos veces.
+					const id = row.id ? String(row.id) : null;
+					if (id) {
+						if (announcedRef.current.has(id)) return;
+						announcedRef.current.add(id);
+					}
 					redemptionSeq.current += 1;
 					setLastRedemption({ seq: redemptionSeq.current, name });
 				},
@@ -545,74 +557,70 @@ export function Jumbotron({
 		void pollTv();
 	}, eventId ? TV_POLL_MS : null);
 
-	// ── Red de seguridad del Flash Drop ─────────────────────────────────
-	// El drop llegaba SOLO por Realtime, y en un local la wifi se cae.  Cuando
-	// el websocket muere, la pantalla no se entera: no aparece el drop, no baja
-	// el stock, y nadie lo nota hasta que alguien mira el móvil — con la
-	// promoción entera perdida, que dura media hora.
+	// ── Red de seguridad de la pantalla ─────────────────────────────────
+	// Realtime es el camino rápido, pero en un local la wifi se cae y los
+	// eventos perdidos durante una caída NO se recuperan al reconectar: hay que
+	// releer el estado.  Sin esto, el DJ lanza un drop, la pantalla no se entera
+	// y se pierde la promoción entera — media hora.
 	//
-	// Los eventos perdidos durante una caída NO se recuperan al reconectar, así
-	// que hace falta releer el estado, no esperar al siguiente.  Va atado a la
-	// SALA y no al evento: una campaña no cuelga de la fiesta, y así sigue
-	// funcionando aunque el evento aún no esté abierto.
-	//
-	// Cada 20 s: con una pantalla por local el coste es irrelevante frente a
-	// que la promoción no se vea.
-	const pollFlashDrop = useCallback(async () => {
-		const supabase = getBrowserSupabase();
-		if (!supabase || !_tenantId) return;
-		const { data, error } = await supabase
-			.from("product_availability")
-			.select(
-				"id, label, promo_price_eur, valid_to, stock_total, stock_used, " +
-					"product:tenant_products(name, list_price_eur, promo_price_eur)",
-			)
-			.eq("tenant_id", _tenantId)
-			.eq("kind", "flash_drop")
-			.eq("is_active", true)
-			.gt("valid_to", new Date().toISOString())
-			.order("valid_from", { ascending: false })
-			.limit(1)
-			.maybeSingle();
-		// Un error de red no debe borrar de la pantalla un drop que sigue vivo.
-		if (error) return;
-		if (!data) {
-			setFlashDrop(null);
+	// Va contra `/api/tv` y no contra la base de datos desde el navegador
+	// porque los canjes salen de `wallet_ledger`, que es la tabla del dinero:
+	// no hay razón para abrirla al cliente, y su RLS encadena dos funciones, así
+	// que un permiso mal puesto deja la pantalla muda sin avisar.  Con
+	// service_role esto siempre responde.
+	const pollScreen = useCallback(async () => {
+		if (!_tenantId) return;
+		let token: string | null = null;
+		try {
+			token = await getAccessToken();
+		} catch {
 			return;
 		}
-		const row = data as unknown as {
-			id: string; label: string | null; promo_price_eur: number | null;
-			valid_to: string | null; stock_total: number | null; stock_used: number | null;
-			product:
-				| { name: string; list_price_eur: number | null; promo_price_eur: number | null }
-				| { name: string; list_price_eur: number | null; promo_price_eur: number | null }[]
-				| null;
-		};
-		const prod = Array.isArray(row.product) ? row.product[0] : row.product;
-		setFlashDrop({
-			id: row.id,
-			label: row.label ?? null,
-			product_name: prod?.name ?? "",
-			promo_price_eur:
-				row.promo_price_eur !== null && row.promo_price_eur !== undefined
-					? Number(row.promo_price_eur)
-					: (prod?.promo_price_eur ?? null),
-			// El poll SÍ trae el precio de barra, que el payload de Realtime no
-			// incluye: así el "9€ → 4€" acaba apareciendo aunque el primer aviso
-			// llegara por el websocket.
-			list_price_eur:
-				prod?.list_price_eur !== null && prod?.list_price_eur !== undefined
-					? Number(prod.list_price_eur)
-					: null,
-			valid_to: row.valid_to ?? null,
-			stock_total: row.stock_total ?? null,
-			stock_used: Number(row.stock_used ?? 0),
-		});
-	}, [_tenantId]);
+		if (!token) return;
+		let data: Record<string, unknown>;
+		try {
+			const res = await fetch("/api/tv", {
+				method: "POST",
+				cache: "no-store",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+					"X-Tenant-Slug": tenant.slug,
+				},
+				body: JSON.stringify({ tenant_slug: tenant.slug }),
+			});
+			data = (await res.json()) as Record<string, unknown>;
+		} catch {
+			// Un fallo de red no debe borrar de la pantalla un drop que sigue
+			// vivo: sería cambiar un problema por otro peor.
+			return;
+		}
+		if (data.ok !== true) return;
+
+		setFlashDrop((data.flashDrop as TvFlashDrop | null) ?? null);
+
+		// Solo se anuncian los que no se habían anunciado ya, vengan del sondeo
+		// o del Realtime: el identificador del apunte es el que manda.
+		const recientes = (data.recentRedemptions as
+			| Array<{ id: string; product_name: string }>
+			| undefined) ?? [];
+		for (const r of recientes) {
+			if (announcedRef.current.has(r.id)) continue;
+			announcedRef.current.add(r.id);
+			redemptionSeq.current += 1;
+			setLastRedemption({ seq: redemptionSeq.current, name: r.product_name });
+		}
+		// El conjunto no puede crecer toda la noche.
+		if (announcedRef.current.size > 200) {
+			announcedRef.current = new Set(
+				[...announcedRef.current].slice(-100),
+			);
+		}
+	}, [_tenantId, tenant.slug]);
 
 	useInterval(() => {
-		void pollFlashDrop();
-	}, _tenantId ? FLASH_DROP_POLL_MS : null);
+		void pollScreen();
+	}, _tenantId ? SCREEN_POLL_MS : null);
 
 	// Auto-ocultar el overlay de ganador tras la celebración.
 	useEffect(() => {

@@ -271,10 +271,41 @@ export async function handleTvAction(
 		}
 	}
 
+	// ── Canjes recientes (prueba social) ──────────────────────────────
+	// Se sirven desde aquí y NO por Realtime en el navegador, por dos motivos:
+	// `wallet_ledger` es la tabla del dinero y no hay razón para abrirla al
+	// cliente; y su RLS depende de dos funciones encadenadas, con lo que un
+	// permiso mal puesto deja la pantalla muda sin que nadie se entere.  Aquí
+	// se lee con service_role: siempre funciona.
+	//
+	// Ventana de 90s: lo bastante para cubrir dos ciclos de sondeo sin
+	// anunciar algo que ya no viene a cuento.
+	type TvRedemption = { id: string; product_name: string; at: string };
+	let recentRedemptions: TvRedemption[] = [];
+	{
+		const since = new Date(Date.now() - 90_000).toISOString();
+		const { data, error: redErr } = await supabase
+			.from("wallet_ledger")
+			.select("id, product_name_at_time, created_at")
+			.eq("tenant_id", tenant_id)
+			.eq("reason", "reward_purchase")
+			.gte("created_at", since)
+			.order("created_at", { ascending: true })
+			.limit(10);
+		if (redErr) warn("recent_redemptions", redErr.message);
+		recentRedemptions = ((data ?? []) as Array<Record<string, unknown>>)
+			.map((r) => ({
+				id: String(r.id),
+				product_name: String(r.product_name_at_time ?? "").trim(),
+				at: String(r.created_at),
+			}))
+			.filter((r) => r.product_name.length > 0);
+	}
+
 	return jsonResponse(
 		{
 			ok: true, tenant_id, event_id, tracks, nowPlaying, battle, backdrop,
-			checkin_code, flashDrop,
+			checkin_code, flashDrop, recentRedemptions,
 			// Vacío = todo bien.  Con contenido, la TV puede avisar en pantalla en
 			// vez de fingir que "no hay datos" (F1).
 			warnings,
