@@ -25,3 +25,4 @@ Toda la documentación vive aquí. En la raíz del repo sólo quedan `README.md`
 ## Fuera de `docs/`
 - `database/*.sql` — migraciones numeradas (espejo de lo aplicado en Supabase).
 - `.claude/` — configuración de Claude Code (skills y ajustes), no documentación.
+- [HANDOFF_BI_ETL.md](HANDOFF_BI_ETL.md) — traspaso a BI: el ETL de `fact_rewards` y la medición de campañas.

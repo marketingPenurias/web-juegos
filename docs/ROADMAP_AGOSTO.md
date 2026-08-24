@@ -63,6 +63,9 @@ nuevo seguirá necesitando trabajo manual** — justo la fricción que impide es
 | ↳ S4 | QRs · Marca · **roles previstos** | Modelo `owner` vs `nightgraph_admin` contemplado |
 
 ### 🐛 Bug encontrado el 04/08 — `fact_rewards` mide la etapa equivocada
+> **Sigue abierto el 24/08**, y ahora arrastra también la medición de campañas.
+> Detalle accionable y criterios de aceptación en
+> [`HANDOFF_BI_ETL.md`](HANDOFF_BI_ETL.md).
 El ETL carga `fact_rewards` desde `user_rewards` usando **`redeemed_at`**, que
 sólo se rellena cuando el ticket se consume en barra. Los canjes **comprados**
 (`status='available'`, `redeemed_at` NULL) **nunca entran**: 12 canjes reales en
