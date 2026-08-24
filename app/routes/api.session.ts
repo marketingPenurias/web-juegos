@@ -5,7 +5,10 @@ import {
 	verifyAuthToken,
 } from "../lib/api.server";
 import { getServiceSupabase } from "../lib/supabase.server";
-import { pickTenantSlug } from "../lib/tenant-resolver.server";
+import {
+	pickTenantSlug,
+	resolveTenantProfile,
+} from "../lib/tenant-resolver.server";
 
 /**
  * GET /api/session
@@ -118,6 +121,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		id: string;
 		token_balance: number;
 		lifetime_earned: number;
+		display_name: string | null;
 		birth_date: string | null;
 	};
 	let profile: ProfileRow | null = null;
@@ -129,7 +133,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 	const { data: existing, error: profileErr } = await supabase
 		.from("user_profiles")
-		.select("id, token_balance, lifetime_earned, birth_date")
+		.select("id, token_balance, lifetime_earned, birth_date, display_name")
 		.eq("tenant_id", tenant_id)
 		.eq("auth_user_id", verified.id)
 		.maybeSingle();
@@ -147,6 +151,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			token_balance: Number(existing.token_balance ?? 0),
 			lifetime_earned: Number(existing.lifetime_earned ?? 0),
 			birth_date: (existing.birth_date as string | null) ?? null,
+			display_name: (existing.display_name as string | null) ?? null,
 		};
 	} else {
 		// JIT — creamos el perfil del recién llegado.  email viene del
@@ -163,8 +168,27 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 				token_balance: 0,
 				lifetime_earned: 0,
 			})
-			.select("id, token_balance, lifetime_earned, birth_date")
+			.select("id, token_balance, lifetime_earned, birth_date, display_name")
 			.single();
+
+		if (!insertErr && created) {
+			// Aquí estaba el origen de los "Jefe #7": esta ruta creaba el perfil
+			// SIN nombre (solo lo ponía `api.auth-sync`), y como casi todo el
+			// mundo entra por aquí, 315 de 361 perfiles se quedaron anónimos.
+			// La RPC es tolerante a colisiones y devuelve null si no encuentra
+			// hueco, así que un nombre repetido NUNCA puede tumbar el alta.
+			const { error: nameErr } = await supabase.rpc(
+				"claim_default_display_name",
+				{
+					p_tenant_id: tenant_id,
+					p_user_id: created.id as string,
+					p_full_name: verified.name,
+				},
+			);
+			if (nameErr) {
+				console.warn("[api.session] default display_name", nameErr.message);
+			}
+		}
 
 		if (insertErr || !created) {
 			console.warn(
@@ -209,7 +233,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		// Releer el perfil para capturar el balance tras el bonus.
 		const { data: refreshed } = await supabase
 			.from("user_profiles")
-			.select("id, token_balance, lifetime_earned, birth_date")
+			.select("id, token_balance, lifetime_earned, birth_date, display_name")
 			.eq("id", created.id)
 			.maybeSingle();
 		const finalProfile = refreshed ?? created;
@@ -219,6 +243,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			token_balance: Number(finalProfile.token_balance ?? 0),
 			lifetime_earned: Number(finalProfile.lifetime_earned ?? 0),
 			birth_date: (finalProfile.birth_date as string | null) ?? null,
+			display_name: (finalProfile.display_name as string | null) ?? null,
 		};
 		is_new_user = true;
 	}
@@ -385,6 +410,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 				token_balance: profile.token_balance,
 				lifetime_earned: profile.lifetime_earned,
 				birth_date: profile.birth_date,
+				display_name: profile.display_name,
 			},
 			auth_email: verified.email,
 			active_event,
@@ -402,9 +428,15 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 /**
  * POST /api/session — actualiza campos del perfil del usuario autenticado.
  *
- *   Hoy: `birth_date` (captado en el onboarding, V1.7).  El user_id viene
- *   SIEMPRE del JWT verificado, nunca del body.  Escribe con service_role
- *   acotado por tenant_id + auth_user_id.
+ *   Acepta `birth_date` (control de edad del onboarding) o `display_name` (el
+ *   nombre con el que se le ve en el ranking y en la TV de la sala).  El
+ *   user_id viene SIEMPRE del JWT verificado, nunca del body.  Escribe con
+ *   service_role acotado por tenant_id + auth_user_id.
+ *
+ *   El nombre no se valida aquí: lo hace `set_display_name` en la base de
+ *   datos, que es también quien garantiza que sea único dentro de la sala.
+ *   Repetir esas reglas en el worker solo serviría para que un día
+ *   discreparan.
  */
 export async function action({ request, context }: Route.ActionArgs) {
 	const cors = preflight(request);
@@ -422,11 +454,59 @@ export async function action({ request, context }: Route.ActionArgs) {
 		return jsonResponse({ ok: false, error: "unauthorized" }, { status: 401, request });
 	}
 
-	let body: { tenant_slug?: string; birth_date?: string };
+	type Body = {
+		tenant_slug?: string;
+		birth_date?: string;
+		display_name?: string;
+	};
+	let body: Body;
 	try {
-		body = (await request.json()) as { tenant_slug?: string; birth_date?: string };
+		body = (await request.json()) as Body;
 	} catch {
 		return jsonResponse({ ok: false, error: "invalid_json" }, { status: 400, request });
+	}
+
+	// ── Cambio de nombre ──────────────────────────────────────────────
+	if (typeof body.display_name === "string") {
+		const slugRes = pickTenantSlug(body.tenant_slug ?? null, request);
+		if (!slugRes.ok) {
+			return jsonResponse({ ok: false, error: slugRes.error }, { status: 400, request });
+		}
+		let sb: ReturnType<typeof getServiceSupabase>;
+		try {
+			sb = getServiceSupabase(context);
+		} catch (err) {
+			if (err instanceof Response) return err;
+			return jsonResponse({ ok: false, error: "service_unavailable" }, { status: 503, request });
+		}
+		const profileRes = await resolveTenantProfile(sb, slugRes.slug, verified.id);
+		if (!profileRes.ok) {
+			return jsonResponse({ ok: false, error: profileRes.error }, { status: 404, request });
+		}
+		const { data, error } = await sb.rpc("set_display_name", {
+			p_tenant_id: profileRes.data.tenant_id,
+			p_user_id: profileRes.data.user_profile_id,
+			p_name: body.display_name,
+		});
+		if (error) {
+			// Mismo criterio que en las compras: el motivo va por SQLSTATE, no
+			// por el texto del mensaje, que es copy y puede reescribirse.
+			const code = (error as { code?: string }).code ?? "";
+			const map: Record<string, { error: string; status: number }> = {
+				NG101: { error: "invalid_display_name", status: 400 },
+				NG102: { error: "display_name_taken", status: 409 },
+				NG002: { error: "profile_not_found", status: 404 },
+			};
+			const m = map[code];
+			return jsonResponse(
+				{ ok: false, error: m?.error ?? "update_failed", detail: error.message },
+				{ status: m?.status ?? 500, request },
+			);
+		}
+		return jsonResponse(
+			{ ok: true, display_name: (data as { display_name?: string } | null)?.display_name },
+			{ request },
+		);
 	}
 
 	// Validación estricta de la fecha: formato YYYY-MM-DD, real y razonable

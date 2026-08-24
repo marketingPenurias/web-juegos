@@ -19,7 +19,7 @@ import { pickTenantSlug } from "../lib/tenant-resolver.server";
  *   1. Verifies the JWT (401 otherwise).
  *   2. Resolves the tenant slug strictly (payload → header → host).
  *   3. Upserts the user_profiles row keyed on (tenant_id, auth_user_id).
- *      On insert we stamp display_name + email from the JWT and the
+ *      On insert we stamp email from the JWT and the
  *      acquisition campaign from the `ng_tracking_ref` cookie.
  *   4. Whether new or existing, **clears** the `ng_tracking_ref` cookie
  *      on the response.  Attribution is once-and-done.
@@ -159,21 +159,44 @@ export async function action({ request, context }: Route.ActionArgs) {
 	}
 
 	// New profile — INSERT.
-	const displayName =
-		(verified as { email?: string | null }).email?.split("@")[0] ?? null;
-
+	//
+	// El nombre NO se escribe aquí.  Con el índice único por sala, insertarlo
+	// a pelo puede chocar y tumbar el alta entera — el mismo fallo que dejaba
+	// a la gente sin poder entrar.  Se reclama después con
+	// `claim_default_display_name`, que busca la primera variante libre y se
+	// rinde en silencio si no hay ninguna.
+	//
+	// Antes se usaba el trozo del correo (`alvarodiezz16`); ahora el nombre de
+	// pila que viene firmado en el token, porque esto se pinta en la TV de la
+	// sala y un identificador de correo ahí no pinta nada.
 	const { data: inserted, error: insertErr } = await supabase
 		.from("user_profiles")
 		.insert({
 			tenant_id,
 			auth_user_id: verified.id,
 			email: verified.email ?? `${verified.id}@anonymous`,
-			display_name: displayName,
 			acquisition_source: trackingCode || null,
 			acquisition_campaign_id,
 		})
 		.select("id, token_balance, lifetime_earned, display_name")
 		.maybeSingle();
+
+	let claimedName: string | null = null;
+	if (!insertErr && inserted) {
+		const { data: nameData, error: nameErr } = await supabase.rpc(
+			"claim_default_display_name",
+			{
+				p_tenant_id: tenant_id,
+				p_user_id: inserted.id as string,
+				p_full_name: verified.name,
+			},
+		);
+		if (nameErr) {
+			console.warn("[api.auth-sync] default display_name", nameErr.message);
+		} else {
+			claimedName = (nameData as string | null) ?? null;
+		}
+	}
 
 	// ── TOCTOU recovery ───────────────────────────────────────────────
 	// React StrictMode + a fast SIGNED_IN re-fire can trigger this
@@ -264,7 +287,9 @@ export async function action({ request, context }: Route.ActionArgs) {
 				is_new: true,
 				token_balance: inserted.token_balance ?? 0,
 				lifetime_earned: inserted.lifetime_earned ?? 0,
-				display_name: inserted.display_name,
+				// El de la fila recién insertada siempre es null: el nombre se
+				// reclama justo después, así que se devuelve el que quedó.
+				display_name: claimedName,
 				acquisition_campaign_id,
 			},
 		},

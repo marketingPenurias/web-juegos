@@ -142,6 +142,12 @@ export function jsonResponse(
 export type VerifiedUser = {
 	id: string;
 	email: string | null;
+	/**
+	 * Nombre de la cuenta de Google, tal y como viene FIRMADO en el token
+	 * (`user_metadata.full_name`).  Sirve para proponer un nombre al darse de
+	 * alta sin fiarse de nada que mande el cliente.
+	 */
+	name: string | null;
 	supabase: SupabaseClient;
 };
 
@@ -151,6 +157,9 @@ type JwtPayload = {
 	exp?: number;
 	aud?: string;
 	role?: string;
+	// Supabase incluye los metadatos del proveedor dentro del propio token, así
+	// que el nombre de Google llega firmado y no hace falta pedírselo al cliente.
+	user_metadata?: { full_name?: unknown; name?: unknown };
 };
 
 /**
@@ -376,8 +385,15 @@ export async function verifyAuthToken(
 		);
 	}
 
+	const meta = payload.user_metadata ?? {};
+	const fullName =
+		(typeof meta.full_name === "string" && meta.full_name.trim()) ||
+		(typeof meta.name === "string" && meta.name.trim()) ||
+		null;
+
 	return {
 		id: payload.sub,
+		name: fullName,
 		email: payload.email ?? null,
 		supabase,
 	};

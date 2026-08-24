@@ -21,7 +21,9 @@ Se actualiza a medida que avanza la implementación.
 | Panel de configuración (`/admin` → Promos) | ✅ probado en vivo |
 | Aviso de la regla de oro al guardar | ✅ probado (detecta y no falsea) |
 | Mensaje de ambición en el Hub | ✅ visto en pantalla |
-| Retirada de las columnas obsoletas | ⏸ tras redesplegar (ver Riesgos) |
+| Retirada de las columnas obsoletas | ✅ hecho (migración 32) |
+| Nombre de usuario elegible | ✅ probado en BD · 🧪 falta verlo desplegado |
+| Moderación de nombres (`/admin` → Sesión en vivo) | ✅ probado en BD · 🧪 falta usarla |
 | ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
 
 ---
@@ -72,7 +74,20 @@ Se actualiza a medida que avanza la implementación.
       *"Bronce: viernes, sábado · de 00:00 a 06:00"* al guardar.
 - [ ] Añadir y borrar una ventana desde el panel.
 
-### 6. Regresión (que no se haya roto nada) 🧪
+### 6. Nombre de usuario 🧪
+- [ ] Un perfil sin nombre ve el aviso ámbar en el Hub y llega al perfil.
+- [ ] Elegir un nombre lo cambia en el Hub, el perfil y el ranking.
+- [ ] Un nombre ya cogido en la sala → *"Ese nombre ya está cogido"*.
+- [ ] Menos de 3 caracteres, más de 20, o con símbolos raros → rechazado con el
+      motivo concreto.
+- [ ] Un usuario **nuevo** entra ya con su nombre de pila puesto.
+- [ ] Dos cuentas con el mismo nombre de pila → la segunda queda «Nombre 2»,
+      y **el alta no falla**.
+- [ ] `/admin` → Sesión en vivo lista los nombres visibles y permite retirar uno
+      (con confirmación); esa persona vuelve a salir como «Jefe» y puede elegir
+      otro.
+
+### 7. Regresión (que no se haya roto nada) 🧪
 - [ ] Check-in con QR sigue sumando tokens.
 - [ ] Jukebox, batalla y ruleta intactos.
 - [ ] La TV sigue pintando ranking y batalla.
@@ -176,12 +191,12 @@ Verificado: la misma cuenta existe ya en `prueba` y `lapocha` a la vez.
 
 ## Riesgos abiertos
 
-- **Las columnas obsoletas ya se pueden borrar.** El humo confirmó que el
-  worker desplegado es el nuevo (`/api/catalog` devuelve el catálogo resuelto,
-  no la tabla cruda), así que nada lee `min_tier_required`, `available_days`,
-  `max_per_month` ni los `max_per_*` de `tenant_products`. Se hará justo
-  después de redesplegar los tres arreglos menores, para no encadenar dos
-  cambios sin verificar entre medias.
+- **La moderación de nombres es reactiva, no preventiva.** El staff puede
+  retirar un nombre desde `/admin` → Sesión en vivo, pero alguien tiene que
+  mirar. No hay lista de palabras prohibidas y no creo que merezca la pena:
+  se esquivan trivialmente y dan falsos positivos con apellidos reales. Si una
+  noche se convierte en un problema recurrente, lo siguiente sería exigir
+  aprobación del nombre antes de que salga en pantalla, no filtrar texto.
 - **`price_tokens` y `reference_fiat` NO se borran**: las siguen usando
   `purchase_reward` y `get_promo_catalog` para los productos de canje directo
   (Reserva Prioritaria, Pack Leyenda) y `analytics.run_etl`.

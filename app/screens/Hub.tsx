@@ -6,6 +6,7 @@ import { TierRibbon } from "../components/hub/TierRibbon";
 import { StreakCard } from "../components/hub/StreakCard";
 import { MissionsCard } from "../components/hub/MissionsCard";
 import { LeaderboardCard } from "../components/hub/LeaderboardCard";
+import { NamePromptCard } from "../components/hub/NamePromptCard";
 import { GameLauncherCard } from "../components/hub/GameLauncherCard";
 import { HistoryDrawer } from "../components/HistoryDrawer";
 import { WelcomeModal } from "../components/WelcomeModal";
@@ -18,6 +19,7 @@ import { WelcomeModal } from "../components/WelcomeModal";
  *     · TierRibbon        — los 4 niveles con tu posición actual.
  *     · MissionsCard      — 3 misiones derivadas de `daily_activity`.
  *     · StreakCard        — "Día 1 de piloto" (MVP, sin invent).
+ *     · NamePromptCard    — solo si aún no eligió nombre para el ranking.
  *     · LeaderboardCard   — top real por saldo (`/api/leaderboard`).
  *     · GameLauncherCard  — accesos a los juegos reales.
  *
@@ -56,6 +58,8 @@ export function Hub() {
 
 			<main className="px-6 flex flex-col gap-5">
 				<TokenWalletCard onOpenHistory={() => setHistoryOpen(true)} />
+				{/* Solo aparece si aún no ha elegido nombre. */}
+				<NamePromptCard />
 				{/* V17: los juegos suben al top del Hub (justo bajo el monedero)
 				    para dar protagonismo al Jukebox/Tinder — antes quedaban al
 				    final, por debajo del ranking y la racha. */}

@@ -45,6 +45,7 @@ type SessionPayload = {
 		token_balance: number;
 		lifetime_earned: number;
 		birth_date?: string | null;
+		display_name?: string | null;
 	};
 	auth_email?: string | null;
 	active_event: { id: string; name: string } | null;
@@ -121,6 +122,8 @@ export function useSession() {
 					// La escalera de la sala (umbrales, tasa, canjes/noche):
 					// configurable por discoteca, así que la manda el servidor.
 					tiers: data.tiers,
+					// El nombre del ranking. Puede ser null si aún no eligió.
+					displayName: data.profile.display_name ?? null,
 				});
 			} catch (err) {
 				// TODO: CLEANUP SESSION DEBUG
