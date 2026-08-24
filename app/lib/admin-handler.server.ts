@@ -65,6 +65,8 @@ type AdminBody = {
 	hour_to?: number | null;
 	availability_id?: string;
 	max_per_night?: number | null;
+	// V22: moderación de nombres.
+	profile_id?: string;
 	is_active?: boolean;
 };
 
@@ -893,6 +895,49 @@ export async function handleAdminAction(
 			});
 			const { data: gaps } = await supabase.rpc("check_promo_coverage", { p_tenant_id: tenant_id });
 			return jsonResponse({ ok: true, gaps: gaps ?? [] }, { request });
+		}
+
+		// ── Nombres visibles ───────────────────────────────────────────
+		// Solo importa moderar lo que SE VE: el nombre de quien no sale en la
+		// tele no molesta a nadie.  Se listan los mismos que pinta el ranking.
+		case "visible_names": {
+			const { data, error } = await supabase
+				.from("user_profiles")
+				.select("id, display_name, lifetime_earned")
+				.eq("tenant_id", tenant_id)
+				.not("display_name", "is", null)
+				.order("lifetime_earned", { ascending: false })
+				.limit(20);
+			if (error) {
+				console.warn("[api.admin] visible_names", error.message);
+				return jsonResponse({ ok: false, error: "lookup_failed" }, { status: 500, request });
+			}
+			return jsonResponse({ ok: true, people: data ?? [] }, { request });
+		}
+
+		case "clear_display_name": {
+			const profileId = String(body.profile_id ?? "");
+			if (!profileId) {
+				return jsonResponse({ ok: false, error: "profile_required" }, { status: 400, request });
+			}
+			const { data, error } = await supabase.rpc("clear_display_name", {
+				p_tenant_id: tenant_id,
+				p_user_id: profileId,
+			});
+			if (error) {
+				return jsonResponse(
+					{ ok: false, error: "rpc_failed", detail: error.message },
+					{ status: 400, request },
+				);
+			}
+			// Queda quién lo quitó y QUÉ quitó: es una acción sobre otra persona,
+			// y si alguien pregunta hay que poder responder.
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "clear_display_name",
+				table_name: "user_profiles", record_id: profileId,
+				new_data: data as Record<string, unknown>,
+			});
+			return jsonResponse({ ok: true, ...(data as object) }, { request });
 		}
 
 		default:

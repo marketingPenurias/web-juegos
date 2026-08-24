@@ -14,6 +14,7 @@ import { cn } from "../lib/utils";
 import { VENUE_TZ, toLocalInput, fromLocalInput } from "../lib/madrid-time";
 import { FlashDropPanel } from "../components/admin/FlashDropPanel";
 import { PromoConfigPanel } from "../components/admin/PromoConfigPanel";
+import { NameModerationPanel } from "../components/admin/NameModerationPanel";
 
 /**
  * /admin — Consola del DJ / Staff (Bloque 4).
@@ -435,6 +436,10 @@ export default function Admin() {
 						)}
 
 						{/* ── PESTAÑA 2 · GESTIÓN DE PLANTILLAS ──────────────── */}
+						{activeTab === "live" && (
+							<NameModerationPanel call={call} onToast={flash} />
+						)}
+
 						{/* ── PESTAÑA 2 · PROMOCIONES ────────────────────────── */}
 						{activeTab === "promos" && (
 							<>

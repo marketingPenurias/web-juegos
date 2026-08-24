@@ -23,6 +23,7 @@ Se actualiza a medida que avanza la implementación.
 | Mensaje de ambición en el Hub | ✅ visto en pantalla |
 | Retirada de las columnas obsoletas | ✅ hecho (migración 32) |
 | Nombre de usuario elegible | ✅ probado en BD · 🧪 falta verlo desplegado |
+| Moderación de nombres (`/admin` → Sesión en vivo) | ✅ probado en BD · 🧪 falta usarla |
 | ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
 
 ---
@@ -82,6 +83,9 @@ Se actualiza a medida que avanza la implementación.
 - [ ] Un usuario **nuevo** entra ya con su nombre de pila puesto.
 - [ ] Dos cuentas con el mismo nombre de pila → la segunda queda «Nombre 2»,
       y **el alta no falla**.
+- [ ] `/admin` → Sesión en vivo lista los nombres visibles y permite retirar uno
+      (con confirmación); esa persona vuelve a salir como «Jefe» y puede elegir
+      otro.
 
 ### 7. Regresión (que no se haya roto nada) 🧪
 - [ ] Check-in con QR sigue sumando tokens.
@@ -187,11 +191,12 @@ Verificado: la misma cuenta existe ya en `prueba` y `lapocha` a la vez.
 
 ## Riesgos abiertos
 
-- **Sin moderación de nombres.** El nombre elegido se pinta en la TV del local.
-  La validación impide URLs, emojis y textos largos, pero **nada impide un
-  insulto**. La sala no tiene hoy forma de corregir un nombre. Antes de un
-  sábado con gente conviene decidirlo: lo más barato es un botón en `/admin`
-  para vaciar el nombre de alguien (vuelve a "Jefe #N").
+- **La moderación de nombres es reactiva, no preventiva.** El staff puede
+  retirar un nombre desde `/admin` → Sesión en vivo, pero alguien tiene que
+  mirar. No hay lista de palabras prohibidas y no creo que merezca la pena:
+  se esquivan trivialmente y dan falsos positivos con apellidos reales. Si una
+  noche se convierte en un problema recurrente, lo siguiente sería exigir
+  aprobación del nombre antes de que salga en pantalla, no filtrar texto.
 - **`price_tokens` y `reference_fiat` NO se borran**: las siguen usando
   `purchase_reward` y `get_promo_catalog` para los productos de canje directo
   (Reserva Prioritaria, Pack Leyenda) y `analytics.run_etl`.
