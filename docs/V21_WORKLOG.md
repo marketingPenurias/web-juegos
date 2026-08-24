@@ -27,7 +27,8 @@ Se actualiza a medida que avanza la implementación.
 | Flash Drop anunciado en la TV | ✅ consulta probada · 🧪 falta verlo en pantalla |
 | Check-in educativo ("ya te da para X") | ✅ probado en BD · 🧪 falta verlo |
 | Prueba social en la TV (canjes en vivo) | ✅ construido · 🧪 falta verlo |
-| ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
+| Loop de invitación | ✅ probado en BD · 🧪 falta el circuito real |
+| ETL de BI al día con las campañas | ➡️ traspasado a BI ([HANDOFF_BI_ETL.md](HANDOFF_BI_ETL.md)) |
 
 ---
 
@@ -109,7 +110,19 @@ Se actualiza a medida que avanza la implementación.
 - [ ] Varios canjes seguidos salen de uno en uno, no apilados.
 - [ ] El aviso no tapa el ranking, ni la banda del drop, ni al ganador.
 
-### 9. Regresión (que no se haya roto nada) 🧪
+### 9. Loop de invitación 🧪
+- [ ] El Hub muestra el código y el enlace `?ref=CODIGO`.
+- [ ] «Enviar» abre el compartir del móvil; «copiar» deja el enlace en el portapapeles.
+- [ ] Abrir el enlace **en otro móvil**, registrarse, y comprobar que el perfil
+      nuevo queda con `referred_by` puesto.
+- [ ] **Al registrarse NO se paga nada** — es lo esperado, no un fallo.
+- [ ] Al hacer el invitado su **primer check-in**: el que invita recibe 100 y el
+      invitado 50.
+- [ ] Un segundo check-in del mismo invitado **no vuelve a pagar**.
+- [ ] El texto de la tarjeta dice las cantidades reales de la sala (salen de
+      `tenant_token_rewards`, no están escritas a mano).
+
+### 10. Regresión (que no se haya roto nada) 🧪
 - [ ] Check-in con QR sigue sumando tokens.
 - [ ] Jukebox, batalla y ruleta intactos.
 - [ ] La TV sigue pintando ranking y batalla.

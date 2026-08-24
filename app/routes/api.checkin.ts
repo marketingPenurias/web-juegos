@@ -134,6 +134,19 @@ export async function action({ request, context }: Route.ActionArgs) {
 		return jsonResponse(payload, { status, request });
 	}
 
+	// ── Pago de la invitación ─────────────────────────────────────────
+	// Se cobra AQUÍ y no al registrarse: una cuenta de Google es gratis y se
+	// crea desde el sofá, así que premiar el alta es pagar por cuentas falsas.
+	// El check-in exige estar en la puerta, que es lo que el negocio compra.
+	// Idempotente: se llama en cada check-in y solo paga la primera vez.
+	const { data: referral, error: refErr } = await supabase.rpc(
+		"grant_referral_reward",
+		{ p_tenant_id: tenant_id, p_user_id: user_profile_id },
+	);
+	if (refErr) {
+		console.warn("[api.checkin] grant_referral_reward failed", refErr.message);
+	}
+
 	// ── "¿Y esto para qué me da?" ─────────────────────────────────────
 	// El check-in celebra "+50 tokens", y un número suelto no significa nada
 	// para quien acaba de entrar.  Se adjunta a qué producto equivale YA, o
@@ -150,7 +163,10 @@ export async function action({ request, context }: Route.ActionArgs) {
 		console.warn("[api.checkin] redeem_hint failed", hintErr.message);
 	}
 
-	return jsonResponse({ ...payload, hint: hint ?? null }, { request });
+	return jsonResponse(
+		{ ...payload, hint: hint ?? null, referral: referral ?? null },
+		{ request },
+	);
 }
 
 export function loader({ request }: Route.LoaderArgs) {
