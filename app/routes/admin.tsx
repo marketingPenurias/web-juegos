@@ -13,6 +13,7 @@ import { useTenant } from "../lib/tenant";
 import { cn } from "../lib/utils";
 import { VENUE_TZ, toLocalInput, fromLocalInput } from "../lib/madrid-time";
 import { FlashDropPanel } from "../components/admin/FlashDropPanel";
+import { PromoConfigPanel } from "../components/admin/PromoConfigPanel";
 
 /**
  * /admin — Consola del DJ / Staff (Bloque 4).
@@ -429,7 +430,10 @@ export default function Admin() {
 						{/* ── PESTAÑA 2 · GESTIÓN DE PLANTILLAS ──────────────── */}
 						{/* ── PESTAÑA 2 · PROMOCIONES ────────────────────────── */}
 						{activeTab === "promos" && (
-							<FlashDropPanel call={call} onToast={flash} />
+							<>
+								<FlashDropPanel call={call} onToast={flash} />
+								<PromoConfigPanel call={call} onToast={flash} />
+							</>
 						)}
 
 						{activeTab === "templates" && (
