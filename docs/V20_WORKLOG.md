@@ -6,7 +6,7 @@ primero antes de retomar.
 
 - **Rama de integración:** `feat/v20` → una sola PR a `main` al final.
 - **Ramas por fase:** `feat/v20-fN-...`, se mergean a `feat/v20` al terminar.
-- **Referencias:** modelo de BD en [`database/DB_MODEL.md`](database/DB_MODEL.md) ·
+- **Referencias:** modelo de BD en [`docs/DB_MODEL.md`](DB_MODEL.md) ·
   grafo de código en `graphify-out/` (`graphify query "..."`).
 
 ---
@@ -61,7 +61,7 @@ Tablas afectadas: `global_tracks`, `event_templates`, `event_template_tracks`,
 **Cambio:** `GRANT SELECT/INSERT/UPDATE/DELETE` a `service_role` en las 7 tablas
 + `ALTER DEFAULT PRIVILEGES` para tablas futuras.
 Migración `v20_fix_service_role_grants` · espejo:
-[`database/24_v20_service_role_grants.sql`](database/24_v20_service_role_grants.sql).
+[`database/24_v20_service_role_grants.sql`](../database/24_v20_service_role_grants.sql).
 
 **Verificado:** `has_table_privilege('service_role', …, 'SELECT') = true` en las 7.
 **Pendiente de confirmación visual:** que `/admin` liste Plantillas y Almacén.
@@ -86,7 +86,7 @@ oculto el bug de grants.
 
 ### 2.1 Regla de visibilidad del ranking
 Nueva RPC **`tv_ranking(p_event_id, p_limit)`**
-([`database/25_v20_tv_ranking.sql`](database/25_v20_tv_ranking.sql)):
+([`database/25_v20_tv_ranking.sql`](../database/25_v20_tv_ranking.sql)):
 sólo temas con votos · fuera el que suena · los sonados vuelven si los re-votan
 **o** pasadas 2 h · empate → gana el que lleva más tiempo con esos votos.
 
@@ -176,7 +176,7 @@ título obligaba a tocarlo evento por evento y el género vivía duplicado.
 `global_track_id`. La fila **sólo se crea cuando hace falta** (primer voto o
 inyección del DJ) → un evento pasa de 759 filas a las que de verdad se usan.
 
-**Cambios** ([`database/26_v20_event_tracks_n_to_n.sql`](database/26_v20_event_tracks_n_to_n.sql))
+**Cambios** ([`database/26_v20_event_tracks_n_to_n.sql`](../database/26_v20_event_tracks_n_to_n.sql))
 - Migración **aditiva**: `global_track_id` + backfill + `unique(event_id, global_track_id)`.
   Verificado: **0 huérfanos, 9.108/9.108 mapeadas**. No se borró ninguna columna,
   así que los eventos ya creados siguen comportándose igual.
@@ -358,3 +358,48 @@ personalización de color existía pero nunca se había usado.
 **Pendiente menor:** quedan literales en `i18n.ts` (`onboarding.brand`,
 nombres de productos de ejemplo) que **no se usan** en ninguna pantalla; se
 limpiarán al tocar i18n, sin prisa.
+
+## FASE 7 — Limpieza de código muerto ✅
+
+**Criterio: cero restos.** Auditoría con script (no a ojo), verificando cada
+candidato antes de borrar.
+
+### i18n — 68 claves muertas eliminadas (de 298 → 230 en ES)
+Restos de la maqueta que quedaron cuando la funcionalidad pasó a otro sitio:
+
+| Grupo | Qué era | Dónde vive ahora |
+|---|---|---|
+| `menu.items.*` (18) | productos inventados (Carajillo, Camiseta, Gorra) | catálogo real en `tenant_products` |
+| `ticket.*` (13) | textos del ticket de la maqueta | el ticket real es `RedemptionScreen` → `redemption.*` |
+| `hub.profileName` ("Alejandro"), `hub.levelStatus` | datos de usuario inventados | perfil real desde `/api/session` |
+| `music.*`, `live.*`, `history.tx_*` … | pantallas/flujos que cambiaron | — |
+
+**Preservadas pese a parecer muertas** (se resuelven en runtime; borrarlas
+habría roto la app):
+- `lang.es` / `lang.en` → se llaman con `` t(`lang.${current}`) ``.
+- `tinder.swipesLeft_one` / `_other` → plurales de i18next vía `t(..., {count})`.
+
+**Verificación:** las 29 claves que el código usa sin definir **todas tienen
+`defaultValue`**, así que no rompen. La desincronización ES/EN **mejoró**
+(65 → 61 claves sin traducir); no se introdujo ninguna nueva.
+
+### Módulos huérfanos
+- **Eliminado** `lib/cookie-auth.server.ts`: resto de cuando la TV se
+  autenticaba por cookie. Desde V1.6 usa Bearer, así que `verifyCookieAuth` y
+  `requireTenantRole` no los importaba nadie. (`serializeCookie`, que sí se usa,
+  vive en `api.server.ts` — por eso parecía vivo.)
+- **`app/types/env.d.ts`**: falso positivo, los `.d.ts` no se importan por diseño.
+- **Eliminada `app/components/_future/`** (`MissionRow`, `ViralLoopCard`, README)
+  tras revisarlos uno a uno:
+  - `MissionRow`: una barra de progreso N/M. No aparece en el roadmap y se
+    rehace en minutos cuando exista la tabla `missions`.
+  - `ViralLoopCard`: maqueta del bucle viral. Botones **sin handlers** y el
+    "4 amigos / ronda de chupitos" escrito a fuego (debe venir de la economía).
+    Cuando se haga el loop de invitación de verdad (S4) la UI se rehará contra
+    el contador y el código de invitación reales.
+  - Efecto secundario detectado: estos dos ficheros **mantenían vivas
+    artificialmente 6 claves i18n** (`hub.viralTitle`, `hub.packLeader`…) que
+    las auditorías contaban como usadas. Borradas también.
+  - Git conserva ambos si algún día se quieren recuperar como referencia visual.
+
+**Total i18n tras la limpieza completa: 298 → 224 claves en ES** (−25 %).

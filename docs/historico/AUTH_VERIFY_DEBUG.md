@@ -49,9 +49,9 @@ cambio.
 
 | Fichero | Qué hay marcado |
 |---|---|
-| [app/lib/api.server.ts](app/lib/api.server.ts) | 6 ramas con `console.warn/error` + `throw jsonResponse` (códigos `NO_TOKEN_HEADER`, `JWT_PUBLIC_KEY_MISSING`, `JWT_INVALID_OR_EXPIRED`, `JWT_NO_SUB`, `ENV_VARS_MISSING_IN_CLOUDFLARE`).  Firma temporal `Promise<VerifiedUser>`.  Nuevas helpers `decodeB64Url`, `verifySupabaseJwtLocally`, `readJwtSecret`. |
-| [app/lib/useSession.ts](app/lib/useSession.ts) | 1 `console.log` antes del fetch a `/api/session` + 2 `console.error` con prefijo `[SESSION ERROR]` (excepción de red y fallo `!res.ok`). |
-| [app/routes/api.session.ts](app/routes/api.session.ts) | 1 `console.error` cuando `getServiceSupabase()` throw — significa que falta `SUPABASE_SECRET_KEY` en producción. |
+| [app/lib/api.server.ts](../../app/lib/api.server.ts) | 6 ramas con `console.warn/error` + `throw jsonResponse` (códigos `NO_TOKEN_HEADER`, `JWT_PUBLIC_KEY_MISSING`, `JWT_INVALID_OR_EXPIRED`, `JWT_NO_SUB`, `ENV_VARS_MISSING_IN_CLOUDFLARE`).  Firma temporal `Promise<VerifiedUser>`.  Nuevas helpers `decodeB64Url`, `verifySupabaseJwtLocally`, `readJwtSecret`. |
+| [app/lib/useSession.ts](../../app/lib/useSession.ts) | 1 `console.log` antes del fetch a `/api/session` + 2 `console.error` con prefijo `[SESSION ERROR]` (excepción de red y fallo `!res.ok`). |
+| [app/routes/api.session.ts](../../app/routes/api.session.ts) | 1 `console.error` cuando `getServiceSupabase()` throw — significa que falta `SUPABASE_SECRET_KEY` en producción. |
 
 ## Códigos de error que el cliente ve ahora (Network → Response)
 

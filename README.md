@@ -107,3 +107,7 @@ This template comes with [Tailwind CSS](https://tailwindcss.com/) already config
 ---
 
 Built with ❤️ using React Router.
+
+## Documentación
+
+Toda la documentación del proyecto está en [`docs/`](docs/README.md).

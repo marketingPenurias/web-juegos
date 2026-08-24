@@ -48,6 +48,24 @@ type AdminBody = {
 	// V17: partir la pantalla mostrando la canción que suena ahora (mitad
 	// derecha) junto al ranking (mitad izquierda).
 	tv_show_now_playing?: boolean;
+	// V21: Flash Drops — promoción con caducidad y stock lanzada por el DJ.
+	product_id?: string;
+	promo_price_eur?: number;
+	stock?: number;
+	label?: string;
+	tokens_per_euro?: number;
+	rule_id?: string;
+	// V21: configuración de promociones editable por la sala.
+	list_price_eur?: number;
+	tier_code?: string;
+	min_lifetime?: number;
+	max_redemptions_per_night?: number | null;
+	days?: number[];
+	hour_from?: number | null;
+	hour_to?: number | null;
+	availability_id?: string;
+	max_per_night?: number | null;
+	is_active?: boolean;
 };
 
 type ParsedTrack = {
@@ -613,6 +631,268 @@ export async function handleAdminAction(
 				table_name: "event_templates", record_id: id, new_data: { name },
 			});
 			return jsonResponse({ ok: true }, { request });
+		}
+
+		// ── Flash Drops ────────────────────────────────────────────────
+		// La palanca de la noche: el DJ ve que la sala está fría y suelta una
+		// promoción agresiva con caducidad y stock.  No es una feature aparte,
+		// es una regla de disponibilidad con vigencia corta — pero SÍ lleva
+		// `campaign_code` propio para poder medir cada activación por separado.
+		case "promo_panel": {
+			const [{ data: products, error: prodErr }, { data: campaigns, error: campErr }] =
+				await Promise.all([
+					supabase
+						.from("tenant_products")
+						.select("id, name, list_price_eur, promo_price_eur")
+						.eq("tenant_id", tenant_id)
+						.eq("is_active", true)
+						.eq("redemption_type", "discount")
+						.order("list_price_eur", { ascending: true }),
+					supabase
+						.from("product_availability")
+						.select(
+							"id, campaign_code, label, promo_price_eur, tokens_per_euro, " +
+								"valid_from, valid_to, stock_total, stock_used, is_active, " +
+								"product:tenant_products(name)",
+						)
+						.eq("tenant_id", tenant_id)
+						.eq("kind", "flash_drop")
+						.order("valid_from", { ascending: false })
+						.limit(20),
+				]);
+			// Igual que en `bootstrap`: un error tragado aquí pintaría un panel
+			// vacío que parece "no hay nada" cuando en realidad falló la carga.
+			const warnings: string[] = [];
+			if (prodErr) { console.warn("[api.admin] promo products", prodErr.message); warnings.push("products"); }
+			if (campErr) { console.warn("[api.admin] promo campaigns", campErr.message); warnings.push("campaigns"); }
+			return jsonResponse(
+				{ ok: true, products: products ?? [], campaigns: campaigns ?? [], warnings },
+				{ request },
+			);
+		}
+
+		case "create_flash_drop": {
+			const productId = String(body.product_id ?? "");
+			const price = Number(body.promo_price_eur);
+			const minutes = Number(body.minutes);
+			if (!productId) return jsonResponse({ ok: false, error: "product_required" }, { status: 400, request });
+			if (!Number.isFinite(price) || price < 0) return jsonResponse({ ok: false, error: "invalid_price" }, { status: 400, request });
+			if (!Number.isInteger(minutes) || minutes < 1 || minutes > 480) {
+				return jsonResponse({ ok: false, error: "invalid_minutes" }, { status: 400, request });
+			}
+			const stock = Number.isInteger(body.stock) && Number(body.stock) > 0 ? Number(body.stock) : null;
+			const { data, error } = await supabase.rpc("create_flash_drop", {
+				p_tenant_id: tenant_id,
+				p_product_id: productId,
+				p_promo_price_eur: price,
+				p_minutes: minutes,
+				p_stock: stock,
+				p_tier_code: null,
+				p_label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 80) : null,
+				p_tokens_per_euro: Number.isInteger(body.tokens_per_euro) ? Number(body.tokens_per_euro) : null,
+			});
+			if (error) {
+				return jsonResponse({ ok: false, error: "rpc_failed", detail: error.message }, { status: 400, request });
+			}
+			// Un drop regala dinero: queda en el registro de auditoría con quién
+			// lo lanzó, igual que cualquier otra decisión de la sala.
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "create_flash_drop",
+				table_name: "product_availability",
+				record_id: (data as { rule_id?: string } | null)?.rule_id ?? null,
+				new_data: data as Record<string, unknown>,
+			});
+			return jsonResponse({ ok: true, ...(data as object) }, { request });
+		}
+
+		case "end_flash_drop": {
+			const ruleId = String(body.rule_id ?? "");
+			if (!ruleId) return jsonResponse({ ok: false, error: "rule_id_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("end_flash_drop", {
+				p_tenant_id: tenant_id, p_rule_id: ruleId,
+			});
+			if (error) {
+				return jsonResponse({ ok: false, error: "rpc_failed", detail: error.message }, { status: 400, request });
+			}
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "end_flash_drop",
+				table_name: "product_availability", record_id: ruleId,
+				new_data: data as Record<string, unknown>,
+			});
+			return jsonResponse({ ok: true, ...(data as object) }, { request });
+		}
+
+		// ── Configuración de promociones ───────────────────────────────
+		// Todo esto lo edita la SALA, no nosotros: precios, tasa por nivel,
+		// umbrales y franjas horarias.  Es el requisito que hace que el sistema
+		// sirva para una segunda discoteca sin tocar código.
+		case "promo_config": {
+			const warnings: string[] = [];
+			const warn = (scope: string, msg?: string) => {
+				console.warn(`[api.admin] promo_config ${scope}: ${msg ?? "?"}`);
+				warnings.push(scope);
+			};
+			const [prods, tiersRes, rules] = await Promise.all([
+				supabase.from("tenant_products")
+					.select("id, name, product_type, list_price_eur, promo_price_eur, redemption_type, price_tokens, is_active")
+					.eq("tenant_id", tenant_id)
+					.order("list_price_eur", { ascending: true, nullsFirst: false }),
+				supabase.from("tenant_tier_thresholds")
+					.select("tier_code, display_name, min_lifetime, tokens_per_euro, max_redemptions_per_night, badge_emoji, sort_order")
+					.eq("tenant_id", tenant_id)
+					.order("sort_order", { ascending: true }),
+				supabase.from("product_availability")
+					.select("id, product_id, tier_code, days, hour_from, hour_to, promo_price_eur, tokens_per_euro, max_per_night, max_per_week, label, is_active")
+					.eq("tenant_id", tenant_id)
+					.eq("kind", "base")
+					.order("product_id", { ascending: true }),
+			]);
+			if (prods.error) warn("products", prods.error.message);
+			if (tiersRes.error) warn("tiers", tiersRes.error.message);
+			if (rules.error) warn("availability", rules.error.message);
+			const { data: gaps } = await supabase.rpc("check_promo_coverage", { p_tenant_id: tenant_id });
+			return jsonResponse({
+				ok: true,
+				products: prods.data ?? [],
+				tiers: tiersRes.data ?? [],
+				availability: rules.data ?? [],
+				gaps: gaps ?? [],
+				warnings,
+			}, { request });
+		}
+
+		case "update_product": {
+			const id = String(body.product_id ?? "");
+			if (!id) return jsonResponse({ ok: false, error: "product_required" }, { status: 400, request });
+			const patch: Record<string, unknown> = {};
+			if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 80);
+			// Precios sin decimales: es una regla del local, no una preferencia
+			// de formato — un "3,50 €" en barra no existe.
+			for (const key of ["list_price_eur", "promo_price_eur"] as const) {
+				const v = body[key];
+				if (v === undefined) continue;
+				if (!Number.isFinite(Number(v)) || Number(v) < 0) {
+					return jsonResponse({ ok: false, error: "invalid_price" }, { status: 400, request });
+				}
+				patch[key] = Math.round(Number(v));
+			}
+			if (typeof body.is_active === "boolean") patch.is_active = body.is_active;
+			if (Object.keys(patch).length === 0) {
+				return jsonResponse({ ok: false, error: "nothing_to_update" }, { status: 400, request });
+			}
+			// El promo tiene que mejorar al de barra o el descuento sale negativo
+			// y el producto acabaría "costando" tokens negativos.
+			const { data: current } = await supabase
+				.from("tenant_products").select("list_price_eur, promo_price_eur")
+				.eq("id", id).eq("tenant_id", tenant_id).maybeSingle();
+			const list = Number(patch.list_price_eur ?? current?.list_price_eur ?? 0);
+			const promo = Number(patch.promo_price_eur ?? current?.promo_price_eur ?? 0);
+			if (list > 0 && promo >= list) {
+				return jsonResponse({ ok: false, error: "promo_not_cheaper" }, { status: 400, request });
+			}
+			const { error } = await supabase.from("tenant_products").update(patch).eq("id", id).eq("tenant_id", tenant_id);
+			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "update_product",
+				table_name: "tenant_products", record_id: id, new_data: patch,
+			});
+			return jsonResponse({ ok: true }, { request });
+		}
+
+		case "update_tier": {
+			const code = String(body.tier_code ?? "");
+			if (!code) return jsonResponse({ ok: false, error: "tier_required" }, { status: 400, request });
+			const patch: Record<string, unknown> = {};
+			if (body.min_lifetime !== undefined) {
+				const v = Number(body.min_lifetime);
+				if (!Number.isInteger(v) || v < 0) return jsonResponse({ ok: false, error: "invalid_threshold" }, { status: 400, request });
+				patch.min_lifetime = v;
+			}
+			if (body.tokens_per_euro !== undefined) {
+				const v = Number(body.tokens_per_euro);
+				// 0 regalaría descuentos gratis; el tope evita un dedazo que
+				// deje todo inalcanzable.
+				if (!Number.isInteger(v) || v < 1 || v > 1000) return jsonResponse({ ok: false, error: "invalid_rate" }, { status: 400, request });
+				patch.tokens_per_euro = v;
+			}
+			if (body.max_redemptions_per_night !== undefined) {
+				const v = body.max_redemptions_per_night;
+				if (v === null) patch.max_redemptions_per_night = null;
+				else {
+					const n = Number(v);
+					if (!Number.isInteger(n) || n < 1 || n > 50) return jsonResponse({ ok: false, error: "invalid_limit" }, { status: 400, request });
+					patch.max_redemptions_per_night = n;
+				}
+			}
+			if (Object.keys(patch).length === 0) return jsonResponse({ ok: false, error: "nothing_to_update" }, { status: 400, request });
+			const { error } = await supabase.from("tenant_tier_thresholds").update(patch)
+				.eq("tenant_id", tenant_id).eq("tier_code", code);
+			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "update_tier",
+				table_name: "tenant_tier_thresholds", record_id: null,
+				new_data: { tier_code: code, ...patch },
+			});
+			return jsonResponse({ ok: true }, { request });
+		}
+
+		case "save_availability": {
+			const productId = String(body.product_id ?? "");
+			if (!productId) return jsonResponse({ ok: false, error: "product_required" }, { status: 400, request });
+			const hf = body.hour_from == null ? null : Number(body.hour_from);
+			const ht = body.hour_to == null ? null : Number(body.hour_to);
+			for (const h of [hf, ht]) {
+				if (h !== null && (!Number.isInteger(h) || h < 0 || h > 23)) {
+					return jsonResponse({ ok: false, error: "invalid_hour" }, { status: 400, request });
+				}
+			}
+			// O ambas horas o ninguna: media ventana no significa nada.
+			if ((hf === null) !== (ht === null)) {
+				return jsonResponse({ ok: false, error: "incomplete_window" }, { status: 400, request });
+			}
+			const days = Array.isArray(body.days)
+				? body.days.map(Number).filter((d) => Number.isInteger(d) && d >= 1 && d <= 7)
+				: null;
+			const row = {
+				tenant_id,
+				product_id: productId,
+				tier_code: body.tier_code ? String(body.tier_code) : null,
+				days: days && days.length > 0 ? days : null,
+				hour_from: hf,
+				hour_to: ht,
+				promo_price_eur: body.promo_price_eur == null ? null : Math.round(Number(body.promo_price_eur)),
+				max_per_night: body.max_per_night == null ? null : Number(body.max_per_night),
+				label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 80) : null,
+				is_active: body.is_active !== false,
+				kind: "base",
+			};
+			const id = String(body.availability_id ?? "");
+			const { error } = id
+				? await supabase.from("product_availability").update(row).eq("id", id).eq("tenant_id", tenant_id)
+				: await supabase.from("product_availability").insert(row);
+			if (error) return jsonResponse({ ok: false, error: "save_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: id ? "update_availability" : "create_availability",
+				table_name: "product_availability", record_id: id || null, new_data: row,
+			});
+			// Se devuelven los huecos que deja el cambio: el aviso llega en el
+			// momento de guardar, no un sábado a las dos de la mañana.
+			const { data: gaps } = await supabase.rpc("check_promo_coverage", { p_tenant_id: tenant_id });
+			return jsonResponse({ ok: true, gaps: gaps ?? [] }, { request });
+		}
+
+		case "delete_availability": {
+			const id = String(body.availability_id ?? "");
+			if (!id) return jsonResponse({ ok: false, error: "availability_required" }, { status: 400, request });
+			const { error } = await supabase.from("product_availability")
+				.delete().eq("id", id).eq("tenant_id", tenant_id).eq("kind", "base");
+			if (error) return jsonResponse({ ok: false, error: "delete_failed", detail: error.message }, { status: 500, request });
+			await supabase.from("audit_logs").insert({
+				tenant_id, actor_id: verifiedId, action: "delete_availability",
+				table_name: "product_availability", record_id: id, new_data: null,
+			});
+			const { data: gaps } = await supabase.rpc("check_promo_coverage", { p_tenant_id: tenant_id });
+			return jsonResponse({ ok: true, gaps: gaps ?? [] }, { request });
 		}
 
 		default:

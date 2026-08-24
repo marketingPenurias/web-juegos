@@ -61,8 +61,10 @@ export type MyReward = {
 	expires_at: string | null;
 	created_at: string;
 	product_name: string;
+	/** Lo que hay que pagar en barra con este ticket (0 = invitación). */
 	price_eur: number;
-	price_tokens: number;
+	/** Campaña de la que salió, si vino de una; sirve para medirla. */
+	campaign_code: string | null;
 };
 
 export type RewardResult<T> =

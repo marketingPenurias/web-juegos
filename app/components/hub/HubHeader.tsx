@@ -1,9 +1,8 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { LogOut, User } from "lucide-react";
 import { useGameState } from "../../store/useGameState";
 import { useAuthUser } from "../../lib/useAuthUser";
-import { TIERS, tierFromLifetime } from "../../lib/tier";
+import { TIERS } from "../../lib/tier";
 import { getBrowserSupabase } from "../../lib/supabase.client";
 import { LanguageSwitch } from "../LanguageSwitch";
 
@@ -11,7 +10,8 @@ import { LanguageSwitch } from "../LanguageSwitch";
  * HubHeader — versión REAL.
  *
  *   · Nombre + avatar ← Supabase Auth (`useAuthUser`).
- *   · Badge del tier ← `lifetimeEarned` vía `tierFromLifetime`.
+ *   · Badge del tier ← el tier que resuelve el SERVIDOR (`/api/session`),
+ *     porque los umbrales los configura cada sala.
  *   · Sin sesión, muestra placeholder "Invitado" en vez de un mock que
  *     parezca real ("Alejandro Vega").
  *   · Logout cierra Supabase Auth Y el store local.
@@ -20,11 +20,10 @@ import { LanguageSwitch } from "../LanguageSwitch";
 export function HubHeader() {
 	const { t } = useTranslation();
 	const setScreen = useGameState((s) => s.setScreen);
-	const lifetime = useGameState((s) => s.lifetimeEarned);
 	const logoutStore = useGameState((s) => s.logout);
 	const authUser = useAuthUser();
 
-	const tier = useMemo(() => tierFromLifetime(lifetime), [lifetime]);
+	const tier = useGameState((s) => s.tier);
 	const tierMeta = TIERS[tier];
 
 	const displayName =

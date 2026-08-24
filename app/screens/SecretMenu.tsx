@@ -1,71 +1,42 @@
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-	BadgePercent,
-	Coins,
-	GlassWater,
-	Gift,
-	Lock,
-	Sparkles,
-	Crown,
-} from "lucide-react";
+import { Coins, GlassWater, Gift, Lock, Clock, Zap } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useTenant } from "../lib/tenant";
 import { useCatalog, type CatalogProduct } from "../lib/useCatalog";
 import { useRewards } from "../lib/useRewards";
-import {
-	TIERS,
-	pointsToTier,
-	productVisibility,
-	type TierCode,
-} from "../lib/tier";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { cn } from "../lib/utils";
 
 /**
- * SecretMenu — Catálogo real consumido de `tenant_products`.
+ * SecretMenu — el menú de promociones, ya resuelto por el servidor.
  *
- *   Piloto MVP (decisión CTO): la UI asume Bronce.  Cualquier producto
- *   con `min_tier_required` definido se renderiza como "Próximamente",
- *   sin disparar el flujo de compra.  La lógica de bloqueos profunda
- *   (día, límites, balance) vive en Fase 2.
+ *   Los tokens compran DESCUENTO, no producto: una copa de 9 € se queda en
+ *   6 € y lo que cuesta en tokens es ese descuento multiplicado por la tasa
+ *   del nivel.  Por eso la tarjeta enseña las dos cifras — el precio de barra
+ *   tachado y el que va a pagar — en vez de un precio en tokens a secas: el
+ *   valor está en el ahorro, y sin verlo la promoción no se entiende.
  *
- *   Flujo de compra real:
- *     1. usuario tap → `useRewards.purchase()` (POST /api/rewards)
- *     2. al OK → `useRewards.redeem()` (start_reward_redemption)
- *     3. al OK → `openRedemption({ rewardId, productName, priceEur,
- *        expiresAt })` mostrando la PANTALLA CAMARERO unificada.
+ *   Esta pantalla NO decide nada de eso.  `/api/catalog` devuelve por producto
+ *   su estado (`available` / `not_now` / `locked_tier`), su coste para este
+ *   usuario y la pista de qué le falta.  El cliente solo pinta: si duplicara
+ *   las reglas de nivel, día, franja horaria, vigencia o stock, acabarían
+ *   contradiciendo a la BD en cuanto la sala cambiara un horario.
  *
- *   Defense in depth: aunque el cliente nunca debería disparar la
- *   compra de un producto bloqueado, la RPC `purchase_reward`
- *   re-valida tier + día + límite + balance server-side.
+ *   Flujo de compra:
+ *     1. tap → `useRewards.purchase()` (POST /api/rewards)
+ *     2. OK  → `useRewards.redeem()` (start_reward_redemption)
+ *     3. OK  → `openRedemption(...)` abre la pantalla del camarero.
+ *
+ *   Defense in depth: `purchase_reward` revalida en el servidor contra la
+ *   misma regla que se le enseñó al usuario.
  */
 
-const DAY_LABELS: Record<number, string> = {
-	1: "Lun",
-	2: "Mar",
-	3: "Mié",
-	4: "Jue",
-	5: "Vie",
-	6: "Sáb",
-	7: "Dom",
-};
-
-function formatDays(days: number[] | null): string | null {
-	if (!days || days.length === 0) return null;
-	return days
-		.slice()
-		.sort((a, b) => a - b)
-		.map((d) => DAY_LABELS[d] ?? "?")
-		.join(" · ");
-}
-
-function tierIcon(code: TierCode | null) {
-	if (!code) return Sparkles;
-	if (code === "platino") return Crown;
-	return Lock;
+function eur(value: number | null | undefined): string {
+	// Los precios del local no llevan decimales (9 €, no 9,00 €).
+	return `${Number(value ?? 0).toFixed(0)}€`;
 }
 
 export function SecretMenu() {
@@ -77,12 +48,8 @@ export function SecretMenu() {
 	const setScreen = useGameState((s) => s.setScreen);
 	const redeemTutorialSeen = useGameState((s) => s.redeemTutorialSeen);
 	const markRedeemTutorialSeen = useGameState((s) => s.markRedeemTutorialSeen);
-	// Tier real (server-authoritative) y puntos acumulados: deciden qué promos
-	// se ven, cuáles asoman como "próximamente" y cuánto falta para ellas.
-	const userTier = useGameState((s) => s.tier);
-	const lifetimeEarned = useGameState((s) => s.lifetimeEarned);
 
-	const { products, loading, error, reload } = useCatalog();
+	const { catalog, products, loading, error, reload } = useCatalog();
 	const { purchase, redeem, pending } = useRewards();
 
 	const [toast, setToast] = useState<string | null>(null);
@@ -97,77 +64,23 @@ export function SecretMenu() {
 
 	const containerRef = useRef<HTMLDivElement>(null);
 
-	// ISO weekday según la timezone de Madrid (alineado con la RPC
-	// `business_night` y el chequeo de día del `purchase_reward`).
-	const todayIsoDow = useMemo(() => {
-		const fmt = new Intl.DateTimeFormat("en-US", {
-			timeZone: "Europe/Madrid",
-			weekday: "short",
-		});
-		const day = fmt.format(new Date());
-		// Mon=1..Sun=7 (ISO).  Intl no nos lo da directo; lo mapeamos.
-		const map: Record<string, number> = {
-			Mon: 1,
-			Tue: 2,
-			Wed: 3,
-			Thu: 4,
-			Fri: 5,
-			Sat: 6,
-			Sun: 7,
-		};
-		return map[day] ?? (new Date().getDay() || 7);
-	}, []);
-
 	const groups = useMemo(() => {
 		const available: CatalogProduct[] = [];
+		const notNow: CatalogProduct[] = [];
 		const lockedTier: CatalogProduct[] = [];
-		const lockedDay: CatalogProduct[] = [];
 		for (const p of products) {
-			// V20 · F3 — Gating por el tier REAL del usuario (antes se asumía
-			// bronce para todos, así que un usuario Oro veía sus propias promos
-			// como "próximamente").  Ves lo tuyo + asomas al siguiente nivel;
-			// lo que está 2 escalones por encima ni se muestra.
-			const visibility = productVisibility(
-				p.min_tier_required as TierCode | null,
-				userTier,
-			);
-			if (visibility === "hidden") continue;
-			if (visibility === "locked_next") {
-				lockedTier.push(p);
-				continue;
-			}
-			// Disponible HOY: si `available_days` no se define (NULL o
-			// array vacío), el producto se considera siempre disponible.
-			const allowsToday =
-				!p.available_days ||
-				p.available_days.length === 0 ||
-				p.available_days.includes(todayIsoDow);
-			if (allowsToday) {
-				available.push(p);
-			} else {
-				lockedDay.push(p);
-			}
+			if (p.status === "available") available.push(p);
+			else if (p.status === "not_now") notNow.push(p);
+			else lockedTier.push(p);
 		}
-		return { available, lockedTier, lockedDay };
-	}, [products, todayIsoDow, userTier]);
-
-	const formatDaysLong = (days: number[] | null | undefined): string => {
-		if (!days || days.length === 0) return "";
-		const labels: Record<number, string> = {
-			1: "Lun",
-			2: "Mar",
-			3: "Mié",
-			4: "Jue",
-			5: "Vie",
-			6: "Sáb",
-			7: "Dom",
-		};
-		return days
-			.slice()
-			.sort((a, b) => a - b)
-			.map((d) => labels[d] ?? "?")
-			.join(" · ");
-	};
+		// Las campañas van primero: son las que caducan.
+		available.sort((a, b) => {
+			const ca = a.kind === "base" ? 1 : 0;
+			const cb = b.kind === "base" ? 1 : 0;
+			return ca - cb || a.cost_tokens - b.cost_tokens;
+		});
+		return { available, notNow, lockedTier };
+	}, [products]);
 
 	useGSAP(
 		() => {
@@ -182,9 +95,8 @@ export function SecretMenu() {
 		{ scope: containerRef, dependencies: [products.length] },
 	);
 
-	// Gate: la PRIMERA vez que el usuario pulsa canjear/activar, mostramos
-	// el tutorial anti-fraude antes de tocar el ledger.  Las siguientes
-	// veces (redeemTutorialSeen) va directo.
+	// Gate: la PRIMERA vez que el usuario pulsa canjear mostramos el tutorial
+	// anti-fraude antes de tocar el ledger.
 	const handleBuy = (product: CatalogProduct) => {
 		if (purchasing) return;
 		if (!redeemTutorialSeen) {
@@ -203,22 +115,20 @@ export function SecretMenu() {
 
 	const doPurchase = async (product: CatalogProduct) => {
 		if (purchasing) return;
-		if (tokens < product.price_tokens) {
+		if (tokens < product.cost_tokens) {
 			setTone("warning");
 			setToast(
 				t("menu.toastMissingTokens", {
-					n: product.price_tokens - tokens,
+					n: product.cost_tokens - tokens,
 				}),
 			);
 			return;
 		}
 
-		setPurchasing(product.id);
-		const result = await purchase(product.id);
+		setPurchasing(product.product_id);
+		const result = await purchase(product.product_id);
 		if (!result.ok) {
 			setTone("warning");
-			// Modo diagnóstico piloto: si el backend manda `detail` raw
-			// del RPC, lo mostramos directamente.
 			setToast(
 				result.detail
 					? `${result.error}: ${result.detail}`
@@ -228,7 +138,6 @@ export function SecretMenu() {
 			return;
 		}
 
-		// Actualiza balance espejo en cliente (servidor es la fuente).
 		if (typeof result.balance === "number") {
 			setBalance(result.balance);
 		}
@@ -237,8 +146,8 @@ export function SecretMenu() {
 		// camarero sin pasos manuales — el usuario quiere consumir YA.
 		const redeemResult = await redeem(result.reward_id);
 		if (!redeemResult.ok) {
-			// La compra está hecha y queda como "available" en user_rewards.
-			// El usuario puede reintentar el canje desde el historial.
+			// La compra está hecha y queda como "available" en user_rewards:
+			// el usuario puede reintentar el canje desde el historial.
 			setTone("warning");
 			setToast(
 				redeemResult.detail
@@ -254,10 +163,14 @@ export function SecretMenu() {
 		openRedemption({
 			rewardId: result.reward_id,
 			productName: product.name,
-			priceEur: Number(product.reference_fiat ?? 0),
+			// Lo que tiene que pagar en barra, no el precio de carta.
+			priceEur: Number(product.promo_price_eur ?? 0),
 			expiresAt: redeemResult.expires_at,
 		});
 		setPurchasing(null);
+		// Un canje puede agotar el stock de una campaña o consumir el último
+		// canje de la noche: hay que releer para no ofrecer lo que ya no está.
+		void reload();
 	};
 
 	const translateError = (code: string): string => {
@@ -266,33 +179,14 @@ export function SecretMenu() {
 				return t("menu.errInsufficient");
 			case "product_unavailable":
 				return t("menu.errUnavailable");
-			case "product_wrong_day":
-				return t("menu.errWrongDay", "Este producto no está disponible hoy");
-			case "tier_required":
-				return t(
-					"menu.errTierRequired",
-					"Necesitas subir de nivel para canjear esto",
-				);
+			case "promo_sold_out":
+				return t("menu.errSoldOut");
 			case "night_limit_reached":
-				return t(
-					"menu.errNightLimit",
-					"Ya canjeaste este producto esta noche",
-				);
+				return t("menu.errNightLimit");
 			case "week_limit_reached":
-				return t(
-					"menu.errWeekLimit",
-					"Has alcanzado el límite semanal de este producto",
-				);
-			case "month_limit_reached":
-				return t(
-					"menu.errMonthLimit",
-					"Has alcanzado el límite mensual de este producto",
-				);
+				return t("menu.errWeekLimit");
 			case "profile_not_found":
-				return t(
-					"menu.errProfileMissing",
-					"No encontramos tu perfil. Recarga la app y reintenta.",
-				);
+				return t("menu.errProfileMissing");
 			case "reward_unavailable":
 				return t("menu.errRewardUnavailable");
 			case "unauthorized":
@@ -325,9 +219,24 @@ export function SecretMenu() {
 				<h1 className="text-3xl font-black italic tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
 					{t("menu.secretMenu")}
 				</h1>
-				<p className="text-zinc-400 text-sm font-medium">
-					{t("menu.premiumNoQueue")}
-				</p>
+				{/* Cuántos canjes le quedan: evita la frustración de elegir una
+				    promoción y que el servidor la rechace al final del flujo. */}
+				{catalog.redemptions_left !== null ? (
+					<p className="text-zinc-400 text-sm font-medium">
+						{catalog.redemptions_left > 0
+							? t("menu.redemptionsLeft", {
+									count: catalog.redemptions_left,
+								})
+							: t(
+									"menu.noRedemptionsLeft",
+									"Ya has usado tus canjes de esta noche",
+								)}
+					</p>
+				) : (
+					<p className="text-zinc-400 text-sm font-medium">
+						{t("menu.premiumNoQueue")}
+					</p>
+				)}
 			</header>
 
 			<main className="flex-1 min-h-0 px-6 pt-4 pb-32 overflow-y-auto no-scrollbar flex flex-col gap-4">
@@ -356,26 +265,24 @@ export function SecretMenu() {
 						</h2>
 						{groups.available.map((p) => (
 							<ProductCard
-								key={p.id}
+								key={p.product_id}
 								product={p}
-								busy={purchasing === p.id || pending}
+								nextTierName={catalog.next_tier}
+								affordable={tokens >= p.cost_tokens}
+								busy={purchasing === p.product_id || pending}
 								onBuy={() => void handleBuy(p)}
 							/>
 						))}
 					</section>
 				)}
 
-				{groups.lockedDay.length > 0 && (
+				{groups.notNow.length > 0 && (
 					<section className="flex flex-col gap-3 mt-4">
 						<h2 className="text-[10px] uppercase tracking-[0.3em] text-cyan-300 font-black px-1">
-							{t("menu.lockedDay", "Vuelve otro día")}
+							{t("menu.notNow")}
 						</h2>
-						{groups.lockedDay.map((p) => (
-							<LockedDayCard
-								key={p.id}
-								product={p}
-								daysLabel={formatDaysLong(p.available_days)}
-							/>
+						{groups.notNow.map((p) => (
+							<UnavailableCard key={p.product_id} product={p} variant="time" />
 						))}
 					</section>
 				)}
@@ -386,7 +293,7 @@ export function SecretMenu() {
 							{t("menu.unlockSoon")}
 						</h2>
 						{groups.lockedTier.map((p) => (
-							<LockedCard key={p.id} product={p} lifetimeEarned={lifetimeEarned} />
+							<UnavailableCard key={p.product_id} product={p} variant="tier" />
 						))}
 					</section>
 				)}
@@ -456,29 +363,76 @@ export function SecretMenu() {
 	);
 }
 
+/**
+ * Precio en euros: barra tachada + lo que pagará.  Es el argumento de venta
+ * entero, así que se muestra igual en las tarjetas bloqueadas — que vea lo
+ * que se está perdiendo.
+ */
+function PriceTag({
+	product,
+	dim = false,
+}: {
+	product: CatalogProduct;
+	dim?: boolean;
+}) {
+	if (product.redemption_type === "free_product") return null;
+	return (
+		<span className="inline-flex items-baseline gap-1.5">
+			<span
+				className={cn(
+					"text-[11px] line-through tabular-nums",
+					dim ? "text-zinc-600" : "text-zinc-500",
+				)}
+			>
+				{eur(product.list_price_eur)}
+			</span>
+			<span
+				className={cn(
+					"font-black text-[13px] tabular-nums",
+					dim ? "text-zinc-400" : "text-amber-300",
+				)}
+			>
+				{eur(product.promo_price_eur)}
+			</span>
+		</span>
+	);
+}
+
 function ProductCard({
 	product,
+	nextTierName,
+	affordable,
 	busy,
 	onBuy,
 }: {
 	product: CatalogProduct;
+	nextTierName: string | null;
+	affordable: boolean;
 	busy: boolean;
 	onBuy: () => void;
 }) {
 	const { t } = useTranslation();
-	const isFree = Number(product.reference_fiat ?? 0) === 0;
-	const days = formatDays(product.available_days);
+	const isFree = product.redemption_type === "free_product";
+	const isCampaign = product.kind !== "base";
 
 	return (
 		<article
 			className={cn(
 				"sm-card relative bg-zinc-900/50 backdrop-blur-md transform-gpu translate-z-0 rounded-2xl p-4 flex flex-col gap-3 border",
-				isFree
-					? "border-lime-500/50 shadow-[0_0_25px_rgba(57,255,20,0.18)]"
-					: "border-zinc-800",
+				isCampaign
+					? "border-fuchsia-500/60 shadow-[0_0_25px_rgba(217,70,239,0.22)]"
+					: isFree
+						? "border-lime-500/50 shadow-[0_0_25px_rgba(57,255,20,0.18)]"
+						: "border-zinc-800",
 			)}
 		>
-			{isFree && (
+			{isCampaign && (
+				<span className="absolute -top-2 left-3 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full bg-fuchsia-400 text-black shadow-[0_0_12px_rgba(217,70,239,0.6)] inline-flex items-center gap-1">
+					<Zap className="w-2.5 h-2.5" aria-hidden="true" />
+					{product.label ?? t("menu.flashDrop")}
+				</span>
+			)}
+			{!isCampaign && isFree && (
 				<span className="absolute -top-2 left-3 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full bg-lime-400 text-black shadow-[0_0_12px_rgba(57,255,20,0.6)] inline-flex items-center gap-1">
 					<Gift className="w-2.5 h-2.5" aria-hidden="true" />
 					{t("menu.freeTag")}
@@ -489,13 +443,15 @@ function ProductCard({
 				<div
 					className={cn(
 						"w-14 h-14 rounded-xl flex items-center justify-center text-2xl shrink-0 border",
-						isFree
-							? "bg-lime-500/10 border-lime-500/40"
-							: "bg-zinc-950 border-zinc-800",
+						isCampaign
+							? "bg-fuchsia-500/10 border-fuchsia-500/40"
+							: isFree
+								? "bg-lime-500/10 border-lime-500/40"
+								: "bg-zinc-950 border-zinc-800",
 					)}
 					aria-hidden="true"
 				>
-					{isFree ? "🎁" : "🍸"}
+					{isCampaign ? "⚡" : isFree ? "🎁" : "🍸"}
 				</div>
 				<div className="flex-1 min-w-0">
 					<h3 className="text-base font-black italic tracking-tight text-white leading-tight">
@@ -505,20 +461,22 @@ function ProductCard({
 						<div className="inline-flex items-center gap-1 bg-cyan-950/50 px-2 py-0.5 rounded-full border border-cyan-900/50">
 							<Coins className="w-3 h-3 text-cyan-400" aria-hidden="true" />
 							<span className="text-cyan-300 font-black text-[11px] tabular-nums">
-								{product.price_tokens}
+								{product.cost_tokens}
 							</span>
 						</div>
-						{!isFree && (
-							<span className="font-black text-[11px] text-amber-300 tabular-nums">
-								€{Number(product.reference_fiat ?? 0).toFixed(2)}
-							</span>
-						)}
-						{days && (
-							<span className="font-bold text-[10px] text-zinc-400 uppercase tracking-widest">
-								{days}
-							</span>
-						)}
+						<PriceTag product={product} />
 					</div>
+					{/* La ambición: lo que le costaría si subiera de nivel. */}
+					{product.cost_at_next_tier !== null &&
+						product.cost_at_next_tier < product.cost_tokens &&
+						nextTierName && (
+							<p className="text-[10px] text-zinc-500 mt-1">
+								{t("menu.cheaperAtNextTier", {
+									tier: nextTierName,
+									n: product.cost_at_next_tier,
+								})}
+							</p>
+						)}
 				</div>
 			</div>
 
@@ -528,145 +486,103 @@ function ProductCard({
 				disabled={busy}
 				className={cn(
 					"w-full h-11 rounded-xl font-black text-[12px] uppercase tracking-widest active:scale-95 transition-transform focus-visible:ring-2 focus-visible:ring-cyan-300",
-					isFree
-						? "bg-linear-to-r from-lime-400 to-emerald-500 text-black shadow-[0_0_20px_rgba(57,255,20,0.4)]"
-						: "bg-cyan-500 text-black",
+					isCampaign
+						? "bg-linear-to-r from-fuchsia-400 to-purple-500 text-black shadow-[0_0_20px_rgba(217,70,239,0.4)]"
+						: isFree
+							? "bg-linear-to-r from-lime-400 to-emerald-500 text-black shadow-[0_0_20px_rgba(57,255,20,0.4)]"
+							: "bg-cyan-500 text-black",
 					busy && "opacity-60 cursor-wait",
+					!affordable && !busy && "opacity-60",
 				)}
 			>
 				{busy
 					? t("menu.processing")
-					: isFree
-						? t("menu.activate")
-						: t("menu.canjear")}
+					: !affordable
+						? t("menu.missingTokens")
+						: isFree
+							? t("menu.activate")
+							: t("menu.canjear")}
 			</button>
 		</article>
 	);
 }
 
-function LockedDayCard({
+/**
+ * Tarjeta de lo que no puede pedir.  `unlock_hint` lo redacta el servidor
+ * ("Hoy de 22:00 a 00:00", "Desde Plata"), que es quien conoce la
+ * configuración de la sala: aquí solo se elige el color y el icono.
+ */
+function UnavailableCard({
 	product,
-	daysLabel,
+	variant,
 }: {
 	product: CatalogProduct;
-	daysLabel: string;
+	variant: "time" | "tier";
 }) {
 	const { t } = useTranslation();
-	const isFree = Number(product.reference_fiat ?? 0) === 0;
+	const isTime = variant === "time";
+	const Icon = isTime ? Clock : Lock;
 
 	return (
 		<article
-			className="sm-card relative bg-zinc-900/30 rounded-2xl p-4 flex gap-3 items-center border border-cyan-900/50 opacity-90"
+			className={cn(
+				"sm-card relative rounded-2xl p-4 flex gap-3 items-center border opacity-90 bg-zinc-900/30",
+				isTime ? "border-cyan-900/50" : "border-zinc-800",
+			)}
 			aria-disabled="true"
 		>
 			<div
-				className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl shrink-0 border bg-cyan-950/30 border-cyan-800/40"
+				className={cn(
+					"w-14 h-14 rounded-xl flex items-center justify-center text-2xl shrink-0 border",
+					isTime
+						? "bg-cyan-950/30 border-cyan-800/40"
+						: "bg-zinc-950 border-zinc-800",
+				)}
 				aria-hidden="true"
 			>
-				🕘
+				{isTime ? "🕘" : "🔒"}
 			</div>
-			<div className="flex-1 min-w-0 pr-20">
-				<h3 className="text-sm font-bold text-zinc-200 leading-tight line-clamp-2">
-					{product.name}
-				</h3>
-				<p className="text-[11px] text-cyan-300/80 mt-0.5">
-					{t("menu.onlyOn", "Sólo {{days}}", { days: daysLabel })}
-				</p>
-				<div className="flex flex-wrap items-center gap-2 mt-1.5">
-					<div className="inline-flex items-center gap-1 bg-zinc-950 px-2 py-0.5 rounded-full border border-zinc-800">
-						<Coins className="w-3 h-3 text-zinc-500" aria-hidden="true" />
-						<span className="text-zinc-400 font-black text-[11px] tabular-nums">
-							{product.price_tokens}
-						</span>
-					</div>
-					{!isFree && (
-						<span className="font-bold text-[10px] text-zinc-500 tabular-nums">
-							€{Number(product.reference_fiat ?? 0).toFixed(2)}
-						</span>
-					)}
-				</div>
-			</div>
-			<span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider border text-cyan-300 border-cyan-500/40 bg-cyan-950/70 backdrop-blur-sm">
-				{t("menu.comeBack", "Vuelve otro día")}
-			</span>
-		</article>
-	);
-}
-
-function LockedCard({
-	product,
-	lifetimeEarned,
-}: {
-	product: CatalogProduct;
-	/** Puntos acumulados, para decir cuánto falta exactamente (V20 · F3). */
-	lifetimeEarned: number;
-}) {
-	const { t } = useTranslation();
-	const tier = (product.min_tier_required ?? "plata") as TierCode;
-	const meta = TIERS[tier];
-	const Icon = tierIcon(tier);
-	const isFree = Number(product.reference_fiat ?? 0) === 0;
-	// "Te faltan N" convierte el bloqueo en objetivo concreto en vez de un muro.
-	const missing = pointsToTier(lifetimeEarned, tier);
-
-	return (
-		<article
-			className="sm-card relative bg-zinc-900/30 rounded-2xl p-4 flex gap-3 items-center border border-zinc-800 opacity-90"
-			aria-disabled="true"
-		>
-			<div
-				className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl shrink-0 border"
-				style={{
-					backgroundColor: `${meta.colorPrimary}1A`,
-					borderColor: `${meta.colorPrimary}55`,
-				}}
-				aria-hidden="true"
-			>
-				{meta.emoji}
-			</div>
-			<div className="flex-1 min-w-0 pr-20">
+			<div className="flex-1 min-w-0 pr-16">
 				<div className="flex items-center gap-2">
 					<h3 className="text-sm font-bold text-zinc-300 leading-tight line-clamp-2">
 						{product.name}
 					</h3>
-					<Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
+					<Icon
+						className="w-3.5 h-3.5 text-zinc-500 shrink-0"
+						aria-hidden="true"
+					/>
 				</div>
-				<p className="text-[11px] text-zinc-500 mt-0.5">
-					{t("menu.unlockAt", { tier: meta.displayName })}
-					{missing > 0 && (
-						<span className="text-zinc-400 font-bold">
-							{" · "}
-							{t("menu.unlockMissing", {
-								n: missing,
-								defaultValue: "te faltan {{n}} pts",
-							})}
-						</span>
-					)}
-				</p>
+				{product.unlock_hint && (
+					<p
+						className={cn(
+							"text-[11px] mt-0.5",
+							isTime ? "text-cyan-300/80" : "text-amber-300/80",
+						)}
+					>
+						{product.unlock_hint}
+					</p>
+				)}
 				<div className="flex flex-wrap items-center gap-2 mt-1.5">
 					<div className="inline-flex items-center gap-1 bg-zinc-950 px-2 py-0.5 rounded-full border border-zinc-800">
 						<Coins className="w-3 h-3 text-zinc-500" aria-hidden="true" />
 						<span className="text-zinc-400 font-black text-[11px] tabular-nums">
-							{product.price_tokens}
+							{product.cost_tokens}
 						</span>
 					</div>
-					{!isFree && (
-						<span className="font-bold text-[10px] text-zinc-500 tabular-nums">
-							€{Number(product.reference_fiat ?? 0).toFixed(2)}
-						</span>
-					)}
+					<PriceTag product={product} dim />
 				</div>
 			</div>
 			<span
-				className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider border backdrop-blur-sm"
-				style={{
-					color: meta.colorPrimary,
-					borderColor: `${meta.colorPrimary}66`,
-					backgroundColor: `${meta.colorPrimary}22`,
-				}}
+				className={cn(
+					"absolute top-2 right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider border backdrop-blur-sm",
+					isTime
+						? "text-cyan-300 border-cyan-500/40 bg-cyan-950/70"
+						: "text-amber-300 border-amber-500/40 bg-amber-950/70",
+				)}
 			>
-				<BadgePercent className="w-2.5 h-2.5 inline mr-0.5" aria-hidden="true" />
-				{t("menu.comingSoon")}
+				{isTime
+					? t("menu.comeBackLater")
+					: t("menu.lockedTag")}
 			</span>
 		</article>
 	);

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { getAccessToken, getBrowserSupabase } from "./supabase.client";
-import { useGameState } from "../store/useGameState";
+import { useGameState, type TierRule } from "../store/useGameState";
 import { useTenant } from "./tenant";
 
 /**
@@ -49,6 +49,7 @@ type SessionPayload = {
 	auth_email?: string | null;
 	active_event: { id: string; name: string } | null;
 	tier: "bronce" | "plata" | "oro" | "platino";
+	tiers?: TierRule[];
 	daily_activity?: DailyActivity;
 	reward_rules?: RewardRule[];
 	streak?: number;
@@ -117,6 +118,9 @@ export function useSession() {
 					// Tier server-authoritative (get_user_tier + tenant_tier_thresholds):
 					// el cliente ya no lo recalcula, sólo lo pinta (V20 · F3).
 					tier: data.tier,
+					// La escalera de la sala (umbrales, tasa, canjes/noche):
+					// configurable por discoteca, así que la manda el servidor.
+					tiers: data.tiers,
 				});
 			} catch (err) {
 				// TODO: CLEANUP SESSION DEBUG

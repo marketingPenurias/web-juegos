@@ -1,29 +1,47 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { gsap, useGSAP } from "../../lib/gsap";
 import { useGameState } from "../../store/useGameState";
-import { TIERS, TIER_ORDER, tierFromLifetime } from "../../lib/tier";
+import { TIERS, TIER_ORDER, isTierCode, type TierCode } from "../../lib/tier";
 import { cn } from "../../lib/utils";
 
 /**
- * TierRibbon — banda visual con los 4 niveles para el Hub.
+ * TierRibbon — banda visual con los niveles de la sala para el Hub.
  *
- *   Piloto MVP: el tier "actual" se calcula desde `lifetimeEarned` con
- *   `tierFromLifetime`.  Para el piloto donde casi nadie pasará de
- *   500 tokens, el badge Bronce es el normal y los superiores aparecen
- *   con candado y "Próximamente".  En Fase 2 se sustituye por el
- *   estado real (incluyendo riesgo / downgrade Platino).
+ *   Tanto el nivel actual como los umbrales vienen del SERVIDOR: cada
+ *   discoteca configura su propia escalera (nombres, emojis y puntos), así que
+ *   calcularlos aquí con constantes obligaría a mantener dos verdades.  Si la
+ *   sesión aún no ha respondido, se cae a los cuatro niveles por defecto solo
+ *   para no dejar el hueco vacío en el primer render.
  *
- *   Cero lógica de bloqueos en otras vistas — esta cinta es la única
- *   pista visual de progresión para el piloto.
+ *   Es la única pista visual de progresión: ninguna otra vista bloquea nada.
  */
 
 export function TierRibbon() {
 	const { t } = useTranslation();
 	const lifetime = useGameState((s) => s.lifetimeEarned);
 	const tokens = useGameState((s) => s.tokens);
-	const currentTier = tierFromLifetime(lifetime);
+	const currentTier = useGameState((s) => s.tier);
+	const tiers = useGameState((s) => s.tiers);
+
+	// Escalera real de la sala; respaldo visual mientras carga la sesión.
+	const ladder =
+		tiers.length > 0
+			? tiers
+					.filter((tr) => isTierCode(tr.tier_code))
+					.map((tr) => ({
+						code: tr.tier_code as TierCode,
+						displayName: tr.display_name || TIERS[tr.tier_code as TierCode].displayName,
+						emoji: tr.badge_emoji || TIERS[tr.tier_code as TierCode].emoji,
+						minLifetime: tr.min_lifetime,
+					}))
+			: TIER_ORDER.map((code) => ({
+					code,
+					displayName: TIERS[code].displayName,
+					emoji: TIERS[code].emoji,
+					minLifetime: 0,
+				}));
 	const containerRef = useRef<HTMLDivElement>(null);
 
 	useGSAP(
@@ -39,6 +57,47 @@ export function TierRibbon() {
 		},
 		{ scope: containerRef, dependencies: [currentTier] },
 	);
+
+	// Qué le falta para el siguiente nivel y qué gana con él.  Todo sale de la
+	// configuración de la sala, así que el mensaje es cierto en cualquier
+	// discoteca sin tocarlo.
+	const nextStep = useMemo(() => {
+		if (tiers.length === 0) return null;
+		const current = tiers.find((tr) => tr.tier_code === currentTier);
+		if (!current) return null;
+		const next = tiers
+			.filter((tr) => tr.sort_order > current.sort_order)
+			.sort((a, b) => a.sort_order - b.sort_order)[0];
+		if (!next) return null;
+
+		const perks: string[] = [];
+		const rateNow = current.tokens_per_euro;
+		const rateNext = next.tokens_per_euro;
+		if (rateNow && rateNext && rateNext < rateNow) {
+			perks.push(
+				t("hub.perkCheaper", {
+					pct: Math.round(((rateNow - rateNext) / rateNow) * 100),
+				}),
+			);
+		}
+		// null = sin límite, que es una mejora aunque no sea un número mayor.
+		if (next.max_redemptions_per_night === null) {
+			perks.push(t("hub.perkUnlimited"));
+		} else if (
+			current.max_redemptions_per_night !== null &&
+			next.max_redemptions_per_night > current.max_redemptions_per_night
+		) {
+			perks.push(
+				t("hub.perkRedemptions", { count: next.max_redemptions_per_night }),
+			);
+		}
+
+		return {
+			displayName: next.display_name,
+			missing: Math.max(0, next.min_lifetime - lifetime),
+			perks,
+		};
+	}, [tiers, currentTier, lifetime, t]);
 
 	return (
 		<section
@@ -56,10 +115,11 @@ export function TierRibbon() {
 			</div>
 
 			<div className="grid grid-cols-4 gap-2">
-				{TIER_ORDER.map((code) => {
+				{ladder.map((step) => {
+					const code = step.code;
 					const meta = TIERS[code];
 					const isCurrent = code === currentTier;
-					const isUnlocked = lifetime >= meta.minLifetime;
+					const isUnlocked = lifetime >= step.minLifetime;
 					return (
 						<div
 							key={code}
@@ -85,7 +145,7 @@ export function TierRibbon() {
 									filter: isUnlocked ? undefined : "grayscale(0.7)",
 								}}
 							>
-								{meta.emoji}
+								{step.emoji}
 							</span>
 							<span
 								className={cn(
@@ -96,7 +156,7 @@ export function TierRibbon() {
 									color: isCurrent ? meta.colorPrimary : undefined,
 								}}
 							>
-								{meta.displayName}
+								{step.displayName}
 							</span>
 							{!isUnlocked && (
 								<Lock
@@ -119,13 +179,29 @@ export function TierRibbon() {
 				})}
 			</div>
 
-			<p className="text-[10px] text-zinc-500 mt-3 text-center px-1 leading-relaxed">
-				{t(
-					"hub.tierFooter",
-					"Sube de nivel ganando tokens en los juegos · disponible {{n}}",
-					{ n: tokens },
-				)}
-			</p>
+			{/* El gancho de retención: que alguien nuevo quiera volver una
+			    SEGUNDA noche.  Un "sube de nivel" genérico no mueve a nadie;
+			    decirle cuánto le falta y qué gana exactamente, sí. */}
+			{nextStep ? (
+				<p className="text-[10px] text-zinc-400 mt-3 text-center px-1 leading-relaxed">
+					{t("hub.tierNext", {
+						n: nextStep.missing,
+						tier: nextStep.displayName,
+					})}
+					{nextStep.perks.length > 0 && (
+						<span className="text-zinc-500">
+							{" · "}
+							{nextStep.perks.join(" · ")}
+						</span>
+					)}
+				</p>
+			) : (
+				<p className="text-[10px] text-zinc-500 mt-3 text-center px-1 leading-relaxed">
+					{t("hub.tierTop", "Estás en el nivel máximo · disponible {{n}}", {
+						n: tokens,
+					})}
+				</p>
+			)}
 		</section>
 	);
 }

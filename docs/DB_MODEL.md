@@ -18,6 +18,34 @@ realtime, cron y extensiones.
 
 ---
 
+## product_availability (V21)
+
+El **CUÁNDO** de cada promoción: una fila por producto × nivel × ventana.
+Sustituye a `tenant_products.min_tier_required` / `available_days`, que solo
+permitían una regla por producto y obligaban a duplicarlo una vez por nivel.
+
+| Columna | Para qué |
+|---|---|
+| `tier_code` | `null` = todos los niveles |
+| `days` smallint[] | ISO dow; se compara contra `business_night()`, no contra el reloj |
+| `hour_from` / `hour_to` | `from > to` = la ventana **cruza medianoche** (22→02) |
+| `valid_from` / `valid_to` | vigencia — es lo que hace temporal a una campaña |
+| `stock_total` / `stock_used` | unidades; se descuenta de forma atómica al comprar |
+| `promo_price_eur` | sobrescribe el precio del producto en esta ventana |
+| `tokens_per_euro` | sobrescribe la **tasa del nivel** (un drop = todos pagan como Platino) |
+| `kind` | `base` \| `flash_drop` \| `happy_hour` \| `campaign` |
+| `campaign_code` | identidad estable de la campaña (`FD-20260821-01`) para medirla |
+
+**Funciones**: `matching_rules()` (reglas vigentes para un nivel e instante),
+`get_promo_catalog()` (el menú resuelto para un usuario), `purchase_reward()`
+(compra; SQLSTATE NG001–NG008 por motivo de rechazo), `create_flash_drop()` /
+`end_flash_drop()`, `seed_default_catalog()` (alta de catálogo de una sala nueva).
+**Vista**: `campaign_performance` — canjes, usuarios, € regalados, tasa de
+consumo en barra e ingreso real por `campaign_code`.
+
+> El coste en tokens **no se almacena**: es `(list_price_eur − promo) × tasa`.
+> Por eso un producto existe una sola vez y no una por nivel.
+
 ## 1. Convenciones
 
 - **Multi-tenant:** casi todo cuelga de `tenants(id)` vía `tenant_id` con FK
