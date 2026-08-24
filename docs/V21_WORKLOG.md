@@ -21,7 +21,8 @@ Se actualiza a medida que avanza la implementación.
 | Panel de configuración (`/admin` → Promos) | ✅ efecto probado en BD · 🧪 falta usarlo |
 | Aviso de la regla de oro al guardar | ✅ probado (detecta y no falsea) |
 | Mensaje de ambición en el Hub | ✅ cifras verificadas · 🧪 falta verlo |
-| Retirada de las columnas obsoletas | ⏸ tras desplegar |
+| Retirada de las columnas obsoletas | ⏸ **bloqueada** hasta el humo con sesión (ver Riesgos) |
+| ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
 
 ---
 
@@ -98,12 +99,42 @@ Se actualiza a medida que avanza la implementación.
 
 ---
 
+## Verificado en producción (2026-08-21, tras el despliegue)
+
+Sin sesión iniciada no se puede entrar al menú, la TV ni `/admin`, así que se
+comprobó todo lo que no la necesita:
+
+- **El build desplegado es el de V21**, no el anterior. En el bundle del cliente
+  están `cheaperAtNextTier`, `redemptionsLeft`, `unlock_hint`, `cost_tokens`,
+  `promo_price_eur`, `tierNext`, `perkCheaper`, `list_price_eur`… y **han
+  desaparecido** `min_tier_required`, `available_days`, `price_tokens`,
+  `tierFromLifetime` y `productVisibility`.
+- **Contrato cliente ↔ servidor idéntico**: las 9 claves de la raíz y las 15 de
+  producto que emite `get_promo_catalog` coinciden exactamente con los tipos de
+  `useCatalog.ts`. Ni falta ni sobra ninguna — era el fallo de integración más
+  probable y queda descartado.
+- `/api/catalog`, `/api/session` y `/api/rewards` responden **401** sin token.
+- Las dos salas quedan coherentes: 13 productos, 0 sin precio de barra,
+  37 reglas, **0 huecos** de cobertura, misma escalera de niveles.
+- La app carga sin errores de consola.
+
+---
+
 ## Riesgos abiertos
 
-- **`price_tokens` es un puente**: la app desplegada aún lo pinta, así que se
-  rellenó con el coste de bronce. El cobro real ya no lo usa. Se elimina —
-  junto a `min_tier_required` y `available_days` — cuando esta versión esté
-  arriba.
-- **La Pocha ya tiene el catálogo nuevo** aunque el frontend viejo siga en
-  producción. Es seguro porque `purchase_reward` valida con el modelo nuevo,
-  pero conviene no dejar la ventana abierta más de lo necesario.
+- **No se han borrado las columnas obsoletas todavía, a propósito.** Nadie en
+  la base de datos las lee (`min_tier_required`, `available_days`,
+  `max_per_month`, y los `max_per_*` de `tenant_products`) y el bundle del
+  cliente tampoco. Pero `/api/catalog` corre en el *worker*, y no puedo
+  comprobar sin sesión que el worker desplegado sea el nuevo. Si fuera el
+  viejo, seguiría haciendo `select … min_tier_required …` y borrarlas tumbaría
+  el menú en producción. Cuestan cero mantenerlas una hora más: **primero el
+  humo con sesión, después el borrado**.
+- **`price_tokens` y `reference_fiat` NO se borran**: las siguen usando
+  `purchase_reward` y `get_promo_catalog` para los productos de canje directo
+  (Reserva Prioritaria, Pack Leyenda) y `analytics.run_etl`.
+- **El ETL de BI está ciego a las campañas.** `analytics.run_etl` sigue
+  filtrando por `redeemed_at` —o sea, solo cuenta lo consumido en barra, no lo
+  comprado— y no conoce `discount_eur` ni `campaign_code`. Mientras siga así,
+  el panel de tu compañera no podrá medir un Flash Drop aunque los datos ya
+  estén ahí.
