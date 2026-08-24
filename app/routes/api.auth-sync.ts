@@ -2,12 +2,11 @@ import type { Route } from "./+types/api.auth-sync";
 import {
 	corsHeaders,
 	jsonResponse,
-	parseCookies,
 	preflight,
-	serializeCookie,
 	verifyAuthToken,
 } from "../lib/api.server";
 import { getServiceSupabase } from "../lib/supabase.server";
+import { clearRefCookie, resolveRefCookie } from "../lib/referral.server";
 import { pickTenantSlug } from "../lib/tenant-resolver.server";
 
 /**
@@ -102,28 +101,15 @@ export async function action({ request, context }: Route.ActionArgs) {
 		.maybeSingle();
 
 	// ── Consume the tracking cookie regardless of new / existing ──────
-	const cookies = parseCookies(request);
-	const trackingCode = (cookies["ng_tracking_ref"] || "").trim();
-	const clearCookie = serializeCookie("ng_tracking_ref", "", {
-		maxAge: 0,
-		secure: new URL(request.url).protocol === "https:",
-	});
+	// La resolución vive en `referral.server` porque el alta perezosa de
+	// `api.session` necesita exactamente la misma: tenerla duplicada acabaría
+	// con las dos rutas atribuyendo distinto.
+	const ref = await resolveRefCookie(supabase, request, tenant_id);
+	const trackingCode = ref.code ?? "";
+	const clearCookie = clearRefCookie(request);
 
-	let acquisition_campaign_id: string | null =
-		existing?.acquisition_campaign_id ?? null;
-
-	if (trackingCode && !existing?.acquisition_campaign_id) {
-		const { data: campaignId } = await supabase.rpc(
-			"resolve_tracking_campaign",
-			{
-				p_tenant_id: tenant_id,
-				p_code: trackingCode,
-			},
-		);
-		if (typeof campaignId === "string" && campaignId) {
-			acquisition_campaign_id = campaignId;
-		}
-	}
+	const acquisition_campaign_id: string | null =
+		existing?.acquisition_campaign_id ?? ref.campaignId;
 
 	// ── Branch: existing vs new ───────────────────────────────────────
 	if (existing) {
@@ -177,6 +163,8 @@ export async function action({ request, context }: Route.ActionArgs) {
 			email: verified.email ?? `${verified.id}@anonymous`,
 			acquisition_source: trackingCode || null,
 			acquisition_campaign_id,
+			// Quién le invitó. Se fija UNA vez, al crear el perfil.
+			referred_by: ref.referrerId,
 		})
 		.select("id, token_balance, lifetime_earned, display_name")
 		.maybeSingle();

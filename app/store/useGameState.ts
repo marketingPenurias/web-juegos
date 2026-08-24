@@ -59,6 +59,18 @@ export type CheckinResult = {
 	streak?: number;
 	milestoneWeek?: number;
 	milestoneAmount?: number;
+	/**
+	 * A qué equivalen sus tokens ahora mismo.  `affordable` = lo mejor que ya
+	 * puede pedir; `next` = lo más cerca que le queda y cuánto le falta.  Lo
+	 * calcula el servidor con las MISMAS reglas del menú, para no prometer algo
+	 * que luego el menú le niegue.
+	 */
+	hint?: {
+		balance: number;
+		affordable: { name: string; promo_price_eur: number; cost_tokens: number } | null;
+		next: { name: string; promo_price_eur: number; cost_tokens: number; missing: number } | null;
+		redemptions_left: number | null;
+	} | null;
 	error?: string;
 };
 
@@ -111,6 +123,8 @@ type GameState = {
 	// null = todavía no tiene → el ranking mostrará "Jefe #N" y conviene
 	// invitarle a elegir uno.
 	displayName: string | null;
+	// Código para invitar. Se comparte como enlace `?ref=CODIGO`.
+	inviteCode: string | null;
 	// ¿Se ha resuelto ya /api/session al menos una vez?  El gate de cumpleaños
 	// SÓLO puede mostrarse cuando esto es true — así no parpadea en cada
 	// recarga mientras `birthDate` (no persistido) aún no ha llegado del server.
@@ -159,6 +173,7 @@ type GameState = {
 		tier?: TierCode;
 		tiers?: TierRule[];
 		displayName?: string | null;
+		inviteCode?: string | null;
 	}) => void;
 	setDisplayName: (name: string) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
@@ -188,6 +203,7 @@ export const useGameState = create<GameState>()(
 			tier: "bronce",
 			tiers: [],
 			displayName: null,
+			inviteCode: null,
 			sessionLoaded: false,
 			activeRedemption: null,
 			battleActive: false,
@@ -225,6 +241,7 @@ export const useGameState = create<GameState>()(
 					tier: "bronce",
 					tiers: [],
 					displayName: null,
+					inviteCode: null,
 					// Al desloguear, la próxima sesión debe re-resolverse antes de
 					// poder mostrar el gate de cumpleaños.
 					sessionLoaded: false,
@@ -253,6 +270,7 @@ export const useGameState = create<GameState>()(
 				tier,
 				tiers,
 				displayName,
+				inviteCode,
 			}) =>
 				set((state) => ({
 					userProfileId,
@@ -268,6 +286,7 @@ export const useGameState = create<GameState>()(
 					tiers: tiers && tiers.length > 0 ? tiers : state.tiers,
 					displayName:
 						displayName !== undefined ? displayName : state.displayName,
+					inviteCode: inviteCode ?? state.inviteCode,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
 					streak: typeof streak === "number" ? streak : state.streak,

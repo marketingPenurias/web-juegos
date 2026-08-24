@@ -7,6 +7,7 @@ import { StreakCard } from "../components/hub/StreakCard";
 import { MissionsCard } from "../components/hub/MissionsCard";
 import { LeaderboardCard } from "../components/hub/LeaderboardCard";
 import { NamePromptCard } from "../components/hub/NamePromptCard";
+import { InviteCard } from "../components/hub/InviteCard";
 import { GameLauncherCard } from "../components/hub/GameLauncherCard";
 import { HistoryDrawer } from "../components/HistoryDrawer";
 import { WelcomeModal } from "../components/WelcomeModal";
@@ -21,6 +22,7 @@ import { WelcomeModal } from "../components/WelcomeModal";
  *     · StreakCard        — "Día 1 de piloto" (MVP, sin invent).
  *     · NamePromptCard    — solo si aún no eligió nombre para el ranking.
  *     · LeaderboardCard   — top real por saldo (`/api/leaderboard`).
+ *     · InviteCard        — enlace de invitación; cobra con el check-in del amigo.
  *     · GameLauncherCard  — accesos a los juegos reales.
  *
  *   Cards en barbecho (`components/_future/`, sin backend aún):
@@ -67,6 +69,7 @@ export function Hub() {
 				<TierRibbon />
 				<MissionsCard />
 				<LeaderboardCard />
+				<InviteCard />
 				<StreakCard />
 			</main>
 

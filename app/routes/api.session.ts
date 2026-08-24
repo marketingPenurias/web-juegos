@@ -9,6 +9,7 @@ import {
 	pickTenantSlug,
 	resolveTenantProfile,
 } from "../lib/tenant-resolver.server";
+import { clearRefCookie, resolveRefCookie } from "../lib/referral.server";
 
 /**
  * GET /api/session
@@ -123,6 +124,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		lifetime_earned: number;
 		display_name: string | null;
 		birth_date: string | null;
+		invite_code: string | null;
 	};
 	let profile: ProfileRow | null = null;
 	// is_new_user: true SOLO cuando el JIT crea el perfil en esta llamada
@@ -130,10 +132,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	// de bienvenida + los +100.  En llamadas posteriores el perfil ya existe
 	// → false, así que el modal es naturalmente one-shot.
 	let is_new_user = false;
+	// Si se ha consumido el `?ref=`, la cookie caduca en la respuesta: si no,
+	// el siguiente que entre en este móvil heredaría la atribución.
+	let refCookieUsed = false;
 
 	const { data: existing, error: profileErr } = await supabase
 		.from("user_profiles")
-		.select("id, token_balance, lifetime_earned, birth_date, display_name")
+		.select("id, token_balance, lifetime_earned, birth_date, display_name, invite_code")
 		.eq("tenant_id", tenant_id)
 		.eq("auth_user_id", verified.id)
 		.maybeSingle();
@@ -152,6 +157,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			lifetime_earned: Number(existing.lifetime_earned ?? 0),
 			birth_date: (existing.birth_date as string | null) ?? null,
 			display_name: (existing.display_name as string | null) ?? null,
+			invite_code: (existing.invite_code as string | null) ?? null,
 		};
 	} else {
 		// JIT — creamos el perfil del recién llegado.  email viene del
@@ -159,6 +165,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		// porque `email` es required pero el verificado siempre lo trae
 		// en OAuth Google).
 		const insertEmail = verified.email ?? `${verified.id}@anon.nightgraph`;
+		// De dónde viene: campaña, o la persona que le invitó.  Esta ruta NO lo
+		// miraba, y como es por donde entra la mayoría, casi todas las altas se
+		// quedaban sin atribución — y una invitación sin invitador no se paga.
+		const ref = await resolveRefCookie(supabase, request, tenant_id);
+		refCookieUsed = ref.code !== null;
+
 		const { data: created, error: insertErr } = await supabase
 			.from("user_profiles")
 			.insert({
@@ -167,8 +179,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 				email: insertEmail,
 				token_balance: 0,
 				lifetime_earned: 0,
+				acquisition_source: ref.code,
+				acquisition_campaign_id: ref.campaignId,
+				referred_by: ref.referrerId,
 			})
-			.select("id, token_balance, lifetime_earned, birth_date, display_name")
+			.select("id, token_balance, lifetime_earned, birth_date, display_name, invite_code")
 			.single();
 
 		if (!insertErr && created) {
@@ -233,7 +248,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		// Releer el perfil para capturar el balance tras el bonus.
 		const { data: refreshed } = await supabase
 			.from("user_profiles")
-			.select("id, token_balance, lifetime_earned, birth_date, display_name")
+			.select("id, token_balance, lifetime_earned, birth_date, display_name, invite_code")
 			.eq("id", created.id)
 			.maybeSingle();
 		const finalProfile = refreshed ?? created;
@@ -244,6 +259,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			lifetime_earned: Number(finalProfile.lifetime_earned ?? 0),
 			birth_date: (finalProfile.birth_date as string | null) ?? null,
 			display_name: (finalProfile.display_name as string | null) ?? null,
+			invite_code: (finalProfile.invite_code as string | null) ?? null,
 		};
 		is_new_user = true;
 	}
@@ -372,6 +388,22 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		}
 	}
 
+	// ── Código de invitación ──────────────────────────────────────────
+	// Se genera la primera vez que hace falta y ya no se vuelve a escribir: los
+	// perfiles anteriores a esta versión no tienen ninguno, y crearlo en el
+	// alta habría dejado fuera a todos ellos.
+	if (!profile.invite_code) {
+		const { data: code, error: codeErr } = await supabase.rpc(
+			"get_or_create_invite_code",
+			{ p_tenant_id: tenant_id, p_user_id: profile.id },
+		);
+		if (codeErr) {
+			console.warn("[api.session] invite_code", codeErr.message);
+		} else if (typeof code === "string") {
+			profile.invite_code = code;
+		}
+	}
+
 	// ── Niveles de la sala ────────────────────────────────────────────
 	// Los umbrales y la tasa tk/€ son configurables POR DISCOTECA, así que no
 	// pueden vivir cableados en el cliente: dos salas tienen escaleras
@@ -411,6 +443,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 				lifetime_earned: profile.lifetime_earned,
 				birth_date: profile.birth_date,
 				display_name: profile.display_name,
+				invite_code: profile.invite_code,
 			},
 			auth_email: verified.email,
 			active_event,
@@ -421,7 +454,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 			streak,
 			is_new_user,
 		},
-		{ request },
+		refCookieUsed
+			? { request, headers: { "Set-Cookie": clearRefCookie(request) } }
+			: { request },
 	);
 }
 

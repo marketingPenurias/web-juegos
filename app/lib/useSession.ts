@@ -46,6 +46,7 @@ type SessionPayload = {
 		lifetime_earned: number;
 		birth_date?: string | null;
 		display_name?: string | null;
+		invite_code?: string | null;
 	};
 	auth_email?: string | null;
 	active_event: { id: string; name: string } | null;
@@ -124,6 +125,7 @@ export function useSession() {
 					tiers: data.tiers,
 					// El nombre del ranking. Puede ser null si aún no eligió.
 					displayName: data.profile.display_name ?? null,
+					inviteCode: data.profile.invite_code ?? null,
 				});
 			} catch (err) {
 				// TODO: CLEANUP SESSION DEBUG

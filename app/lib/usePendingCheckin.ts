@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { getAccessToken, getBrowserSupabase } from "./supabase.client";
 import { useTenant } from "./tenant";
-import { useGameState } from "../store/useGameState";
+import { useGameState, type CheckinResult } from "../store/useGameState";
 
 /**
  * usePendingCheckin — "FLUJO FRÍO" del QR.
@@ -93,6 +93,7 @@ export function usePendingCheckin() {
 						streak: Number(data.streak ?? 0),
 						milestoneWeek: Number(data.milestone_week ?? 0),
 						milestoneAmount: Number(data.milestone_amount ?? 0),
+						hint: (data.hint ?? null) as CheckinResult["hint"],
 					});
 				} else {
 					setCheckinResult({

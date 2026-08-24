@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 import { Jumbotron } from "./Jumbotron";
+import type { TvFlashDrop } from "./tv/FlashDropBanner";
 import { getAccessToken } from "../lib/supabase.client";
+import { extractSlugFromHost } from "../lib/tenant";
 
 /**
  * TvScreen — pantalla de proyector ÚNICA (Operación Wiring).
@@ -44,19 +46,24 @@ type Boot =
 			tracks: TvTrack[];
 			nowPlaying: TvTrack | null;
 			battle: TvBattle;
+			flashDrop: TvFlashDrop | null;
 			backdrop: TvBackdrop;
 			checkinCode: string | null;
 	  };
 
+/**
+ * Slug de la sala desde el host.
+ *
+ *   Antes había aquí una segunda implementación, más cruda y divergente: para
+ *   un host de dos partes (`bar.es`) la canónica devuelve vacío —y el llamante
+ *   responde 404— mientras que esta se quedaba con el subdominio.  Dos formas
+ *   de resolver la misma pregunta acaban discrepando; se usa la de `tenant`.
+ */
 function tenantSlugFromHost(): string {
-	if (typeof window === "undefined") return "lapocha";
-	const host = window.location.hostname;
-	const sub = host.split(".")[0];
-	if (!sub || sub === "localhost" || sub === "www" || host.includes("pages.dev")) {
-		return "lapocha";
-	}
-	return sub;
+	if (typeof window === "undefined") return "";
+	return extractSlugFromHost(window.location.hostname);
 }
+
 
 export function TvScreen({
 	showQr = false,
@@ -110,6 +117,7 @@ export function TvScreen({
 				nowPlaying: (data.nowPlaying as TvTrack | null) ?? null,
 				checkinCode: (data.checkin_code as string | null) ?? null,
 				battle: (data.battle as TvBattle) ?? null,
+				flashDrop: (data.flashDrop as TvFlashDrop | null) ?? null,
 				backdrop: {
 					mode: bm === "video" || bm === "photo" ? bm : "carousel",
 					url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
@@ -180,6 +188,7 @@ export function TvScreen({
 			enableBattle={enableBattle}
 			initialBattle={initialBattle}
 			initialBackdrop={boot.backdrop}
+			initialFlashDrop={boot.flashDrop}
 		/>
 	);
 }

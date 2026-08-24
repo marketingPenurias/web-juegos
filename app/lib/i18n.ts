@@ -39,6 +39,13 @@ const resources = {
 				legalSuffix:
 					". Solo usaremos tus datos para el funcionamiento de la app durante este piloto.",
 			},
+			invite: {
+				title: "Trae a un amigo",
+				body: "Te llevas {{n}} tokens cuando entre y haga check-in. Él empieza con {{m}}.",
+				shareText: "Te invito a {{venue}} · llévate {{n}} tokens de regalo al entrar",
+				copy: "Copiar enlace",
+				share: "Enviar",
+			},
 			name: {
 				label: "Tu nombre en el ranking",
 				unset: "Sin elegir · sales como «Jefe»",
@@ -329,6 +336,13 @@ const resources = {
 				legalLink: "Terms of Use and Privacy Policy",
 				legalSuffix:
 					". We'll only use your data to run the app during this pilot.",
+			},
+			invite: {
+				title: "Bring a friend",
+				body: "You get {{n}} tokens when they show up and check in. They start with {{m}}.",
+				shareText: "Come to {{venue}} with me · {{n}} free tokens when you arrive",
+				copy: "Copy link",
+				share: "Send",
 			},
 			name: {
 				label: "Your leaderboard name",

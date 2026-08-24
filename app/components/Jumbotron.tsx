@@ -5,6 +5,11 @@ import { gsap, useGSAP } from "../lib/gsap";
 import { getBrowserSupabase } from "../lib/supabase.client";
 import { useInterval } from "../lib/useInterval";
 import { useTenant } from "../lib/tenant";
+import { FlashDropBanner, type TvFlashDrop } from "./tv/FlashDropBanner";
+import {
+	RedemptionTicker,
+	type RedemptionEvent,
+} from "./tv/RedemptionTicker";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { VenueBackdrop } from "./VenueBackdrop";
 import { cn } from "../lib/utils";
@@ -58,6 +63,7 @@ type Props = {
 	enableBattle?: boolean;
 	initialBattle?: Battle | null;
 	initialBackdrop?: TvBackdrop | null;
+	initialFlashDrop?: TvFlashDrop | null;
 };
 
 const ROW_HEIGHT = 96; // px — must match the row's CSS height
@@ -92,11 +98,17 @@ export function Jumbotron({
 	enableBattle = false,
 	initialBattle = null,
 	initialBackdrop = null,
+	initialFlashDrop = null,
 }: Props) {
 	const tenant = useTenant();
 	// Fotos del local (bucket tenant-assets) para el fondo dinámico de la TV.
 	const venuePhotos = useVenuePhotos(tenant.slug);
 	// Preferencia de fondo controlada por el DJ desde /admin (realtime).
+	const [flashDrop, setFlashDrop] = useState<TvFlashDrop | null>(initialFlashDrop);
+	// Último canje anunciado. Solo el último y un contador: la pantalla está
+	// encendida toda la noche y una lista acumulada crecería sin techo.
+	const [lastRedemption, setLastRedemption] = useState<RedemptionEvent | null>(null);
+	const redemptionSeq = useRef(0);
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
 		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true, showNowPlaying: false },
 	);
@@ -297,6 +309,100 @@ export function Jumbotron({
 
 		return () => { void supabase.removeChannel(channel); };
 	}, [eventId]);
+
+	// ── Realtime del Flash Drop ─────────────────────────────────────────
+	// Un drop dura 15-30 minutos: enterarse en el siguiente sondeo se comería
+	// un trozo grande de la promoción.  Se escucha por sala (no por evento)
+	// porque una campaña no cuelga de la fiesta, y los UPDATE traen `stock_used`
+	// para que la cuenta de unidades baje en vivo — que es la parte que
+	// engancha a quien está mirando la pantalla.
+	useEffect(() => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !_tenantId) return;
+
+		const apply = (row: Record<string, unknown> | null) => {
+			if (!row || row.kind !== "flash_drop") return;
+			const active =
+				row.is_active === true &&
+				typeof row.valid_to === "string" &&
+				new Date(row.valid_to).getTime() > Date.now();
+			if (!active) {
+				// Cortado o caducado: la banda se retira sola.
+				setFlashDrop((cur) => (cur && cur.id === row.id ? null : cur));
+				return;
+			}
+			setFlashDrop((cur) => {
+				// Un INSERT trae la campaña nueva; un UPDATE solo actualiza la que
+				// ya se está anunciando.  El nombre del producto no viaja en el
+				// payload de Realtime, así que se conserva el que ya teníamos.
+				if (cur && cur.id !== row.id) return cur;
+				return {
+					id: String(row.id),
+					label: (row.label as string | null) ?? cur?.label ?? null,
+					product_name: cur?.product_name ?? "",
+					promo_price_eur:
+						row.promo_price_eur === null || row.promo_price_eur === undefined
+							? (cur?.promo_price_eur ?? null)
+							: Number(row.promo_price_eur),
+					list_price_eur: cur?.list_price_eur ?? null,
+					valid_to: (row.valid_to as string | null) ?? null,
+					stock_total:
+						row.stock_total === null || row.stock_total === undefined
+							? null
+							: Number(row.stock_total),
+					stock_used: Number(row.stock_used ?? 0),
+				};
+			});
+		};
+
+		const channel = supabase
+			.channel(`tv:flashdrop:${_tenantId}`)
+			.on(
+				"postgres_changes",
+				{ event: "*", schema: "public", table: "product_availability", filter: `tenant_id=eq.${_tenantId}` },
+				(payload) => apply((payload.new ?? null) as Record<string, unknown> | null),
+			)
+			.subscribe();
+
+		return () => { void supabase.removeChannel(channel); };
+	}, [_tenantId]);
+
+	// ── Realtime de canjes (prueba social) ──────────────────────────────
+	// Se escucha `wallet_ledger` y no `user_rewards` por dos motivos: ya está
+	// en la publicación de Realtime, y su fila trae el nombre del producto
+	// congelado en el momento de la compra (`product_name_at_time`), así que no
+	// hace falta ir a buscarlo.
+	//
+	// La TV entra con cuenta de staff, y `wallet_ledger_staff_read` le deja ver
+	// el ledger de toda la sala; con una cuenta normal la RLS solo dejaría
+	// pasar los canjes propios y esto no anunciaría nada.
+	useEffect(() => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !_tenantId) return;
+
+		const channel = supabase
+			.channel(`tv:redemptions:${_tenantId}`)
+			.on(
+				"postgres_changes",
+				{ event: "INSERT", schema: "public", table: "wallet_ledger", filter: `tenant_id=eq.${_tenantId}` },
+				(payload) => {
+					const row = payload.new as {
+						reason?: string;
+						product_name_at_time?: string | null;
+					};
+					// El ledger recoge TODO el movimiento de tokens (premios, boosts,
+					// ajustes); aquí solo interesan las compras del menú.
+					if (row?.reason !== "reward_purchase") return;
+					const name = row.product_name_at_time?.trim();
+					if (!name) return;
+					redemptionSeq.current += 1;
+					setLastRedemption({ seq: redemptionSeq.current, name });
+				},
+			)
+			.subscribe();
+
+		return () => { void supabase.removeChannel(channel); };
+	}, [_tenantId]);
 
 	// ── Realtime live_battles (sincronización del DUELO) ────────────────
 	useEffect(() => {
@@ -702,6 +808,11 @@ export function Jumbotron({
 			))}
 
 			{/* ── OVERLAY GANADOR DE BATALLA (ambas TVs) ─────────────────── */}
+			{/* Debajo del overlay del ganador: la celebración manda durante sus
+			    segundos, la promoción sigue ahí después. */}
+			<FlashDropBanner drop={flashDrop} />
+			<RedemptionTicker latest={lastRedemption} />
+
 			{winner && <WinnerOverlay track={winner} />}
 
 			{!cleanMode && (

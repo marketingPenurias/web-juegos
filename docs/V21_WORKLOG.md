@@ -24,7 +24,11 @@ Se actualiza a medida que avanza la implementación.
 | Retirada de las columnas obsoletas | ✅ hecho (migración 32) |
 | Nombre de usuario elegible | ✅ probado en BD · 🧪 falta verlo desplegado |
 | Moderación de nombres (`/admin` → Sesión en vivo) | ✅ probado en BD · 🧪 falta usarla |
-| ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
+| Flash Drop anunciado en la TV | ✅ consulta probada · 🧪 falta verlo en pantalla |
+| Check-in educativo ("ya te da para X") | ✅ probado en BD · 🧪 falta verlo |
+| Prueba social en la TV (canjes en vivo) | ✅ construido · 🧪 falta verlo |
+| Loop de invitación | ✅ probado en BD · 🧪 falta el circuito real |
+| ETL de BI al día con las campañas | ➡️ traspasado a BI ([HANDOFF_BI_ETL.md](HANDOFF_BI_ETL.md)) |
 
 ---
 
@@ -87,7 +91,38 @@ Se actualiza a medida que avanza la implementación.
       (con confirmación); esa persona vuelve a salir como «Jefe» y puede elegir
       otro.
 
-### 7. Regresión (que no se haya roto nada) 🧪
+### 7. Flash Drop en la TV 🧪
+- [ ] Con un drop en marcha, la banda aparece abajo **entrando de golpe**.
+- [ ] Muestra el nombre, `9€` tachado → `4€`, unidades restantes y cuenta atrás.
+- [ ] Lanzar un drop con la TV ya abierta lo hace aparecer **sin recargar**.
+- [ ] Canjear desde el móvil baja el contador de unidades **en la pantalla**.
+- [ ] Agotar el stock → la banda pasa a gris y dice «Agotado».
+- [ ] Cortarlo desde `/admin` la retira sola.
+- [ ] Con una batalla en curso, la banda **no tapa** el duelo ni el ganador.
+
+### 8. Economía visible 🧪
+- [ ] Hacer check-in con saldo suficiente → *"Ya te da para Chupito por 2€"*.
+- [ ] Con saldo corto → *"Te faltan 50 para Chupito"*, con la cifra exacta.
+- [ ] Lo que promete el modal **coincide** con lo que deja el menú (mismo
+      producto, mismo precio) — no puede ofrecer algo que luego le nieguen.
+- [ ] Canjear desde el móvil hace saltar el aviso verde en la TV con el nombre
+      del producto, **sin nombre de persona**.
+- [ ] Varios canjes seguidos salen de uno en uno, no apilados.
+- [ ] El aviso no tapa el ranking, ni la banda del drop, ni al ganador.
+
+### 9. Loop de invitación 🧪
+- [ ] El Hub muestra el código y el enlace `?ref=CODIGO`.
+- [ ] «Enviar» abre el compartir del móvil; «copiar» deja el enlace en el portapapeles.
+- [ ] Abrir el enlace **en otro móvil**, registrarse, y comprobar que el perfil
+      nuevo queda con `referred_by` puesto.
+- [ ] **Al registrarse NO se paga nada** — es lo esperado, no un fallo.
+- [ ] Al hacer el invitado su **primer check-in**: el que invita recibe 100 y el
+      invitado 50.
+- [ ] Un segundo check-in del mismo invitado **no vuelve a pagar**.
+- [ ] El texto de la tarjeta dice las cantidades reales de la sala (salen de
+      `tenant_token_rewards`, no están escritas a mano).
+
+### 10. Regresión (que no se haya roto nada) 🧪
 - [ ] Check-in con QR sigue sumando tokens.
 - [ ] Jukebox, batalla y ruleta intactos.
 - [ ] La TV sigue pintando ranking y batalla.

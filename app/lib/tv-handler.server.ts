@@ -202,10 +202,79 @@ export async function handleTvAction(
 		}
 	}
 
+	// ── Flash Drop en curso ───────────────────────────────────────────
+	// La pantalla es donde un drop cobra sentido: si solo aparece en el móvil,
+	// se entera quien ya estaba mirando el teléfono, que es justo al revés de
+	// lo que buscamos.  Aquí va el estado inicial; el Realtime de
+	// `product_availability` se encarga de los cambios.
+	type TvDrop = {
+		id: string;
+		label: string | null;
+		product_name: string;
+		promo_price_eur: number | null;
+		list_price_eur: number | null;
+		valid_to: string | null;
+		stock_total: number | null;
+		stock_used: number;
+	};
+	let flashDrop: TvDrop | null = null;
+	{
+		const { data, error: dropErr } = await supabase
+			.from("product_availability")
+			.select(
+				"id, label, promo_price_eur, valid_to, stock_total, stock_used, " +
+					"product:tenant_products(name, list_price_eur, promo_price_eur)",
+			)
+			.eq("tenant_id", tenant_id)
+			.eq("kind", "flash_drop")
+			.eq("is_active", true)
+			.gt("valid_to", new Date().toISOString())
+			.order("valid_from", { ascending: false })
+			.limit(1)
+			.maybeSingle();
+		if (dropErr) warn("flash_drop", dropErr.message);
+		// El cliente tipado no infiere el embed to-one, así que se le da forma
+		// aquí (mismo criterio que el resto del handler).
+		type ProductEmbed = {
+			name: string;
+			list_price_eur: number | null;
+			promo_price_eur: number | null;
+		};
+		const row = data as unknown as
+			| {
+					id: string;
+					label: string | null;
+					promo_price_eur: number | null;
+					valid_to: string | null;
+					stock_total: number | null;
+					stock_used: number | null;
+					product: ProductEmbed | ProductEmbed[] | null;
+			  }
+			| null;
+		if (row) {
+			const prod = Array.isArray(row.product) ? row.product[0] : row.product;
+			// Si la campaña no fija precio propio, vale el del producto.
+			const promo = row.promo_price_eur ?? prod?.promo_price_eur ?? null;
+			flashDrop = {
+				id: row.id,
+				label: row.label ?? null,
+				product_name: prod?.name ?? "",
+				promo_price_eur: promo === null ? null : Number(promo),
+				list_price_eur:
+					prod?.list_price_eur === null || prod?.list_price_eur === undefined
+						? null
+						: Number(prod.list_price_eur),
+				valid_to: row.valid_to ?? null,
+				stock_total: row.stock_total ?? null,
+				stock_used: Number(row.stock_used ?? 0),
+			};
+		}
+	}
+
 	return jsonResponse(
 		{
 			ok: true, tenant_id, event_id, tracks, nowPlaying, battle, backdrop,
-			checkin_code,
+			checkin_code, flashDrop,
 			// Vacío = todo bien.  Con contenido, la TV puede avisar en pantalla en
 			// vez de fingir que "no hay datos" (F1).
 			warnings,
