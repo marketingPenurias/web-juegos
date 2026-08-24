@@ -38,23 +38,34 @@ export function RedemptionTicker({ latest }: { latest: RedemptionEvent | null })
 	useEffect(() => {
 		if (!latest || latest.seq <= lastSeq.current) return;
 		lastSeq.current = latest.seq;
-		pending.current.push(latest.name);
-		// Si entran más rápido de lo que se pueden enseñar, se descartan los más
-		// viejos: anunciar con dos minutos de retraso no es prueba social.
-		if (pending.current.length > MAX_PENDING) {
-			pending.current = pending.current.slice(-MAX_PENDING);
-		}
+
+		// Si no hay nada en pantalla, sale YA.  Esperar a un tick del
+		// temporizador retrasaba el primer anuncio sin motivo, y los
+		// navegadores estrangulan los `setInterval` de las pestañas en segundo
+		// plano —hasta un tick por minuto—, con lo que un canje podía tardar
+		// eso en aparecer.  El intervalo se queda solo para vaciar la cola.
+		setCurrent((cur) => {
+			if (cur) {
+				pending.current.push(latest.name);
+				// Si entran más rápido de lo que se pueden enseñar, se descartan
+				// los más viejos: anunciar con dos minutos de retraso no es
+				// prueba social.
+				if (pending.current.length > MAX_PENDING) {
+					pending.current = pending.current.slice(-MAX_PENDING);
+				}
+				return cur;
+			}
+			return latest.name;
+		});
 	}, [latest]);
 
 	useEffect(() => {
+		if (current) return; // hay algo en pantalla: nada que sacar
 		const id = setInterval(() => {
-			setCurrent((cur) => {
-				if (cur) return cur; // uno cada vez
-				return pending.current.shift() ?? null;
-			});
+			setCurrent((cur) => (cur ? cur : (pending.current.shift() ?? null)));
 		}, 400);
 		return () => clearInterval(id);
-	}, []);
+	}, [current]);
 
 	useEffect(() => {
 		if (!current) return;

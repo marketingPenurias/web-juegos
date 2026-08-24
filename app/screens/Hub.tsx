@@ -38,15 +38,31 @@ export function Hub() {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [historyOpen, setHistoryOpen] = useState(false);
 
+	// `fromTo` con opacidad final EXPLÍCITA, no `from`.
+	//
+	//   `from(opacity: 0)` toma el valor ACTUAL como destino, así que si el
+	//   efecto se reejecuta mientras una tarjeta sigue en 0, el destino pasa a
+	//   ser 0 y se queda invisible para siempre.  Es el fallo que nos mordió en
+	//   la V17, y cuesta de diagnosticar porque no deja rastro: DOM completo,
+	//   cero errores en consola y `opacity: 0` calculado.
+	//
+	//   Hoy este efecto corre una sola vez y no se dispara, pero basta con
+	//   añadir una dependencia para reabrirlo.  `fromTo` lo cierra por
+	//   construcción y `clearProps` deja el estilo en línea fuera al acabar.
 	useGSAP(
 		() => {
-			gsap.from(".hub-card", {
-				y: 24,
-				opacity: 0,
-				stagger: 0.08,
-				duration: 0.55,
-				ease: "power3.out",
-			});
+			gsap.fromTo(
+				".hub-card",
+				{ y: 24, opacity: 0 },
+				{
+					y: 0,
+					opacity: 1,
+					stagger: 0.08,
+					duration: 0.55,
+					ease: "power3.out",
+					clearProps: "opacity,transform",
+				},
+			);
 		},
 		{ scope: containerRef },
 	);
