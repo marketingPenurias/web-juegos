@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 import { Jumbotron } from "./Jumbotron";
+import type { TvFlashDrop } from "./tv/FlashDropBanner";
 import { getAccessToken } from "../lib/supabase.client";
 
 /**
@@ -44,6 +45,7 @@ type Boot =
 			tracks: TvTrack[];
 			nowPlaying: TvTrack | null;
 			battle: TvBattle;
+			flashDrop: TvFlashDrop | null;
 			backdrop: TvBackdrop;
 			checkinCode: string | null;
 	  };
@@ -110,6 +112,7 @@ export function TvScreen({
 				nowPlaying: (data.nowPlaying as TvTrack | null) ?? null,
 				checkinCode: (data.checkin_code as string | null) ?? null,
 				battle: (data.battle as TvBattle) ?? null,
+				flashDrop: (data.flashDrop as TvFlashDrop | null) ?? null,
 				backdrop: {
 					mode: bm === "video" || bm === "photo" ? bm : "carousel",
 					url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
@@ -180,6 +183,7 @@ export function TvScreen({
 			enableBattle={enableBattle}
 			initialBattle={initialBattle}
 			initialBackdrop={boot.backdrop}
+			initialFlashDrop={boot.flashDrop}
 		/>
 	);
 }

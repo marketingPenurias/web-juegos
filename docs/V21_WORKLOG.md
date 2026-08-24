@@ -24,6 +24,7 @@ Se actualiza a medida que avanza la implementación.
 | Retirada de las columnas obsoletas | ✅ hecho (migración 32) |
 | Nombre de usuario elegible | ✅ probado en BD · 🧪 falta verlo desplegado |
 | Moderación de nombres (`/admin` → Sesión en vivo) | ✅ probado en BD · 🧪 falta usarla |
+| Flash Drop anunciado en la TV | ✅ consulta probada · 🧪 falta verlo en pantalla |
 | ETL de BI al día con las campañas | ❌ pendiente — `run_etl` no conoce `campaign_code` |
 
 ---
@@ -87,7 +88,16 @@ Se actualiza a medida que avanza la implementación.
       (con confirmación); esa persona vuelve a salir como «Jefe» y puede elegir
       otro.
 
-### 7. Regresión (que no se haya roto nada) 🧪
+### 7. Flash Drop en la TV 🧪
+- [ ] Con un drop en marcha, la banda aparece abajo **entrando de golpe**.
+- [ ] Muestra el nombre, `9€` tachado → `4€`, unidades restantes y cuenta atrás.
+- [ ] Lanzar un drop con la TV ya abierta lo hace aparecer **sin recargar**.
+- [ ] Canjear desde el móvil baja el contador de unidades **en la pantalla**.
+- [ ] Agotar el stock → la banda pasa a gris y dice «Agotado».
+- [ ] Cortarlo desde `/admin` la retira sola.
+- [ ] Con una batalla en curso, la banda **no tapa** el duelo ni el ganador.
+
+### 8. Regresión (que no se haya roto nada) 🧪
 - [ ] Check-in con QR sigue sumando tokens.
 - [ ] Jukebox, batalla y ruleta intactos.
 - [ ] La TV sigue pintando ranking y batalla.
