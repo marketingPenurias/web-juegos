@@ -19,6 +19,7 @@ import { TIERS } from "../lib/tier";
 import { getBrowserSupabase } from "../lib/supabase.client";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { Toast } from "../components/Toast";
+import { DisplayNameEditor } from "../components/DisplayNameEditor";
 
 /**
  * Profile — versión REAL.
@@ -66,7 +67,12 @@ export function Profile() {
 		return Math.min(1, Math.max(0, (lifetime - current.min_lifetime) / range));
 	}, [tiers, tier, lifetime]);
 
+	// El nombre elegido por la persona manda sobre el de la cuenta de Google:
+	// es el que se ve en el ranking, así que el perfil tiene que enseñar el
+	// mismo, no otro distinto.
+	const chosenName = useGameState((s) => s.displayName);
 	const displayName =
+		chosenName?.trim() ||
 		authUser?.displayName?.trim() ||
 		authUser?.email?.split("@")[0] ||
 		t("profile.guest", "Invitado");
@@ -150,6 +156,9 @@ export function Profile() {
 			</section>
 
 			<section className="px-6 pt-6 profile-fade">
+				<div className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4 mb-4">
+					<DisplayNameEditor />
+				</div>
 				<div
 					className="rounded-2xl border p-5"
 					style={{

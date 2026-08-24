@@ -26,7 +26,11 @@ export function HubHeader() {
 	const tier = useGameState((s) => s.tier);
 	const tierMeta = TIERS[tier];
 
+	// El nombre elegido, el mismo que sale en el ranking. Si aún no lo eligió,
+	// se cae al de la cuenta de Google para no saludar a un "Invitado".
+	const chosenName = useGameState((s) => s.displayName);
 	const displayName =
+		chosenName?.trim() ||
 		authUser?.displayName?.trim() ||
 		authUser?.email?.split("@")[0] ||
 		t("profile.guest", "Invitado");

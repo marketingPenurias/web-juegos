@@ -107,6 +107,10 @@ type GameState = {
 	// noche).  Es configurable por discoteca, así que llega del servidor en vez
 	// de estar cableada en el cliente.  Vacío = aún no ha respondido la sesión.
 	tiers: TierRule[];
+	// Nombre elegido por la persona: es el que se ve en el ranking y en la TV.
+	// null = todavía no tiene → el ranking mostrará "Jefe #N" y conviene
+	// invitarle a elegir uno.
+	displayName: string | null;
 	// ¿Se ha resuelto ya /api/session al menos una vez?  El gate de cumpleaños
 	// SÓLO puede mostrarse cuando esto es true — así no parpadea en cada
 	// recarga mientras `birthDate` (no persistido) aún no ha llegado del server.
@@ -154,7 +158,9 @@ type GameState = {
 		birthDate?: string | null;
 		tier?: TierCode;
 		tiers?: TierRule[];
+		displayName?: string | null;
 	}) => void;
+	setDisplayName: (name: string) => void;
 	setBalance: (tokenBalance: number, lifetimeEarned?: number) => void;
 	setStreak: (streak: number) => void;
 	markDaily: (key: keyof DailyActivity) => void;
@@ -181,6 +187,7 @@ export const useGameState = create<GameState>()(
 			birthDate: null,
 			tier: "bronce",
 			tiers: [],
+			displayName: null,
 			sessionLoaded: false,
 			activeRedemption: null,
 			battleActive: false,
@@ -217,6 +224,7 @@ export const useGameState = create<GameState>()(
 					birthDate: null,
 					tier: "bronce",
 					tiers: [],
+					displayName: null,
 					// Al desloguear, la próxima sesión debe re-resolverse antes de
 					// poder mostrar el gate de cumpleaños.
 					sessionLoaded: false,
@@ -244,6 +252,7 @@ export const useGameState = create<GameState>()(
 				birthDate,
 				tier,
 				tiers,
+				displayName,
 			}) =>
 				set((state) => ({
 					userProfileId,
@@ -257,6 +266,8 @@ export const useGameState = create<GameState>()(
 					birthDate: birthDate !== undefined ? birthDate : state.birthDate,
 					tier: tier ?? state.tier,
 					tiers: tiers && tiers.length > 0 ? tiers : state.tiers,
+					displayName:
+						displayName !== undefined ? displayName : state.displayName,
 					dailyActivity: dailyActivity ?? state.dailyActivity,
 					rewardRules: rewardRules ?? state.rewardRules,
 					streak: typeof streak === "number" ? streak : state.streak,
@@ -264,6 +275,8 @@ export const useGameState = create<GameState>()(
 					// la bienvenida (one-shot, sobrevive a recargas vía persist).
 					isNewUser: isNewUser === true && !state.welcomeSeen,
 				})),
+
+			setDisplayName: (name) => set({ displayName: name }),
 
 			setBalance: (tokenBalance, lifetimeEarned) =>
 				set((state) => ({
