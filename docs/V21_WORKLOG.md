@@ -26,7 +26,7 @@ Se actualiza a medida que avanza la implementación.
 | Moderación de nombres (`/admin` → Sesión en vivo) | ✅ probado en BD · 🧪 falta usarla |
 | Flash Drop anunciado en la TV | ✅ consulta probada · 🧪 falta verlo en pantalla |
 | Check-in educativo ("ya te da para X") | ✅ probado en BD · 🧪 falta verlo |
-| Prueba social en la TV (canjes en vivo) | ✅ construido · 🧪 falta verlo |
+| Prueba social en la TV (canjes en vivo) | ✅ **confirmado en pantalla** |
 | Loop de invitación | ✅ probado en BD · 🧪 falta el circuito real |
 | ETL de BI al día con las campañas | ➡️ traspasado a BI ([HANDOFF_BI_ETL.md](HANDOFF_BI_ETL.md)) |
 
@@ -267,13 +267,10 @@ anuncio, que además es mejor comportamiento.
 
 ## Riesgos abiertos
 
-- **El aviso de canje en la TV sigue SIN VERIFICAR en pantalla.** El servidor
-  está comprobado: `/api/tv` devuelve `recentRedemptions` con el canje correcto,
-  y el bundle desplegado lleva el código. Lo que no he podido observar es el
-  render final, porque todas las pestañas del navegador que conduzco están
-  `hidden` (la ventana no tiene foco del sistema) y el sondeo es un
-  `setInterval`, que Chrome estrangula hasta un tick por minuto. **Requiere que
-  una persona mire la pantalla con la ventana en primer plano.**
+- ~~El aviso de canje en la TV sin verificar~~ → **confirmado funcionando** con
+  la ventana en primer plano (2026-08-24). El fallo de fondo era doble: el
+  `grant` que faltaba en `is_tenant_staff` y la dependencia de Realtime sobre
+  una tabla financiera; ahora se sirve desde `/api/tv` con service_role.
 
 - **La moderación de nombres es reactiva, no preventiva.** El staff puede
   retirar un nombre desde `/admin` → Sesión en vivo, pero alguien tiene que
