@@ -80,6 +80,9 @@ const HIDE_MS = 2 * 60 * 60 * 1000;
 // sólo hay 1 pantalla por local, incluso 3s es coste nulo (~80 queries/min).
 // Tras el piloto, si se prioriza el realtime, se puede subir a 10-12s.
 const TV_POLL_MS = 3_000;
+// Respaldo del Flash Drop: Realtime es el primario, esto solo cubre la caída
+// de wifi.  20s basta para que una promoción de 30 minutos no se pierda.
+const FLASH_DROP_POLL_MS = 20_000;
 // Sólo celebramos ganadores de batallas que cerraron hace poco (evita
 // disparar la animación por una batalla vieja al arrancar la pantalla).
 // 120s: el cron de cierre puede tardar hasta ~60s tras `ends_at`, así que la
@@ -541,6 +544,75 @@ export function Jumbotron({
 	useInterval(() => {
 		void pollTv();
 	}, eventId ? TV_POLL_MS : null);
+
+	// ── Red de seguridad del Flash Drop ─────────────────────────────────
+	// El drop llegaba SOLO por Realtime, y en un local la wifi se cae.  Cuando
+	// el websocket muere, la pantalla no se entera: no aparece el drop, no baja
+	// el stock, y nadie lo nota hasta que alguien mira el móvil — con la
+	// promoción entera perdida, que dura media hora.
+	//
+	// Los eventos perdidos durante una caída NO se recuperan al reconectar, así
+	// que hace falta releer el estado, no esperar al siguiente.  Va atado a la
+	// SALA y no al evento: una campaña no cuelga de la fiesta, y así sigue
+	// funcionando aunque el evento aún no esté abierto.
+	//
+	// Cada 20 s: con una pantalla por local el coste es irrelevante frente a
+	// que la promoción no se vea.
+	const pollFlashDrop = useCallback(async () => {
+		const supabase = getBrowserSupabase();
+		if (!supabase || !_tenantId) return;
+		const { data, error } = await supabase
+			.from("product_availability")
+			.select(
+				"id, label, promo_price_eur, valid_to, stock_total, stock_used, " +
+					"product:tenant_products(name, list_price_eur, promo_price_eur)",
+			)
+			.eq("tenant_id", _tenantId)
+			.eq("kind", "flash_drop")
+			.eq("is_active", true)
+			.gt("valid_to", new Date().toISOString())
+			.order("valid_from", { ascending: false })
+			.limit(1)
+			.maybeSingle();
+		// Un error de red no debe borrar de la pantalla un drop que sigue vivo.
+		if (error) return;
+		if (!data) {
+			setFlashDrop(null);
+			return;
+		}
+		const row = data as unknown as {
+			id: string; label: string | null; promo_price_eur: number | null;
+			valid_to: string | null; stock_total: number | null; stock_used: number | null;
+			product:
+				| { name: string; list_price_eur: number | null; promo_price_eur: number | null }
+				| { name: string; list_price_eur: number | null; promo_price_eur: number | null }[]
+				| null;
+		};
+		const prod = Array.isArray(row.product) ? row.product[0] : row.product;
+		setFlashDrop({
+			id: row.id,
+			label: row.label ?? null,
+			product_name: prod?.name ?? "",
+			promo_price_eur:
+				row.promo_price_eur !== null && row.promo_price_eur !== undefined
+					? Number(row.promo_price_eur)
+					: (prod?.promo_price_eur ?? null),
+			// El poll SÍ trae el precio de barra, que el payload de Realtime no
+			// incluye: así el "9€ → 4€" acaba apareciendo aunque el primer aviso
+			// llegara por el websocket.
+			list_price_eur:
+				prod?.list_price_eur !== null && prod?.list_price_eur !== undefined
+					? Number(prod.list_price_eur)
+					: null,
+			valid_to: row.valid_to ?? null,
+			stock_total: row.stock_total ?? null,
+			stock_used: Number(row.stock_used ?? 0),
+		});
+	}, [_tenantId]);
+
+	useInterval(() => {
+		void pollFlashDrop();
+	}, _tenantId ? FLASH_DROP_POLL_MS : null);
 
 	// Auto-ocultar el overlay de ganador tras la celebración.
 	useEffect(() => {

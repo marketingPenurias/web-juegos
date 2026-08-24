@@ -224,6 +224,47 @@ Verificado: la misma cuenta existe ya en `prueba` y `lapocha` a la vez.
 
 ---
 
+## Ensayo general (2026-08-24, sala `prueba`, tras el despliegue)
+
+### Fallo grave encontrado: la RLS asumía una sola discoteca por persona
+`current_tenant_id()` resolvía la sala con
+`… where auth_user_id = auth.uid() limit 1`. Ese `limit 1` era seguro **hasta
+que quitamos el índice único global** (migración 30) para permitir que una
+cuenta exista en varias salas. Desde entonces devolvía una sala **cualquiera**.
+
+Con perfil en `lapocha` y en `prueba` devolvía `lapocha`, así que estando en
+`prueba` **las 25 políticas negaban todas las filas**. Se manifestó como que la
+TV no recibía los Flash Drops, pero afectaba a todo y habría golpeado a
+cualquiera que jugara en una segunda sala. Corregido en la migración 38
+cambiando la semántica a `is_tenant_member(tenant_id)`. Verificado: **0
+políticas ambiguas**.
+
+### Verificado en pantalla
+- Hub: nombre elegido en la cabecera, ranking con «Tú» arriba, y la tarjeta de
+  invitación con el código real (`F45ACY`) y las cantidades de la sala.
+- TV: cabecera, QR y la banda del Flash Drop con
+  *«Copa a 4€ · 9€ → 4€ · 20 quedan · 25:20 se acaba»*.
+- **Realtime**: cambiar el stock en la BD bajó el contador de la tele de
+  **20 a 13 sin recargar**.
+- Compra real: 200 → 75 tk, con la tasa de Plata (1 € = 125 tk).
+
+### Sin verificar, y por qué
+El **aviso de canje en la TV** no se pudo comprobar: la ventana de Chrome no
+tiene el foco del sistema, las dos pestañas se reportan `hidden`, y los
+navegadores estrangulan los temporizadores de segundo plano. Tres «fallos» que
+perseguí —el Hub en blanco y la banda saliéndose por abajo— resultaron ser el
+**mismo artefacto**: GSAP congelado a mitad de animación por falta de frames.
+
+> **Lección de método:** antes de dar por rota una interfaz, comprobar
+> `document.visibilityState`. Un DOM completo con `opacity: 0` o un `transform`
+> a medias es casi siempre una pestaña en segundo plano, no una regresión.
+
+Queda pendiente **mirar la tele con la ventana en primer plano** mientras
+alguien canja. Aparte, se quitó la dependencia del temporizador para el primer
+anuncio, que además es mejor comportamiento.
+
+---
+
 ## Riesgos abiertos
 
 - **La moderación de nombres es reactiva, no preventiva.** El staff puede
