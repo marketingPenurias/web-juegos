@@ -269,6 +269,7 @@ export function SecretMenu() {
 								product={p}
 								nextTierName={catalog.next_tier}
 								affordable={tokens >= p.cost_tokens}
+								outOfRedemptions={catalog.redemptions_left === 0}
 								busy={purchasing === p.product_id || pending}
 								onBuy={() => void handleBuy(p)}
 							/>
@@ -402,12 +403,15 @@ function ProductCard({
 	product,
 	nextTierName,
 	affordable,
+	outOfRedemptions,
 	busy,
 	onBuy,
 }: {
 	product: CatalogProduct;
 	nextTierName: string | null;
 	affordable: boolean;
+	/** Ya gastó los canjes de su nivel esta noche. */
+	outOfRedemptions: boolean;
 	busy: boolean;
 	onBuy: () => void;
 }) {
@@ -483,7 +487,7 @@ function ProductCard({
 			<button
 				type="button"
 				onClick={onBuy}
-				disabled={busy}
+				disabled={busy || outOfRedemptions}
 				className={cn(
 					"w-full h-11 rounded-xl font-black text-[12px] uppercase tracking-widest active:scale-95 transition-transform focus-visible:ring-2 focus-visible:ring-cyan-300",
 					isCampaign
@@ -492,16 +496,18 @@ function ProductCard({
 							? "bg-linear-to-r from-lime-400 to-emerald-500 text-black shadow-[0_0_20px_rgba(57,255,20,0.4)]"
 							: "bg-cyan-500 text-black",
 					busy && "opacity-60 cursor-wait",
-					!affordable && !busy && "opacity-60",
+					(!affordable || outOfRedemptions) && !busy && "opacity-60",
 				)}
 			>
 				{busy
 					? t("menu.processing")
-					: !affordable
-						? t("menu.missingTokens")
-						: isFree
-							? t("menu.activate")
-							: t("menu.canjear")}
+					: outOfRedemptions
+						? t("menu.noRedemptionsLeft")
+						: !affordable
+							? t("menu.missingTokens")
+							: isFree
+								? t("menu.activate")
+								: t("menu.canjear")}
 			</button>
 		</article>
 	);

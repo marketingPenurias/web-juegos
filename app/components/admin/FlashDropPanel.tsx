@@ -50,10 +50,19 @@ function productName(c: Campaign): string {
 	return p?.name ?? "—";
 }
 
-/** Minutos que le quedan a un drop; ≤0 = terminado. */
-function minutesLeft(validTo: string | null): number {
+/** Milisegundos que le quedan a un drop; ≤0 = terminado. */
+function msLeft(validTo: string | null, now = Date.now()): number {
 	if (!validTo) return 0;
-	return Math.ceil((new Date(validTo).getTime() - Date.now()) / 60000);
+	return new Date(validTo).getTime() - now;
+}
+
+/**
+ * Minutos para pintar.  Se redondea hacia ABAJO —un drop de 30 minutos recién
+ * lanzado pone "30 min", no "31"— pero nunca por debajo de 1 mientras siga
+ * vivo, para que el último minuto no aparezca como "0 min".
+ */
+function minutesLabel(ms: number): number {
+	return ms <= 0 ? 0 : Math.max(1, Math.floor(ms / 60000));
 }
 
 export function FlashDropPanel({
@@ -144,12 +153,10 @@ export function FlashDropPanel({
 		void load();
 	};
 
-	const live = campaigns.filter(
-		(c) => c.is_active && minutesLeft(c.valid_to) > 0,
-	);
-	const past = campaigns.filter(
-		(c) => !c.is_active || minutesLeft(c.valid_to) <= 0,
-	);
+	// La vigencia se decide con los milisegundos exactos, no con los minutos
+	// redondeados: si no, un drop con 30 segundos de vida se iría al histórico.
+	const live = campaigns.filter((c) => c.is_active && msLeft(c.valid_to, now) > 0);
+	const past = campaigns.filter((c) => !c.is_active || msLeft(c.valid_to, now) <= 0);
 
 	return (
 		<section className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-4">
@@ -168,12 +175,7 @@ export function FlashDropPanel({
 			{live.length > 0 && (
 				<div className="flex flex-col gap-2">
 					{live.map((c) => {
-						const left = Math.max(
-							0,
-							Math.ceil(
-								(new Date(c.valid_to ?? 0).getTime() - now) / 60000,
-							),
-						);
+						const left = minutesLabel(msLeft(c.valid_to, now));
 						return (
 							<div
 								key={c.id}

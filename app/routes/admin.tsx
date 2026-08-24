@@ -328,6 +328,13 @@ export default function Admin() {
 							onCreate={(payload) => run("create_event", payload, "Evento programado")}
 							onActivate={(id) => run("activate_event", { event_id: id }, "Evento activado")}
 						/>
+						{/* La carta y los precios se preparan CON LA SALA CERRADA — un
+						    martes por la tarde, no a las tres de la mañana.  Exigir una
+						    fiesta activa para tocarlos dejaba la configuración
+						    inalcanzable justo cuando hay tiempo de pensarla.  Los Flash
+						    Drops sí se quedan dentro de la sesión: no hay noche a la que
+						    lanzarlos. */}
+						<PromoConfigPanel call={call} onToast={flash} />
 					</>
 				) : (
 					<>
