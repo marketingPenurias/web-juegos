@@ -1,5 +1,18 @@
 # Roadmap · Agosto 2026
 
+> ## 🔒 CERRADO el 24/08/2026 — documento histórico
+>
+> Este plan cubría agosto y está organizado por semanas. Ya no es el vigente:
+> la fecha que manda ahora es **la reapertura de La Pocha en septiembre**, y hay
+> un tercer carril que aquí no existía (**empresa**: sociedad, contratos y
+> facturación).
+>
+> **Roadmap vigente → «Ruta a la segunda sala»** (artefacto compartido).
+>
+> Resultado de agosto: **3 de los 6 objetivos cerrados, 1 a medias, 2 sin
+> empezar**. Se conserva porque explica de dónde vienen las decisiones de
+> producto y el reparto original entre Álvaro y la compi.
+
 La Pocha cierra en agosto → **cero datos nuevos**. Por eso todo el mes se trabaja
 contra el **sandbox** (`prueba`), no contra producción.
 
