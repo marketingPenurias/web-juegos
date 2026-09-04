@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **4 de septiembre de 2026** · **27 comprobaciones, 27 en verde**. Se actualiza cada vez que se pasa el QA.
+Estado a **4 de septiembre de 2026** · **27 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -72,6 +72,16 @@ se mueve: ruleta (+15), Tinder (+25), batalla (+10) y reto de mesa (+40).
 | Las 3:00 pertenecen a la noche anterior | Correcto |
 | Cobertura de la carta | 0 huecos |
 
+### Juegos · jugados de verdad desde la app
+
+| Caso | Resultado |
+| :-- | :-- |
+| **Ruleta de Rondas** | Gira, elige, y paga **+15** · 75 → 90 |
+| **Tinder Musical** | 5 swipes, paga **+25** · 90 → 115 |
+| Los «temazo» del Tinder cuentan como voto | 3 votos registrados |
+| **Jukebox** | Catálogo completo, 759 temas |
+| El Hub se actualiza tras jugar | Saldo, histórico y misiones |
+
 ### Panel del DJ · verificado en la interfaz
 
 | Caso | Resultado |
@@ -91,8 +101,10 @@ se mueve: ruleta (+15), Tinder (+25), batalla (+10) y reto de mesa (+40).
 Nada de esto se ha ejercitado. **No quiere decir que esté roto: quiere decir
 que no lo sabemos.**
 
-- **Los cuatro juegos jugándolos.** La lógica de debajo está probada —premios,
-  límites, votos— pero nadie ha jugado una partida entera desde un móvil.
+- **La Batalla de Temas desde la app.** Es el único juego que queda por jugar
+  de punta a punta; la parte del DJ (lanzar y cerrar) sí está probada.
+- **Pedir y boostear una canción** desde el Jukebox. El catálogo carga, pero
+  no se ha pulsado PEDIR ni BOOST.
 - **Las pantallas de TV.** Ni el jumbotron ni el dashboard de pantalla.
 - **El circuito de invitación desde dos teléfonos.** La maquinaria está
   probada y paga bien; falta el recorrido humano: A comparte, B abre el enlace,
