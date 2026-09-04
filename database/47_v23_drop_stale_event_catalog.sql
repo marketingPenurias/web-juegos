@@ -1,0 +1,27 @@
+-- 47 · v23 · El catálogo del Jukebox llevaba roto desde agosto
+--
+--   Síntoma: "No se pudo cargar el catálogo" en el Jukebox, con un 500
+--   `lookup_failed`.  El Tinder, en cambio, funcionaba.
+--
+--   Causa: existen DOS `event_catalog`.
+--
+--       event_catalog(uuid, integer)                    ← la vieja
+--       event_catalog(uuid, integer, uuid DEFAULT null) ← la de la v20
+--
+--   La migración 26 la creó con un parámetro más usando CREATE OR REPLACE,
+--   y ahí está la trampa: con una firma distinta eso **no reemplaza**, crea
+--   una sobrecarga.  La vieja se quedó viva.
+--
+--   Como el tercer parámetro tiene valor por defecto, llamar con dos
+--   argumentos es ambiguo y Postgres se niega:
+--       ERROR 42725: function event_catalog(uuid, integer) is not unique
+--
+--   Por eso fallaba solo el Jukebox: llama con dos argumentos.  El Tinder
+--   pasa los tres y no hay ambigüedad.  Lleva así desde principios de
+--   agosto, y es lo que el DJ reportó como "no sé qué le pasa al catálogo
+--   de música".
+--
+--   La de tres argumentos hace lo mismo que la vieja cuando el tercero es
+--   NULL, así que la vieja sobra: se borra.
+
+drop function if exists public.event_catalog(uuid, integer);
