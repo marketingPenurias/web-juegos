@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **4 de septiembre de 2026**. Se actualiza cada vez que se pasa el QA.
+Estado a **4 de septiembre de 2026** · **27 comprobaciones, 27 en verde**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -45,6 +45,22 @@ que mirarla antes de desplegar.
 | Aplicar la misma plantilla dos veces | Añade 0 · no duplica |
 | Añadir dos veces la misma canción | Rechazada |
 
+### Check-in y referidos
+
+| Caso | Resultado |
+| :-- | :-- |
+| Entrar con un QR válido | +50 fichas y visita registrada |
+| Repetir el mismo QR esta noche | `already_checked_in` |
+| QR inventado | `invalid_qr` |
+| **QR de OTRA sala** | `invalid_qr` |
+| **Quien invita cobra al entrar su amigo** | 75 → 175 |
+| **No se paga dos veces** | 175 → 175 |
+
+### Límites diarios · lo que evita que se farmeen fichas
+
+Los cuatro premios de «1 por noche» rechazan el segundo intento y el saldo no
+se mueve: ruleta (+15), Tinder (+25), batalla (+10) y reto de mesa (+40).
+
 ### Batalla, niveles y horario
 
 | Caso | Resultado |
@@ -75,15 +91,12 @@ que mirarla antes de desplegar.
 Nada de esto se ha ejercitado. **No quiere decir que esté roto: quiere decir
 que no lo sabemos.**
 
-- **Check-in por QR.** `process_checkin` existe pero no se ha probado el
-  recorrido: escanear, registrar visita y pagar el premio de referido. Es el
-  que estaba roto durante todo el piloto de agosto, así que es el primero de
-  la lista.
-- **Los cuatro juegos por la interfaz.** Ruleta de rondas, Tinder Musical,
-  Jukebox y Batalla se han probado por debajo (las RPC), no jugándolos.
+- **Los cuatro juegos jugándolos.** La lógica de debajo está probada —premios,
+  límites, votos— pero nadie ha jugado una partida entera desde un móvil.
 - **Las pantallas de TV.** Ni el jumbotron ni el dashboard de pantalla.
-- **El circuito de invitación completo.** Hace falta un segundo teléfono: A
-  invita, B se registra con el código, B hace check-in, A cobra.
+- **El circuito de invitación desde dos teléfonos.** La maquinaria está
+  probada y paga bien; falta el recorrido humano: A comparte, B abre el enlace,
+  B se registra, B escanea.
 - **Subida de fotos y vídeo del local**, y el carrusel de fondo.
 - **Comportamiento con mala conexión**, que es la condición normal de un local.
 

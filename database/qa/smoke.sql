@@ -24,9 +24,8 @@ declare
 	v_t uuid; v_otro uuid; v_u uuid; v_actor uuid;
 	v_ev uuid; v_prod uuid; v_prod_otra_sala uuid; v_track uuid;
 	v_saldo_ini int; v_lifetime_ini int; v_reward uuid;
+	v_b uuid; v_sb_ini int; v_ref_ini uuid; v_code text;
 	r jsonb; v_err text; v_n int;
-
-	procedure_placeholder text;
 begin
 	select id into v_t    from tenants where slug='prueba';
 	select id into v_otro from tenants where slug='lapocha';
@@ -182,16 +181,90 @@ begin
 	insert into qa values ('Carta','todos los niveles tienen algo a cualquier hora','0 huecos',
 		v_n::text, case when v_n = 0 then 'ok' else 'FALLO' end);
 
+	-- ═══ CHECK-IN Y REFERIDOS ═══════════════════════════════════════════
+	--   El check-in es la bisagra del negocio: registra la visita, paga las
+	--   fichas de entrada y dispara el premio de quien invitó.  Estuvo roto
+	--   todo el piloto de agosto, así que se comprueba entero.
+	select id, token_balance into v_b, v_sb_ini
+	  from user_profiles where tenant_id = v_t and id <> v_u
+	 order by created_at desc limit 1;
+	select referred_by into v_ref_ini from user_profiles where id = v_b;
+
+	update user_profiles set referred_by = v_u where id = v_b;
+	delete from venue_visits where user_id = v_b
+	  and business_night(entry_time) = business_night(now());
+	delete from wallet_ledger where user_id in (v_u, v_b) and reason like '%referral%';
+
+	r := process_checkin(v_b, 'PRUEBA-ENTRADA-01');
+	insert into qa values ('Check-in','entrar con un QR válido','ok + premio',
+		coalesce(r->>'ok','?') || ' · +' || coalesce(r->>'reward_amount','0') || ' fichas',
+		case when (r->>'ok')::boolean then 'ok' else 'FALLO' end);
+
+	r := process_checkin(v_b, 'PRUEBA-ENTRADA-01');
+	insert into qa values ('Check-in','repetir el mismo QR esta noche','rechazado',
+		coalesce(r->>'error','lo permitió'),
+		case when r->>'error' = 'already_checked_in' then 'ok' else 'FALLO' end);
+
+	r := process_checkin(v_b, 'NO-EXISTE-999');
+	insert into qa values ('Check-in','QR inventado','rechazado',
+		coalesce(r->>'error','lo permitió'),
+		case when r->>'error' = 'invalid_qr' then 'ok' else 'FALLO' end);
+
+	r := process_checkin(v_b, 'POCHA-ENTRADA-01');
+	insert into qa values ('Aislamiento','QR de OTRA sala','rechazado',
+		coalesce(r->>'error','lo permitió'),
+		case when r->>'error' = 'invalid_qr' then 'ok' else 'FALLO' end);
+
+	select token_balance into v_n from user_profiles where id = v_u;
+	r := grant_referral_reward(v_t, v_b);
+	insert into qa select 'Referido','quien invita cobra al entrar su amigo','sube el saldo',
+		v_n::text || ' → ' || token_balance::text,
+		case when token_balance > v_n then 'ok' else 'FALLO' end
+	  from user_profiles where id = v_u;
+
+	select token_balance into v_n from user_profiles where id = v_u;
+	r := grant_referral_reward(v_t, v_b);
+	insert into qa select 'Referido','no se paga dos veces','el saldo no cambia',
+		v_n::text || ' → ' || token_balance::text,
+		case when token_balance = v_n then 'ok' else 'FALLO' end
+	  from user_profiles where id = v_u;
+
+	-- ═══ LÍMITES DIARIOS ════════════════════════════════════════════════
+	--   Cuatro premios son "1 por noche".  Si el límite no se aplica, se
+	--   pueden farmear fichas sin salir de casa — y las fichas son dinero
+	--   en barra.
+	foreach v_code in array array['ruleta_spin','tinder_completion',
+	                              'livebattle_vote','reto_mesa'] loop
+		delete from wallet_ledger where user_id = v_u and reason = v_code
+		  and business_night(created_at) = business_night(now());
+		r := claim_gamification_reward(v_u, v_code, null);
+		select token_balance into v_n from user_profiles where id = v_u;
+		r := claim_gamification_reward(v_u, v_code, null);
+		insert into qa select 'Juegos · ' || v_code,'cobrar dos veces la misma noche',
+			'la 2ª no paga', v_n::text || ' → ' || token_balance::text,
+			case when token_balance = v_n then 'ok' else 'FALLO — se puede farmear' end
+		  from user_profiles where id = v_u;
+	end loop;
+
 	-- ═══ DESHACER ═══════════════════════════════════════════════════════
-	delete from track_votes  where event_id = v_ev;
-	delete from user_rewards where user_id = v_u and event_id = v_ev;
-	delete from wallet_ledger where user_id = v_u and event_id = v_ev;
-	delete from live_battles where event_id = v_ev;
+	-- Orden importa: los movimientos de cartera apuntan a la fiesta con una
+	-- clave foránea, así que se van ANTES que ella.
+	delete from track_votes   where event_id = v_ev;
+	delete from user_rewards  where event_id = v_ev;
+	delete from wallet_ledger where event_id = v_ev;
+	delete from live_battles  where event_id = v_ev;
 	delete from event_tracks where event_id = v_ev;
 	delete from tenant_events where id = v_ev;
+	delete from venue_visits  where user_id = v_b
+	  and business_night(entry_time) = business_night(now());
+	delete from wallet_ledger where user_id in (v_u, v_b)
+	  and business_night(created_at) = business_night(now());
 	update user_profiles
 	   set token_balance = v_saldo_ini, lifetime_earned = v_lifetime_ini
 	 where id = v_u;
+	update user_profiles
+	   set token_balance = v_sb_ini, referred_by = v_ref_ini
+	 where id = v_b;
 
 	insert into qa
 	select 'Limpieza','el usuario queda como estaba', v_saldo_ini::text,
