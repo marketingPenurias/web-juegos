@@ -60,6 +60,17 @@ type Call = (
 
 const DURATIONS = [15, 30, 45, 60];
 
+/**
+ * Euros para leer: decimales solo cuando los hay.
+ *
+ *   Antes iba con `toFixed(0)`, así que medio euro de descuento se anunciaba
+ *   como "1€" y el DJ creía estar regalando el doble.  El servidor formatea
+ *   la etiqueta del drop con esta misma regla.
+ */
+function eur(n: number): string {
+	return Number.isInteger(n) ? `${n}€` : `${n.toFixed(2).replace(".", ",")}€`;
+}
+
 function productName(c: Campaign): string {
 	const p = Array.isArray(c.product) ? c.product[0] : c.product;
 	return p?.name ?? "—";
@@ -339,7 +350,7 @@ export function FlashDropPanel({
 						<TrendingDown className="w-3 h-3 text-lime-400" aria-hidden="true" />
 						Regalas{" "}
 						<strong className="text-lime-300">
-							{preview.discount.toFixed(0)}€
+							{eur(preview.discount)}
 						</strong>{" "}
 						por copa y les cuesta{" "}
 						<strong className="text-cyan-300 tabular-nums">
