@@ -333,7 +333,7 @@ export function FlashDropPanel({
 				    poner una copa a 8 € teniéndola ya a 7. */}
 				{selected && vigente?.cost_tokens != null && (
 					<p className="text-[11px] text-zinc-400">
-						Ahora mismo esa {selected.name.toLowerCase()} les cuesta{" "}
+						Ahora mismo, {selected.name} les cuesta{" "}
 						<strong className="text-zinc-200 tabular-nums">
 							{vigente.cost_tokens}
 						</strong>{" "}
