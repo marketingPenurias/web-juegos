@@ -24,6 +24,21 @@ type Product = {
 	promo_price_eur: number | null;
 };
 
+/**
+ * Lo que un cliente del nivel de entrada paga AHORA MISMO por cada producto.
+ *
+ *   Lo calcula el servidor con el mismo criterio que el catálogo del móvil.
+ *   Sin este dato el DJ lanza a ciegas: el 3 de septiembre puso una Copa a
+ *   8 € cuando la carta ya la tenía a 7, y el drop quedó por detrás.
+ */
+type CurrentPrice = {
+	product_id: string;
+	kind: string;
+	label: string | null;
+	promo_price_eur: number | null;
+	cost_tokens: number | null;
+};
+
 type Campaign = {
 	id: string;
 	campaign_code: string | null;
@@ -73,6 +88,7 @@ export function FlashDropPanel({
 	onToast: (msg: string) => void;
 }) {
 	const [products, setProducts] = useState<Product[]>([]);
+	const [current, setCurrent] = useState<CurrentPrice[]>([]);
 	const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
@@ -95,6 +111,7 @@ export function FlashDropPanel({
 		const data = await call("promo_panel");
 		if (data.ok === true) {
 			setProducts((data.products as Product[]) ?? []);
+			setCurrent((data.current as CurrentPrice[]) ?? []);
 			setCampaigns((data.campaigns as Campaign[]) ?? []);
 			const warnings = (data.warnings as string[]) ?? [];
 			if (warnings.length > 0) {
@@ -115,13 +132,22 @@ export function FlashDropPanel({
 	// Vista previa de lo que va a costar, para que el DJ vea el efecto ANTES de
 	// lanzarlo.  La tasa la fija el servidor (la más baja de la casa), aquí se
 	// estima solo para enseñarla.
+	// Lo que cuesta HOY ese producto, para poder comparar.
+	const vigente = current.find((c) => c.product_id === productId) ?? null;
+
 	const preview = useMemo(() => {
 		if (!selected?.list_price_eur) return null;
 		const p = Number(price);
 		if (!Number.isFinite(p) || p < 0 || p >= Number(selected.list_price_eur)) return null;
 		const discount = Number(selected.list_price_eur) - p;
-		return { discount, cost: Math.round(discount * 75) };
-	}, [selected, price]);
+		const cost = Math.round(discount * 75);
+		// Un drop que no baja el precio en fichas no lo va a ver nadie: el
+		// catálogo enseña siempre la oferta más barata para el cliente, y si
+		// la que ya había gana, el drop queda invisible.
+		const actual = vigente?.cost_tokens ?? null;
+		const mejora = actual === null ? null : actual - cost;
+		return { discount, cost, actual, mejora };
+	}, [selected, price, vigente]);
 
 	const launch = async () => {
 		if (!productId || !preview || busy) return;
@@ -291,6 +317,23 @@ export function FlashDropPanel({
 				</div>
 
 				{/* Que vea el efecto antes de regalar dinero. */}
+				{/* Con qué compite el drop. Se enseña en cuanto hay producto
+				    elegido, ANTES de teclear el precio: es el dato que evita
+				    poner una copa a 8 € teniéndola ya a 7. */}
+				{selected && vigente?.cost_tokens != null && (
+					<p className="text-[11px] text-zinc-400">
+						Ahora mismo esa {selected.name.toLowerCase()} les cuesta{" "}
+						<strong className="text-zinc-200 tabular-nums">
+							{vigente.cost_tokens}
+						</strong>{" "}
+						tokens
+						{vigente.promo_price_eur != null && (
+							<> (a {Number(vigente.promo_price_eur).toFixed(0)}€)</>
+						)}
+						{vigente.label && <> · {vigente.label}</>}.
+					</p>
+				)}
+
 				{preview && selected && (
 					<p className="text-[11px] text-zinc-400 inline-flex items-center gap-1.5">
 						<TrendingDown className="w-3 h-3 text-lime-400" aria-hidden="true" />
@@ -303,6 +346,21 @@ export function FlashDropPanel({
 							{preview.cost}
 						</strong>{" "}
 						tokens.
+					</p>
+				)}
+
+				{/* El aviso que faltaba. El catálogo enseña siempre la oferta más
+				    barata para el cliente, así que un drop que no mejore la que
+				    ya hay sencillamente no aparece — y desde el panel parece que
+				    no se ha lanzado. */}
+				{preview && preview.mejora !== null && preview.mejora <= 0 && (
+					<p className="rounded-xl border border-amber-500/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
+						<strong>Este drop no se va a ver.</strong> Cuesta{" "}
+						<span className="tabular-nums">{preview.cost}</span> tokens y la
+						oferta que ya hay puesta cuesta{" "}
+						<span className="tabular-nums">{preview.actual}</span>. La app
+						siempre enseña la más barata para el cliente, así que seguirá
+						viéndose la otra. Baja más el precio para que compense.
 					</p>
 				)}
 
