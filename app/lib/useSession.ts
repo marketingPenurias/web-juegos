@@ -135,10 +135,34 @@ export function useSession() {
 
 		void fetchSession();
 
+		// ── Revalidación: la fiesta activa cambia bajo los pies ───────────
+		//
+		//   Preguntar una sola vez al arrancar dejaba móviles colgados toda la
+		//   noche.  Si el DJ activa la fiesta —o cambia a otra— después de que
+		//   alguien haya abierto la app, ese teléfono se queda apuntando a la
+		//   fiesta anterior, o a ninguna, y el Jukebox y el Tinder se le
+		//   quedan vacíos hasta que cierre y vuelva a abrir.  Pasó el 3 de
+		//   septiembre y no hay forma de que el usuario lo entienda.
+		//
+		//   Dos disparadores, no uno:
+		//     · Al volver a la pestaña.  Es el caso real —el móvil se guarda
+		//       en el bolsillo y se saca otra vez— y no cuesta nada.
+		//     · Un intervalo lento, para el que deja la app abierta mirando.
+		//       En segundo plano el navegador lo estrangula, y da igual:
+		//       cuando vuelva a primer plano dispara el otro.
+		const REVALIDATE_MS = 120_000;
+
+		const revalidate = () => {
+			if (document.visibilityState !== "visible") return;
+			void fetchSession();
+		};
+
+		document.addEventListener("visibilitychange", revalidate);
+		const timer = window.setInterval(revalidate, REVALIDATE_MS);
+
 		// Re-sync on auth state changes (login / logout / token refresh).
 		const supabase = getBrowserSupabase();
-		if (!supabase) return () => undefined;
-		const { data } = supabase.auth.onAuthStateChange((event) => {
+		const sub = supabase?.auth.onAuthStateChange((event) => {
 			if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
 				void fetchSession();
 			}
@@ -149,7 +173,9 @@ export function useSession() {
 
 		return () => {
 			cancelled = true;
-			data.subscription.unsubscribe();
+			document.removeEventListener("visibilitychange", revalidate);
+			window.clearInterval(timer);
+			sub?.data.subscription.unsubscribe();
 		};
 	}, [tenant.slug, syncSession, logout]);
 }

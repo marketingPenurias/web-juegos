@@ -205,3 +205,4 @@ dist
 
 ### graphify (grafo local regenerable; contiene rutas de máquina) ###
 graphify-out/
+.deck-inversion/

@@ -1,25 +1,29 @@
 import { useTranslation } from "react-i18next";
 import { Flame } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { useGameState } from "../../store/useGameState";
 
 /**
- * StreakCard — MVP del piloto.
+ * StreakCard — cuántas noches seguidas ha venido.
  *
- *   No tenemos tabla `user_streaks` ni cron diario que mantenga la
- *   racha; hasta Fase 2 esto vive como "Día 1 de piloto" — fijo y
- *   honesto.  El multiplicador visual (1ª llama activa, resto
- *   apagadas) sirve de pista de "lo que viene" sin inventar números.
+ *   Durante el piloto esto decía "Día 1 de piloto" con el número escrito a
+ *   fuego, porque no había dato de racha que enseñar.  Ya lo hay: llega en
+ *   el bundle de `/api/session`.  Seguía puesto a 1 y se notaba — el DJ lo
+ *   vio la noche del 3 de septiembre y avisó.
  *
- *   Sin datos de usuarios falsos.  Cuando el cron mensual aterrice,
- *   sustituiremos `currentDay`, `targetDays` y `multiplier` por
- *   campos del bundle de `/api/session`.
+ *   Las llamas van hasta cuatro.  Quien lleve más de cuatro noches las ve
+ *   todas encendidas y el número exacto arriba: la barra es un ánimo, no un
+ *   marcador.
  */
 
 const TOTAL_STEPS = 4;
-const CURRENT_DAY = 1;
 
 export function StreakCard() {
 	const { t } = useTranslation();
+	const streak = useGameState((s) => s.streak) ?? 0;
+
+	// La barra y las llamas se llenan hasta cuatro; el número de arriba no.
+	const pasos = Math.min(Math.max(streak, 0), TOTAL_STEPS);
 
 	return (
 		<section
@@ -31,7 +35,9 @@ export function StreakCard() {
 					{t("hub.loyalty")}
 				</h3>
 				<span className="text-orange-400 text-xs font-black uppercase tracking-widest bg-orange-950/50 px-2 py-0.5 rounded-full border border-orange-500/20">
-					{t("hub.pilotDay", "Día {{n}} de piloto", { n: CURRENT_DAY })}
+					{streak > 0
+						? t("hub.streakNights", "{{n}} noches seguidas", { n: streak })
+						: t("hub.streakFirst", "Tu primera noche")}
 				</span>
 			</div>
 
@@ -40,14 +46,14 @@ export function StreakCard() {
 					<div
 						className="h-full bg-linear-to-r from-orange-600 to-orange-400"
 						style={{
-							width: `${(CURRENT_DAY / TOTAL_STEPS) * 100}%`,
+							width: `${(pasos / TOTAL_STEPS) * 100}%`,
 						}}
 					/>
 				</div>
 
 				{Array.from({ length: TOTAL_STEPS }, (_, i) => {
 					const step = i + 1;
-					const active = step <= CURRENT_DAY;
+					const active = step <= pasos;
 					return (
 						<div
 							key={step}

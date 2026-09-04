@@ -39,6 +39,8 @@ type AdminBody = {
 	cover_image_url?: string;
 	minutes?: number;
 	event_id?: string;
+	/** Activar una fiesta aunque no tenga ninguna canción. Decisión explícita. */
+	confirm_empty?: boolean;
 	global_ids?: string[];
 	// Control de pantallas (TV): modo de fondo + visibilidad de capas.
 	tv_mode?: string;
@@ -438,6 +440,29 @@ export async function handleAdminAction(
 		case "activate_event": {
 			const eventId = String(body.event_id ?? "");
 			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+
+			// Activar una fiesta SIN REPERTORIO deja el Tinder y el Jukebox
+			// vacíos — y el móvil que entre en ese momento se queda así hasta
+			// que cierre y vuelva a abrir la app, porque la fiesta activa se
+			// pregunta una sola vez al arrancar.
+			//
+			// Es lo que tumbó la noche del 3 de septiembre: se activó diez
+			// minutos antes de cargar las canciones, y nadie avisó de nada.
+			// Ahora hay que confirmarlo a propósito.
+			if (body.confirm_empty !== true) {
+				const { count } = await supabase
+					.from("event_tracks")
+					.select("id", { count: "exact", head: true })
+					.eq("tenant_id", tenant_id)
+					.eq("event_id", eventId);
+				if ((count ?? 0) === 0) {
+					return jsonResponse(
+						{ ok: false, error: "event_has_no_tracks" },
+						{ status: 409, request },
+					);
+				}
+			}
+
 			// Cerrar otros activos.
 			await supabase
 				.from("tenant_events")
@@ -667,8 +692,28 @@ export async function handleAdminAction(
 			const warnings: string[] = [];
 			if (prodErr) { console.warn("[api.admin] promo products", prodErr.message); warnings.push("products"); }
 			if (campErr) { console.warn("[api.admin] promo campaigns", campErr.message); warnings.push("campaigns"); }
+
+			// Qué oferta está ganando AHORA en cada producto, calculada con el
+			// mismo criterio que ve el cliente.  Sin esto el DJ lanza un drop
+			// a ciegas y puede quedar por detrás de la promoción que ya había
+			// puesta — que es justo lo que pasó el 3 de septiembre.
+			const { data: current, error: curErr } = await supabase.rpc(
+				"get_current_best_prices",
+				{ p_tenant_id: tenant_id },
+			);
+			if (curErr) {
+				console.warn("[api.admin] current best prices", curErr.message);
+				warnings.push("current_prices");
+			}
+
 			return jsonResponse(
-				{ ok: true, products: products ?? [], campaigns: campaigns ?? [], warnings },
+				{
+					ok: true,
+					products: products ?? [],
+					campaigns: campaigns ?? [],
+					current: current ?? [],
+					warnings,
+				},
 				{ request },
 			);
 		}

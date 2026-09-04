@@ -135,6 +135,46 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	}
 
 	const catalog = data as unknown as PromoCatalog;
+
+	// Deja constancia de qué campañas ha **visto** este usuario esta noche.
+	//
+	//   Sin esto solo se puede contar lo canjeado, y eso no demuestra que la
+	//   app genere consumo: esas copas podrían haberse bebido igual.  Para
+	//   poder afirmar un incremento hay que comparar a quien recibió el
+	//   estímulo con quien no, y eso empieza por saber quién lo recibió.
+	//
+	//   `waitUntil`: es una métrica, no el catálogo.  En un local la conexión
+	//   es mala y el menú tiene que abrirse rápido, así que la respuesta no
+	//   espera a la escritura.  Si falla, se pierde una fila de analítica y
+	//   nadie se queda sin poder pedir.
+	const seen = catalog.products
+		.filter((p) => p.rule_id !== null && p.kind !== "base")
+		.map((p) => ({
+			availability_id: p.rule_id,
+			campaign_code: p.campaign_code,
+			kind: p.kind,
+		}));
+
+	if (seen.length > 0) {
+		// `Promise.resolve`: el builder de Supabase es un PromiseLike y
+		// `waitUntil` exige un Promise de verdad.
+		const write = Promise.resolve(
+			supabase.rpc("log_campaign_exposure", {
+				p_tenant_id: profileResult.data.tenant_id,
+				p_user_id: profileResult.data.user_profile_id,
+				p_rules: seen,
+			}),
+		).then(({ error: logError }) => {
+			if (logError) {
+				console.warn(
+					"[api.catalog] log_campaign_exposure failed",
+					logError.message,
+				);
+			}
+		});
+		context.cloudflare.ctx.waitUntil(write);
+	}
+
 	return jsonResponse({ ok: true, ...catalog }, { request });
 }
 

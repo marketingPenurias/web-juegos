@@ -263,6 +263,34 @@ export default function Admin() {
 		return r;
 	};
 
+	/**
+	 * Activar una fiesta, avisando si va sin canciones.
+	 *
+	 *   El servidor se niega a activar una fiesta vacía salvo que se le diga
+	 *   que sí a propósito.  Aquí se traduce ese "no" en una pregunta, porque
+	 *   a veces es legítimo — abrir la sala y cargar el repertorio después —
+	 *   pero tiene que ser una decisión, no un descuido.
+	 */
+	const activateEvent = async (id: string) => {
+		const r = await run("activate_event", { event_id: id }, "Evento activado");
+		if (r.ok === false && r.error === "event_has_no_tracks") {
+			const seguir = window.confirm(
+				"Esta fiesta no tiene ninguna canción todavía.\n\n" +
+					"Si la activas ahora, quien abra la app verá el Jukebox y el Tinder " +
+					"vacíos, y seguirá viéndolos vacíos aunque cargues las canciones " +
+					"después — hasta que cierre y vuelva a abrir la app.\n\n" +
+					"¿Activarla igualmente?",
+			);
+			if (seguir) {
+				await run(
+					"activate_event",
+					{ event_id: id, confirm_empty: true },
+					"Evento activado (sin canciones)",
+				);
+			}
+		}
+	};
+
 	// Borrado OPTIMISTA de una pista: la sacamos del estado local AL INSTANTE
 	// (UI responde sin esperar a la red) y luego confirmamos contra el backend.
 	// Si falla, revalidamos para "deshacer" el borrado optimista.
@@ -327,7 +355,7 @@ export default function Admin() {
 							activeId={null}
 							busy={busy}
 							onCreate={(payload) => run("create_event", payload, "Evento programado")}
-							onActivate={(id) => run("activate_event", { event_id: id }, "Evento activado")}
+							onActivate={(id) => void activateEvent(id)}
 						/>
 						{/* La carta y los precios se preparan CON LA SALA CERRADA — un
 						    martes por la tarde, no a las tres de la mañana.  Exigir una
@@ -430,7 +458,7 @@ export default function Admin() {
 									activeId={event.id}
 									busy={busy}
 									onCreate={(payload) => run("create_event", payload, "Evento programado")}
-									onActivate={(id) => run("activate_event", { event_id: id }, "Evento activado")}
+									onActivate={(id) => void activateEvent(id)}
 								/>
 							</div>
 						)}
