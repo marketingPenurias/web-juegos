@@ -563,7 +563,7 @@ export async function handleAdminAction(
 
 			const { data: globals } = await supabase
 				.from("global_tracks")
-				.select("spotify_id, title, artist, cover_image_url")
+				.select("id, spotify_id, title, artist, cover_image_url, genre")
 				.eq("tenant_id", tenant_id)
 				.in("id", ids);
 			const { data: existing } = await supabase
@@ -575,11 +575,18 @@ export async function handleAdminAction(
 			const toInsert = (globals ?? [])
 				.filter((g) => !already.has((g as { spotify_id: string }).spotify_id))
 				.map((g) => {
-					const row = g as { spotify_id: string; title: string; artist: string; cover_image_url: string | null };
+					const row = g as {
+						id: string; spotify_id: string; title: string;
+						artist: string; cover_image_url: string | null; genre: string | null;
+					};
 					return {
 						tenant_id, event_id: eventId,
 						spotify_id: row.spotify_id, title: row.title, artist: row.artist,
 						cover_image_url: row.cover_image_url,
+						// El género y el enlace viajan con la canción.  Se caían
+						// aquí, y el desglose por género del dashboard recibía
+						// NULL para todo lo cargado desde el panel.
+						genre: row.genre, global_track_id: row.id,
 					};
 				});
 			let added = 0;
@@ -606,7 +613,7 @@ export async function handleAdminAction(
 
 			const { data: globals } = await supabase
 				.from("global_tracks")
-				.select("spotify_id, title, artist, cover_image_url")
+				.select("id, spotify_id, title, artist, cover_image_url, genre")
 				.eq("tenant_id", tenant_id)
 				.in("id", ids);
 			if (!globals || globals.length === 0) {
@@ -621,11 +628,15 @@ export async function handleAdminAction(
 				return jsonResponse({ ok: false, error: "create_failed", detail: tplErr?.message }, { status: 500, request });
 			}
 			const rows = globals.map((g, i) => {
-				const row = g as { spotify_id: string; title: string; artist: string; cover_image_url: string | null };
+				const row = g as {
+					id: string; spotify_id: string; title: string;
+					artist: string; cover_image_url: string | null; genre: string | null;
+				};
 				return {
 					template_id: tpl.id as string, tenant_id,
 					spotify_id: row.spotify_id, title: row.title, artist: row.artist,
 					cover_image_url: row.cover_image_url, position: i,
+					genre: row.genre, global_track_id: row.id,
 				};
 			});
 			const { error: trErr } = await supabase.from("event_template_tracks").insert(rows);
