@@ -130,6 +130,20 @@ type GameState = {
 	// recarga mientras `birthDate` (no persistido) aún no ha llegado del server.
 	sessionLoaded: boolean;
 
+	/**
+	 * ¿Seguimos esperando a saber quién es el usuario?
+	 *
+	 *   `sessionLoaded` no sirve para esto: en modo demo —sin sesión— no se
+	 *   marca NUNCA, así que colgar una pantalla de carga de esa bandera
+	 *   dejaría la app esperando para siempre.
+	 *
+	 *   Esta se resuelve pase lo que pase: llegó la sesión, no hay sesión,
+	 *   falló la red o se agotó la espera.  Arranca en `true` porque al
+	 *   abrir la app todavía no sabemos nada.
+	 */
+	sessionPending: boolean;
+	setSessionPending: (pending: boolean) => void;
+
 	// ── Estado de canje activo (pantalla camarero) ──────────────────────
 	activeRedemption: ActiveRedemption | null;
 
@@ -205,6 +219,7 @@ export const useGameState = create<GameState>()(
 			displayName: null,
 			inviteCode: null,
 			sessionLoaded: false,
+			sessionPending: true,
 			activeRedemption: null,
 			battleActive: false,
 			dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
@@ -215,6 +230,7 @@ export const useGameState = create<GameState>()(
 			checkinResult: null,
 
 			setScreen: (s) => set({ currentScreen: s }),
+			setSessionPending: (pending) => set({ sessionPending: pending }),
 
 			addTokens: (n) =>
 				set((state) => ({ tokens: Math.max(0, state.tokens + n) })),
@@ -245,6 +261,7 @@ export const useGameState = create<GameState>()(
 					// Al desloguear, la próxima sesión debe re-resolverse antes de
 					// poder mostrar el gate de cumpleaños.
 					sessionLoaded: false,
+					sessionPending: false,
 					battleActive: false,
 					dailyActivity: { ...EMPTY_DAILY_ACTIVITY },
 					rewardRules: [],
@@ -281,6 +298,7 @@ export const useGameState = create<GameState>()(
 					// Sesión resuelta desde el server → el gate de cumpleaños ya
 					// puede decidir con datos reales (evita el parpadeo al recargar).
 					sessionLoaded: true,
+					sessionPending: false,
 					birthDate: birthDate !== undefined ? birthDate : state.birthDate,
 					tier: tier ?? state.tier,
 					tiers: tiers && tiers.length > 0 ? tiers : state.tiers,

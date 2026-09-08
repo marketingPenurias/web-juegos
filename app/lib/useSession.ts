@@ -61,6 +61,7 @@ type SessionPayload = {
 export function useSession() {
 	const tenant = useTenant();
 	const syncSession = useGameState((s) => s.syncSession);
+	const setSessionPending = useGameState((s) => s.setSessionPending);
 	const logout = useGameState((s) => s.logout);
 
 	useEffect(() => {
@@ -73,7 +74,12 @@ export function useSession() {
 			} catch {
 				token = null;
 			}
-			if (!token) return; // demo mode
+			if (!token) {
+				// Modo demo: no hay sesión que resolver, así que se deja de
+				// esperar.  Si no, la pantalla de carga no se iría nunca.
+				setSessionPending(false);
+				return;
+			}
 
 			try {
 				// TODO: CLEANUP AUTH VERIFY DEBUG
@@ -130,10 +136,30 @@ export function useSession() {
 			} catch (err) {
 				// TODO: CLEANUP SESSION DEBUG
 				console.error("[SESSION ERROR] Excepción de red:", err);
+			} finally {
+				// Pase lo que pase se deja de esperar.  En un local la red se cae
+				// a mitad de petición con toda normalidad, y es mucho mejor
+				// enseñar la app —aunque sea con datos incompletos— que dejar a
+				// alguien mirando un cargando eterno en la puerta.
+				if (!cancelled) setSessionPending(false);
 			}
 		}
 
 		void fetchSession();
+
+		// Red de seguridad de la pantalla de carga.
+		//
+		//   `fetch` no lleva timeout propio: si la red del local se queda a
+		//   medias la promesa puede no resolverse en mucho rato, y con ella el
+		//   `finally` que quita el splash.  Alguien en la puerta se quedaría
+		//   mirando el logo indefinidamente.  Pasados 8 s se deja pasar a la
+		//   app aunque la sesión no haya llegado: se verá menos información,
+		//   pero se verá algo, y la revalidación de aquí abajo la traerá en
+		//   cuanto haya cobertura.
+		const SPLASH_MAX_MS = 8000;
+		const splashGuard = window.setTimeout(() => {
+			setSessionPending(false);
+		}, SPLASH_MAX_MS);
 
 		// ── Revalidación: la fiesta activa cambia bajo los pies ───────────
 		//
@@ -173,9 +199,10 @@ export function useSession() {
 
 		return () => {
 			cancelled = true;
+			window.clearTimeout(splashGuard);
 			document.removeEventListener("visibilitychange", revalidate);
 			window.clearInterval(timer);
 			sub?.data.subscription.unsubscribe();
 		};
-	}, [tenant.slug, syncSession, logout]);
+	}, [tenant.slug, syncSession, setSessionPending, logout]);
 }

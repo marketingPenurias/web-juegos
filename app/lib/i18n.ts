@@ -15,6 +15,10 @@ const resources = {
 			},
 			lang: { es: "ES", en: "EN", switch: "Cambiar idioma" },
 			nav: { hub: "Hub", live: "Live", menu: "Menú", ticket: "Ticket", battleLive: "¡Batalla!" },
+			splash: {
+				loading: "Preparando tu noche…",
+				slow: "La conexión del local va lenta. Seguimos intentándolo.",
+			},
 			birthGate: {
 				title: "¿Cuándo es tu cumple?",
 				subtitle:
@@ -255,6 +259,10 @@ const resources = {
 				title: "Pídele al DJ",
 				subtitle:
 					"Pedir es gratis. Boostea con 50 tokens y tu canción salta al primer puesto.",
+				// Lucía, tras una noche en la sala: la gente busca su tema, no está,
+				// y concluye "vaya mierda, esto no funciona".  El problema no es que
+				// falte: es que nadie le ha dicho que la lista la elige el DJ.
+				djOnly: "Solo puedes pedir las canciones que ha elegido el DJ.",
 				searchPlaceholder: "Busca una canción o artista…",
 				request: "Pedir",
 				requested: "Pedida",
@@ -262,6 +270,8 @@ const resources = {
 				boostAria: "Boost por {{n}} tokens",
 				boostedTag: "TOP",
 				noResults: "No hay canciones que coincidan",
+				noResultsHint:
+					"La lista la elige el DJ de la sala, así que no están todas las canciones del mundo. Prueba con otro artista.",
 				genreAll: "Todos",
 				toastRequested: "Pedida al DJ ✓",
 				toastBoosted: "🔥 Boost activado · primera de la cola",
@@ -314,6 +324,10 @@ const resources = {
 			},
 			lang: { es: "ES", en: "EN", switch: "Change language" },
 			nav: { hub: "Hub", live: "Live", menu: "Menu", ticket: "Ticket", battleLive: "Battle!" },
+			splash: {
+				loading: "Getting your night ready…",
+				slow: "The venue's connection is slow. Still trying.",
+			},
 			birthGate: {
 				title: "When's your birthday?",
 				subtitle:
@@ -506,6 +520,7 @@ const resources = {
 				title: "Tell the DJ",
 				subtitle:
 					"Requests are free. Spend 50 tokens to boost your song to the top of the queue.",
+				djOnly: "You can only request songs the DJ has picked.",
 				searchPlaceholder: "Search a song or artist…",
 				request: "Request",
 				requested: "Sent",
@@ -513,6 +528,8 @@ const resources = {
 				boostAria: "Boost for {{n}} tokens",
 				boostedTag: "TOP",
 				noResults: "No matching songs",
+				noResultsHint:
+					"The venue's DJ picks the list, so it isn't every song in the world. Try another artist.",
 				genreAll: "All",
 				toastRequested: "Request sent ✓",
 				toastBoosted: "🔥 Boost on · first in queue",
