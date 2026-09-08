@@ -69,9 +69,6 @@ type Props = {
 const ROW_HEIGHT = 96; // px — must match the row's CSS height
 const MAX_ROWS = 8;
 
-// Ventana de ocultación V17: una canción sonada no vuelve al ranking hasta
-// pasadas 2h (mientras, is_played la oculta; después, played_at).
-const HIDE_MS = 2 * 60 * 60 * 1000;
 // Red de la TV: Realtime PRIMARIO (event_tracks votos + is_played,
 // live_battles ganador, tenant_events fondo) y este poll como FALLBACK de
 // seguridad — con 1 pantalla por local el coste es despreciable.
@@ -194,25 +191,30 @@ export function Jumbotron({
 	};
 	const qrTarget = buildQrTarget();
 
-	// Ranking visible (V20).  MISMA regla que el RPC `tv_ranking` de la BD —
+	// Ranking visible (V23).  MISMA regla que el RPC `tv_ranking` de la BD —
 	// aquí se replica porque el Realtime entrega filas sueltas y no queremos que
 	// se cuelen ni un frame antes del siguiente poll:
 	//   · sólo temas CON votos (fuera el relleno sin votar);
-	//   · fuera el que suena ahora;
-	//   · un tema ya sonado vuelve SÓLO si lo re-votan (last_vote_at > played_at)
-	//     o si han pasado 2h desde que sonó.
-	// Nada de esto borra datos: total_votes y track_votes quedan intactos, así
-	// que al reaparecer conserva TODOS sus votos.
+	//   · fuera el que suena ahora.
+	//
+	// Antes había una tercera regla —esconder 2h la que ya había sonado— que
+	// existía para tapar un agujero: el contador no se reseteaba al pincharla,
+	// así que volvía al ranking con todos sus votos y se plantaba arriba.  El
+	// 05/09, 33 de las 48 del ranking eran eso.
+	//
+	// Desde la migración 48, `admin_set_now_playing` pone el contador a cero,
+	// y el filtro `total_votes > 0` la deja fuera él solo.  Si alguien que aún
+	// no la había votado la vota, vuelve a subir desde cero: eso es demanda
+	// nueva, no el eco de hace tres horas.
+	//
+	// Los votos NO se pierden: viven en `track_votes`, que es de donde salen
+	// las métricas.  Lo que se resetea es el contador del ranking.
 	const sorted = useMemo(() => {
-		const cutoff = Date.now() - HIDE_MS;
 		return [...tracks]
 			.filter((t) => {
 				if (t.total_votes <= 0) return false;
 				if (t.is_played) return false;
-				if (!t.played_at) return true;
-				const playedAt = Date.parse(t.played_at);
-				const reVoted = t.last_vote_at && Date.parse(t.last_vote_at) > playedAt;
-				return Boolean(reVoted) || playedAt < cutoff;
+				return true;
 			})
 			.sort((a, b) => {
 				if (b.total_votes !== a.total_votes) return b.total_votes - a.total_votes;
@@ -497,8 +499,7 @@ export function Jumbotron({
 		setConnected(true);
 
 		// 1) Ranking — RPC `tv_ranking`: la regla de visibilidad vive UNA sola vez
-		//    (en SQL) y la comparte servidor y TV.  Hace falta porque compara dos
-		//    columnas (last_vote_at > played_at) y PostgREST no puede expresarlo.
+		//    (en SQL) y la comparte servidor y TV.
 		const { data: top } = await supabase.rpc("tv_ranking", {
 			p_event_id: eventId,
 			p_limit: MAX_ROWS + 2,

@@ -537,13 +537,19 @@ end; $$;
 ### 6.5 Panel DJ / Staff (todas validan `is_tenant_staff` y escriben en `audit_logs`)
 
 - `admin_open_party(tenant, actor, name?)` → crea/devuelve la fiesta activa (10h).
-- `admin_set_now_playing(tenant, actor, event, track)` → marca "sonando"; **conserva
-  `played_at`** de la anterior (para ocultarla 2h en la TV, fix V17).
+- `admin_set_now_playing(tenant, actor, event, track)` → marca "sonando"; conserva
+  `played_at` de la anterior. **v23: pone `total_votes=0` y `last_vote_at=null`
+  de la que empieza a sonar** — el contador del ranking se resetea, el registro
+  de `track_votes` NO. Excepción: si el tema está en una batalla `live` respeta
+  el contador (el duelo se decide comparando `total_votes`) y devuelve
+  `votes_reset:false`. Ver `VOTOS.md`.
 - `admin_add_event_track` / `admin_bulk_insert_global` → catálogo → evento (dedupe por spotify_id).
 - `admin_save_template` / `admin_apply_template` / `admin_delete_template` → plantillas de setlist.
 - `admin_start_battle` (×2) / `admin_force_close_battle` → batallas.
 - `get_admin_metrics(tenant, actor, event)` → `{total_votes, tokens_spent_today,
-  checkins_today, active_players}` (todo por `business_night`).
+  checkins_today, active_players}` (todo por `business_night`). **v23:
+  `total_votes` se cuenta desde `track_votes` (boost pondera 5), no sumando
+  `event_tracks.total_votes`** — ese contador ahora se resetea al pinchar.
 
 ### 6.6 Check-in / fidelidad
 

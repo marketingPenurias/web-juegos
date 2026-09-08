@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **4 de septiembre de 2026** · **27 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
+Estado a **8 de septiembre de 2026** · **37 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -44,6 +44,20 @@ que mirarla antes de desplegar.
 | Aplicar una plantilla | Conserva género y enlace |
 | Aplicar la misma plantilla dos veces | Añade 0 · no duplica |
 | Añadir dos veces la misma canción | Rechazada |
+
+### Reset de votos al pinchar · v23
+
+| Caso | Resultado |
+| :-- | :-- |
+| Votar un tema | El contador sube a 1 |
+| **Javi la pincha** | **El contador vuelve a 0** · y se limpia el desempate |
+| El voto | **NO se pierde** · sigue en `track_votes` |
+| El panel del DJ | Lo sigue contando |
+| El ranking de la TV | La saca al momento, sin esperar 2h |
+| Quien ya la votó | No la puede revotar (`already_voted`) |
+| Quien no la había votado | La sube otra vez, desde 1 |
+| El total acumulado | Suma · no se resetea |
+| **Pinchar un tema en duelo** | **NO lo deja a 0** · perdería la batalla solo |
 
 ### Check-in y referidos
 
@@ -130,10 +144,6 @@ que no lo sabemos.**
 - **Quien invita no ve nada** hasta que su amigo hace check-in. El enlace se
   usó, el sistema lo sabe, y la persona que invitó no se entera. Es lo que
   confundió al DJ el 3 de septiembre.
-- **El ranking de la TV se llena de canciones ya sonadas.** El contador de
-  votos no se resetea al pincharlas, y a las 2h vuelven a la lista con todos
-  sus votos. La noche del 05/09, 33 de las 48 del ranking eran eso. Analizado
-  en `VOTOS.md`; sin decidir si se toca.
 - **16 temas de plantilla sin género** en La Pocha. No están en el almacén, así
   que no hay de dónde sacarlo. Son 16 de 516.
 - **`fact_rewards` solo carga los canjes consumidos**, así que la tasa de

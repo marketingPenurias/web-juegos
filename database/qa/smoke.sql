@@ -26,6 +26,7 @@ declare
 	v_saldo_ini int; v_lifetime_ini int; v_reward uuid;
 	v_b uuid; v_sb_ini int; v_ref_ini uuid; v_code text;
 	r jsonb; v_err text; v_n int;
+	v_r1 uuid; v_r2 uuid; v_r3 uuid; v_votos int; v_lva timestamptz; v_base int;
 begin
 	select id into v_t    from tenants where slug='prueba';
 	select id into v_otro from tenants where slug='lapocha';
@@ -245,6 +246,72 @@ begin
 			case when token_balance = v_n then 'ok' else 'FALLO — se puede farmear' end
 		  from user_profiles where id = v_u;
 	end loop;
+
+	-- ═══ RESET DE VOTOS AL PINCHAR (v23) ════════════════════════════════
+	--
+	--   Las dos mitades del asunto, que es fácil arreglar una y romper la
+	--   otra: el contador del ranking se resetea, el registro de votos NO.
+	--   Y el guardia de las batallas, que se decidían comparando el mismo
+	--   contador que ahora ponemos a cero.
+	insert into event_tracks(tenant_id,event_id,spotify_id,title,artist,genre,total_votes,is_played)
+	select v_t, v_ev, 'qareset'||g, 'QA reset '||g, 'QA', 'QA género', 0, false from generate_series(1,3) g;
+	select id into v_r1 from event_tracks where event_id=v_ev and spotify_id='qareset1';
+	select id into v_r2 from event_tracks where event_id=v_ev and spotify_id='qareset2';
+	select id into v_r3 from event_tracks where event_id=v_ev and spotify_id='qareset3';
+
+	-- La fiesta ya trae votos del bloque de Música, así que el panel se mide
+	-- por diferencia y no por el número absoluto.
+	r := get_admin_metrics(v_t, v_actor, v_ev);
+	v_base := (r->>'total_votes')::int;
+
+	r := vote_track(v_t, v_u, v_ev, v_r1, 'free', 0, 'livebattle_boost', 'battle', false);
+	select total_votes into v_votos from event_tracks where id=v_r1;
+	insert into qa values ('Reset de votos','votar sube el contador','1', v_votos::text,
+		case when v_votos=1 then 'ok' else 'FALLO' end);
+
+	r := admin_set_now_playing(v_t, v_actor, v_ev, v_r1);
+	select total_votes, last_vote_at into v_votos, v_lva from event_tracks where id=v_r1;
+	insert into qa values ('Reset de votos','al pincharla el contador vuelve a 0','0', v_votos::text,
+		case when v_votos=0 then 'ok' else 'FALLO' end);
+	insert into qa values ('Reset de votos','y se limpia el desempate','sin sello',
+		coalesce(v_lva::text,'sin sello'), case when v_lva is null then 'ok' else 'FALLO' end);
+
+	select count(*) into v_n from track_votes where track_id=v_r1;
+	insert into qa values ('Reset de votos','el voto NO se pierde','1', v_n::text,
+		case when v_n=1 then 'ok' else 'FALLO' end);
+	r := get_admin_metrics(v_t, v_actor, v_ev);
+	insert into qa values ('Reset de votos','y el panel del DJ lo sigue contando',
+		(v_base+1)::text, coalesce(r->>'total_votes','—'),
+		case when (r->>'total_votes')::int = v_base+1 then 'ok' else 'FALLO' end);
+
+	select count(*) into v_n from tv_ranking(v_ev, 10) where id=v_r1;
+	insert into qa values ('Reset de votos','sale del ranking al momento, sin esperar 2h','0',
+		v_n::text, case when v_n=0 then 'ok' else 'FALLO' end);
+
+	-- Puede volver, pero sólo si la vota gente que aún no la había votado.
+	r := admin_set_now_playing(v_t, v_actor, v_ev, v_r2);
+	r := vote_track(v_t, v_u, v_ev, v_r1, 'free', 0, 'livebattle_boost', 'battle', false);
+	insert into qa values ('Reset de votos','quien ya la votó no la revota','already_voted',
+		coalesce(r->>'error','dejó votar'),
+		case when r->>'error'='already_voted' then 'ok' else 'FALLO' end);
+	r := vote_track(v_t, v_b, v_ev, v_r1, 'free', 0, 'livebattle_boost', 'battle', false);
+	select total_votes into v_votos from event_tracks where id=v_r1;
+	insert into qa values ('Reset de votos','vuelve a subir con gente nueva, desde 1','1',
+		v_votos::text, case when v_votos=1 then 'ok' else 'FALLO' end);
+	r := get_admin_metrics(v_t, v_actor, v_ev);
+	insert into qa values ('Reset de votos','el total acumulado sí suma',
+		(v_base+2)::text, coalesce(r->>'total_votes','—'),
+		case when (r->>'total_votes')::int = v_base+2 then 'ok' else 'FALLO' end);
+
+	-- El duelo se decide comparando total_votes: poner una a cero en mitad
+	-- de la batalla la haría perder sola.
+	insert into live_battles(tenant_id,event_id,track_a,track_b,status,started_at,ends_at)
+	values (v_t, v_ev, v_r1, v_r3, 'live', now(), now()+interval '10 minutes');
+	r := admin_set_now_playing(v_t, v_actor, v_ev, v_r1);
+	select total_votes into v_votos from event_tracks where id=v_r1;
+	insert into qa values ('Reset de votos','pinchar un tema en duelo NO lo deja a 0','1',
+		v_votos::text, case when v_votos=1 then 'ok' else 'FALLO' end);
+	update live_battles set status='closed' where event_id=v_ev and status='live';
 
 	-- ═══ DESHACER ═══════════════════════════════════════════════════════
 	-- Orden importa: los movimientos de cartera apuntan a la fiesta con una
