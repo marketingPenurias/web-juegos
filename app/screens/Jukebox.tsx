@@ -4,6 +4,7 @@ import {
 	ArrowLeft,
 	CheckCircle2,
 	Disc3,
+	Info,
 	Music2,
 	Search,
 	Ticket,
@@ -396,6 +397,14 @@ export function Jukebox() {
 				<p className="text-[11px] text-zinc-500 mt-2 px-1">
 					{t("jukebox.subtitle")}
 				</p>
+				{/* Decirlo ANTES de que busquen.  Quien viene a pedir su tema y no
+				    lo encuentra da por hecho que la app está rota — pasó en La
+				    Pocha y lo dijo más de uno.  No falta la canción: es que la
+				    lista la elige el DJ, y eso hay que contarlo. */}
+				<p className="text-[11px] text-zinc-400 mt-1 px-1 inline-flex items-start gap-1.5">
+					<Info className="w-3 h-3 mt-0.5 shrink-0 text-zinc-500" aria-hidden="true" />
+					<span>{t("jukebox.djOnly")}</span>
+				</p>
 			</section>
 
 			<main className="flex-1 px-6 pt-4 pb-6 overflow-y-auto no-scrollbar">
@@ -419,10 +428,19 @@ export function Jukebox() {
 						</button>
 					</div>
 				)}
+				{/* El vacío es el momento crítico: es cuando alguien decide si esto
+				    funciona o no.  Antes decía solo "no hay coincidencias", que es
+				    cierto y no explica nada. */}
 				{activeEventId && !loading && filtered.length === 0 && !error && (
-					<p className="text-center text-zinc-500 text-sm py-8">
-						{t("jukebox.noResults")}
-					</p>
+					<div className="text-center py-10 px-6 flex flex-col items-center gap-2">
+						<Info className="w-6 h-6 text-zinc-600" aria-hidden="true" />
+						<p className="text-zinc-300 text-sm font-bold">
+							{t("jukebox.noResults")}
+						</p>
+						<p className="text-zinc-500 text-xs leading-relaxed max-w-[34ch]">
+							{t("jukebox.noResultsHint")}
+						</p>
+					</div>
 				)}
 
 				{filtered.length > 0 && (
