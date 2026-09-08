@@ -130,6 +130,10 @@ que no lo sabemos.**
 - **Quien invita no ve nada** hasta que su amigo hace check-in. El enlace se
   usó, el sistema lo sabe, y la persona que invitó no se entera. Es lo que
   confundió al DJ el 3 de septiembre.
+- **El ranking de la TV se llena de canciones ya sonadas.** El contador de
+  votos no se resetea al pincharlas, y a las 2h vuelven a la lista con todos
+  sus votos. La noche del 05/09, 33 de las 48 del ranking eran eso. Analizado
+  en `VOTOS.md`; sin decidir si se toca.
 - **16 temas de plantilla sin género** en La Pocha. No están en el almacén, así
   que no hay de dónde sacarlo. Son 16 de 516.
 - **`fact_rewards` solo carga los canjes consumidos**, así que la tasa de
