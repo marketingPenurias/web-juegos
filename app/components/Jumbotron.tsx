@@ -791,9 +791,13 @@ export function Jumbotron({
 							{/* V20: QR del DUELO — escanear = check-in + entrar directo a
 							    la batalla (`next=live`).  Antes el duelo no tenía QR y se
 							    perdía el momento de máxima atención de la sala. */}
+							{/* Tamaño: este QR se escanea desde la pista, a varios metros
+							    de la tele.  Iba a 144 px —la mitad que el de la pantalla
+							    normal— y en la sala no había forma de cogerlo.  Se sube a
+							    256, a la altura del otro, que sí funciona. */}
 							{showQr && (
-								<div className="mt-2 flex flex-col items-center gap-2 rounded-2xl border border-(--jumbo-primary)/40 bg-black/50 backdrop-blur-md p-4">
-									<div className="w-36 h-36 rounded-xl bg-black/40 border border-white/10 p-2 flex items-center justify-center">
+								<div className="mt-2 flex flex-col items-center gap-3 rounded-2xl border border-(--jumbo-primary)/40 bg-black/50 backdrop-blur-md p-5">
+									<div className="w-64 h-64 rounded-xl bg-black/40 border border-white/10 p-3 flex items-center justify-center">
 										<QRCodeSVG
 											value={buildQrTarget("live")}
 											level="M"
@@ -804,7 +808,7 @@ export function Jumbotron({
 											aria-label="QR para votar en la batalla"
 										/>
 									</div>
-									<p className="text-sm font-black italic tracking-tight text-white text-center leading-tight">
+									<p className="text-xl font-black italic tracking-tight text-white text-center leading-tight">
 										Escanea y vota
 									</p>
 								</div>
