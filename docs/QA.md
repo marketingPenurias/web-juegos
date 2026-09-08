@@ -94,6 +94,15 @@ se mueve: ruleta (+15), Tinder (+25), batalla (+10) y reto de mesa (+40).
 | Precio del drop con decimales | «2,50€», no «3€» |
 | Racha en la app | La real, no «Día 1 de piloto» |
 
+### Arranque de la app
+
+| Caso | Resultado |
+| :-- | :-- |
+| Entrar por el QR estando ya registrado | Splash con el logo, **no** el Hub con 450 fichas |
+| Onboarding | Sin splash · no hay nada que falsear |
+| La sesión tarda | A los 4 s avisa de que la conexión va lenta |
+| La sesión no llega nunca | A los 8 s deja pasar igualmente · no se queda colgado |
+
 ---
 
 ## Ámbar · no probado todavía
@@ -105,6 +114,8 @@ que no lo sabemos.**
   de punta a punta; la parte del DJ (lanzar y cerrar) sí está probada.
 - **Pedir y boostear una canción** desde el Jukebox. El catálogo carga, pero
   no se ha pulsado PEDIR ni BOOST.
+- **El aviso nuevo del Jukebox** («solo las canciones que ha elegido el DJ»)
+  está escrito y compila, pero no se ha visto con una sesión real delante.
 - **Las pantallas de TV.** Ni el jumbotron ni el dashboard de pantalla.
 - **El circuito de invitación desde dos teléfonos.** La maquinaria está
   probada y paga bien; falta el recorrido humano: A comparte, B abre el enlace,
