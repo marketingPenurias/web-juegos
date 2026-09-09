@@ -50,6 +50,7 @@ type AdminBody = {
 	// V17: partir la pantalla mostrando la canción que suena ahora (mitad
 	// derecha) junto al ranking (mitad izquierda).
 	tv_show_now_playing?: boolean;
+	tv_show_promo?: boolean;
 	// V21: Flash Drops — promoción con caducidad y stock lanzada por el DJ.
 	product_id?: string;
 	promo_price_eur?: number;
@@ -352,7 +353,10 @@ export async function handleAdminAction(
 			// V17: "Canción actual" (split view).  Default APAGADO (false) para
 			// no alterar el layout clásico salvo que el DJ lo active.
 			const showNowPlaying = body.tv_show_now_playing === true;
-			const tvBackdrop = { mode, url, showRanking, showBattle, showNowPlaying };
+			// La cuña de NightGraph.  Default ENCENDIDA: es nuestra, sale seis
+			// veces por hora y el DJ la apaga en un toque si estorba.
+			const showPromo = body.tv_show_promo !== false;
+			const tvBackdrop = { mode, url, showRanking, showBattle, showNowPlaying, showPromo };
 			// Read-modify-write del jsonb (un solo DJ lo toca; sin carrera real).
 			const { data: ev } = await supabase
 				.from("tenant_events")

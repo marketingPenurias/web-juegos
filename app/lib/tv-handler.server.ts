@@ -2,6 +2,7 @@ import type { AppLoadContext } from "react-router";
 import { jsonResponse, preflight, verifyAuthToken } from "./api.server";
 import { getServiceSupabase } from "./supabase.server";
 import { hasTenantRole, pickTenantSlug } from "./tenant-resolver.server";
+import { normalizeTvBackdrop, type RawTvBackdrop } from "./tv-backdrop";
 
 /**
  * Handler de `POST /api/tv` — hidratación del Jumbotron `/tv/dashboard`.
@@ -107,17 +108,9 @@ export async function handleTvAction(
 	// Preferencia de fondo de la TV (control remoto del Staff).  Default
 	// carrusel automático si no se ha fijado nada.
 	const meta = (activeEvent?.metadata as Record<string, unknown> | null) ?? null;
-	const rawBackdrop = (meta?.tv_backdrop ?? null) as
-		| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean; showNowPlaying?: boolean }
-		| null;
-	const bm = rawBackdrop?.mode;
-	const backdrop = {
-		mode: bm === "video" || bm === "photo" ? bm : "carousel",
-		url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
-		showRanking: rawBackdrop?.showRanking !== false, // default true
-		showBattle: rawBackdrop?.showBattle !== false, // default true
-		showNowPlaying: rawBackdrop?.showNowPlaying === true, // default false
-	};
+	const backdrop = normalizeTvBackdrop(
+		(meta?.tv_backdrop ?? null) as RawTvBackdrop,
+	);
 
 	// V20 · FASE 1 — Nunca más tragarse un error.  Antes cada query hacía
 	// `const { data } = await …` y descartaba el error, así que un fallo de

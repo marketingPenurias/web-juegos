@@ -397,6 +397,7 @@ export default function Admin() {
 												tv_show_ranking: s.showRanking,
 												tv_show_battle: s.showBattle,
 												tv_show_now_playing: s.showNowPlaying,
+												tv_show_promo: s.showPromo,
 											},
 											s.mode === "photo"
 												? "📌 Foto fijada en la TV"
@@ -721,6 +722,8 @@ type TvState = {
 	showBattle: boolean;
 	// V17: partir la pantalla mostrando la canción que suena ahora.
 	showNowPlaying: boolean;
+	// La cuña de NightGraph cada pocos minutos.
+	showPromo: boolean;
 };
 
 function TvControlPanel({ slug, busy, onSet }: {
@@ -738,6 +741,7 @@ function TvControlPanel({ slug, busy, onSet }: {
 		showRanking: true,
 		showBattle: true,
 		showNowPlaying: false,
+		showPromo: true,
 	});
 
 	// Aplica un cambio parcial: actualiza el estado local Y lo envía entero
@@ -794,8 +798,8 @@ function TvControlPanel({ slug, busy, onSet }: {
 				</button>
 			</div>
 
-			{/* Toggles de CAPAS: ranking, batalla y canción actual */}
-			<div className="grid grid-cols-3 gap-3">
+			{/* Toggles de CAPAS: ranking, batalla, canción actual y cuña */}
+			<div className="grid grid-cols-2 gap-3">
 				<LayerToggle
 					label="Ranking"
 					on={sel.showRanking}
@@ -815,9 +819,16 @@ function TvControlPanel({ slug, busy, onSet }: {
 					busy={busy}
 					onToggle={() => apply({ showNowPlaying: !sel.showNowPlaying })}
 				/>
+				{/* La cuña de la casa: 20 s cada 5 min, salvo duelo o flash drop. */}
+				<LayerToggle
+					label="Cuña NightGraph"
+					on={sel.showPromo}
+					busy={busy}
+					onToggle={() => apply({ showPromo: !sel.showPromo })}
+				/>
 			</div>
 			<p className="text-[10px] text-zinc-600 px-1">
-				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo. Activa <span className="text-cyan-300 font-bold">Canción actual</span> para partir la pantalla: ranking a la izquierda y la canción que suena a la derecha.
+				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo. Activa <span className="text-cyan-300 font-bold">Canción actual</span> para partir la pantalla: ranking a la izquierda y la canción que suena a la derecha. La <span className="text-cyan-300 font-bold">cuña</span> ocupa la pantalla 20 segundos cada 5 minutos con el QR y cómo se juega; se calla sola durante una batalla o un flash drop.
 			</p>
 
 			{/* Fijar una FOTO concreta (mode='photo') */}

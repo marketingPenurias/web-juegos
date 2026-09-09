@@ -12,6 +12,13 @@ import {
 } from "./tv/RedemptionTicker";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { VenueBackdrop } from "./VenueBackdrop";
+import { PromoScreen } from "./tv/PromoScreen";
+import {
+	DEFAULT_TV_BACKDROP,
+	normalizeTvBackdrop,
+	type RawTvBackdrop,
+	type TvBackdrop,
+} from "../lib/tv-backdrop";
 import { cn } from "../lib/utils";
 import type { Track } from "./tv/types";
 import { DuelSide } from "./tv/DuelSide";
@@ -41,15 +48,11 @@ type Battle = { id: string; endsAt: string; a: Track; b: Track };
  *          photo    → una foto fija (`url`), vídeo pausado
  *          carousel → MIXTO: vídeo de base + fotos rotando encima
  *   showRanking → mostrar el Top de la noche (false = sólo fondo)
- *   showBattle  → mostrar la batalla de temas cuando haya una en vivo */
-type TvBackdrop = {
-	mode: "video" | "photo" | "carousel";
-	url: string | null;
-	showRanking: boolean;
-	showBattle: boolean;
-	// V17: partir la pantalla mostrando "Canción actual" en la mitad derecha.
-	showNowPlaying: boolean;
-};
+ *   showBattle  → mostrar la batalla de temas cuando haya una en vivo
+ *   showPromo   → la cuña de NightGraph cada pocos minutos
+ *
+ *   La forma y los valores por defecto viven en `lib/tv-backdrop`, que es el
+ *   único sitio que los conoce. */
 
 type Props = {
 	tenantId: string;
@@ -114,7 +117,7 @@ export function Jumbotron({
 	// no dupliquen el mismo canje.
 	const announcedRef = useRef<Set<string>>(new Set());
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
-		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true, showNowPlaying: false },
+		initialBackdrop ?? DEFAULT_TV_BACKDROP,
 	);
 	// Vídeo de fondo del local (siempre disponible si el tenant lo configuró).
 	const bgVideoUrl = tenant.bgVideoUrl ?? null;
@@ -301,17 +304,9 @@ export function Jumbotron({
 				{ event: "UPDATE", schema: "public", table: "tenant_events", filter: `id=eq.${eventId}` },
 				(payload) => {
 					const meta = (payload.new as { metadata?: Record<string, unknown> })?.metadata ?? null;
-					const raw = (meta?.tv_backdrop ?? null) as
-						| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean; showNowPlaying?: boolean }
-						| null;
-					const m = raw?.mode;
-					setBackdrop({
-						mode: m === "video" || m === "photo" ? m : "carousel",
-						url: typeof raw?.url === "string" ? raw.url : null,
-						showRanking: raw?.showRanking !== false, // default true
-						showBattle: raw?.showBattle !== false, // default true
-						showNowPlaying: raw?.showNowPlaying === true, // default false
-					});
+					setBackdrop(
+						normalizeTvBackdrop((meta?.tv_backdrop ?? null) as RawTvBackdrop),
+					);
 				},
 			)
 			.subscribe();
@@ -897,6 +892,15 @@ export function Jumbotron({
 			    segundos, la promoción sigue ahí después. */}
 			<FlashDropBanner drop={flashDrop} />
 			<RedemptionTicker latest={lastRedemption} />
+
+			{/* La cuña de la casa.  Se calla mientras hay duelo o flash drop:
+			    los dos son momentos con reloj y no se pisan.  Y el overlay del
+			    ganador va por encima, que la celebración manda. */}
+			<PromoScreen
+				qrUrl={qrTarget}
+				host={venueHost}
+				enabled={backdrop.showPromo && !displayBattle && !flashDrop}
+			/>
 
 			{winner && <WinnerOverlay track={winner} />}
 

@@ -4,6 +4,11 @@ import { Jumbotron } from "./Jumbotron";
 import type { TvFlashDrop } from "./tv/FlashDropBanner";
 import { getAccessToken } from "../lib/supabase.client";
 import { extractSlugFromHost } from "../lib/tenant";
+import {
+	normalizeTvBackdrop,
+	type RawTvBackdrop,
+	type TvBackdrop,
+} from "../lib/tv-backdrop";
 
 /**
  * TvScreen — pantalla de proyector ÚNICA (Operación Wiring).
@@ -27,13 +32,7 @@ type TvTrack = {
 	is_played: boolean;
 };
 type TvBattle = { id: string; ends_at: string; a: TvTrack; b: TvTrack } | null;
-export type TvBackdrop = {
-	mode: "video" | "photo" | "carousel";
-	url: string | null;
-	showRanking: boolean;
-	showBattle: boolean;
-	showNowPlaying: boolean;
-};
+
 
 type Boot =
 	| { phase: "loading" }
@@ -107,8 +106,6 @@ export function TvScreen({
 				});
 				return;
 			}
-			const rawBackdrop = (data.backdrop as Partial<TvBackdrop> | null) ?? null;
-			const bm = rawBackdrop?.mode;
 			setBoot({
 				phase: "ready",
 				tenantId: String(data.tenant_id ?? ""),
@@ -118,13 +115,9 @@ export function TvScreen({
 				checkinCode: (data.checkin_code as string | null) ?? null,
 				battle: (data.battle as TvBattle) ?? null,
 				flashDrop: (data.flashDrop as TvFlashDrop | null) ?? null,
-				backdrop: {
-					mode: bm === "video" || bm === "photo" ? bm : "carousel",
-					url: typeof rawBackdrop?.url === "string" ? rawBackdrop.url : null,
-					showRanking: rawBackdrop?.showRanking !== false,
-					showBattle: rawBackdrop?.showBattle !== false,
-					showNowPlaying: rawBackdrop?.showNowPlaying === true,
-				},
+				backdrop: normalizeTvBackdrop(
+					(data.backdrop ?? null) as RawTvBackdrop,
+				),
 			});
 		})();
 		return () => {

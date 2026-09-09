@@ -140,6 +140,8 @@ que no lo sabemos.**
   probada y paga bien; falta el recorrido humano: A comparte, B abre el enlace,
   B se registra, B escanea.
 - **Subida de fotos y vídeo del local**, y el carrusel de fondo.
+- **La cuña de NightGraph en la TV.** Maquetada y vista en 16:9, pero no se ha
+  visto entrar y salir sola en una pantalla real durante una noche.
 - **Comportamiento con mala conexión**, que es la condición normal de un local.
 
 ---
