@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **9 de septiembre de 2026** · **42 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
+Estado a **9 de septiembre de 2026** · **47 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -61,6 +61,19 @@ siguen pasando y protegen lo que hay en la base de datos.
 | Lo que ve el DJ | Una fila por canción, la más pedida arriba |
 | Un cliente mirando el panel | No ve nada |
 | El DJ la acepta | Entra en el almacén y en la fiesta |
+
+### La fiesta es lo que ha elegido el DJ · v23
+
+Se arregló el 9 de septiembre: `event_catalog` devolvía el almacén entero
+siempre, así que las plantillas no acotaban nada y «Quitar» no quitaba.
+
+| Caso | Resultado |
+| :-- | :-- |
+| Fiesta vacía (el DJ no preparó nada) | Se ve el almacén entero · como hasta ahora |
+| **Alguien vota en una fiesta vacía** | **NO se convierte en «lista de una canción»** |
+| Esa fila queda marcada | `added_by = 'vote'` |
+| El DJ carga 3 temas | Solo se ven esos 3 |
+| El DJ quita uno | **Desaparece de verdad** |
 
 ### Reset de votos al pinchar · v23
 
@@ -165,10 +178,6 @@ que no lo sabemos.**
 
 ## Rojo · conocido y sin arreglar
 
-- **El Jukebox no respeta la selección del DJ.** Se quitó un tema de la fiesta
-  y seguía apareciendo y dejándose pedir: `event_catalog` sirve el repertorio
-  del local, no la lista de la noche. Con eso, las plantillas no significan
-  nada. Ver `PETICIONES.md`.
 - **Quien invita no ve nada** hasta que su amigo hace check-in. El enlace se
   usó, el sistema lo sabe, y la persona que invitó no se entera. Es lo que
   confundió al DJ el 3 de septiembre.

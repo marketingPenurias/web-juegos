@@ -27,7 +27,7 @@ declare
 	v_b uuid; v_sb_ini int; v_ref_ini uuid; v_code text;
 	r jsonb; v_err text; v_n int;
 	v_r1 uuid; v_r2 uuid; v_r3 uuid; v_votos int; v_lva timestamptz; v_base int;
-	v_reqkey text;
+	v_reqkey text; v_sel uuid; v_lib int; v_g uuid; v_et uuid;
 begin
 	select id into v_t    from tenants where slug='prueba';
 	select id into v_otro from tenants where slug='lapocha';
@@ -359,6 +359,49 @@ begin
 	select count(*) into v_n from get_track_requests(v_t, v_actor, v_ev);
 	insert into qa values ('Peticiones','y sale de pendientes','0',
 		v_n::text, case when v_n=0 then 'ok' else 'FALLO' end);
+
+	-- ═══ LA FIESTA ES LO QUE HA ELEGIDO EL DJ (v23) ═════════════════════
+	--
+	--   La trampa está en el segundo caso: `ensure_event_track` crea una fila
+	--   en CADA voto, así que "la fiesta tiene canciones" no puede significar
+	--   "hay filas en event_tracks" — una fiesta vacía donde alguien vota se
+	--   quedaría con esa única canción.
+	select count(*) into v_lib from global_tracks where tenant_id = v_t;
+	insert into tenant_events(tenant_id,name,status,start_time,end_time)
+	values (v_t,'QA selección','scheduled', now()-interval '1 hour', now()+interval '6 hours')
+	returning id into v_sel;
+
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','fiesta vacía · se ve todo el almacén',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+
+	select id into v_g from global_tracks where tenant_id=v_t order by title limit 1;
+	v_et := ensure_event_track(v_t, v_sel, v_g);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','un voto NO convierte la fiesta en lista',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+	insert into qa values ('Selección','la fila del voto queda marcada','vote',
+		(select added_by from event_tracks where id = v_et),
+		case when (select added_by from event_tracks where id = v_et) = 'vote'
+		     then 'ok' else 'FALLO' end);
+
+	insert into event_tracks(tenant_id,event_id,global_track_id,spotify_id,title,artist,genre,total_votes,is_played)
+	select v_t, v_sel, g.id, g.spotify_id, g.title, g.artist, g.genre, 0, false
+	from global_tracks g where g.tenant_id=v_t and g.id <> v_g order by g.title limit 3;
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','el DJ carga 3 · sólo se ven ésas','3',
+		v_n::text, case when v_n = 3 then 'ok' else 'FALLO' end);
+
+	delete from event_tracks where event_id = v_sel and added_by = 'dj'
+	  and id = (select id from event_tracks where event_id = v_sel and added_by='dj'
+	            order by title limit 1);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','el DJ quita una · desaparece de verdad','2',
+		v_n::text, case when v_n = 2 then 'ok' else 'FALLO' end);
+
+	delete from track_votes  where event_id = v_sel;
+	delete from event_tracks where event_id = v_sel;
+	delete from tenant_events where id = v_sel;
 
 	-- ═══ DESHACER ═══════════════════════════════════════════════════════
 	-- Orden importa: los movimientos de cartera apuntan a la fiesta con una

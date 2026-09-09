@@ -105,6 +105,10 @@ consumo en barra e ingreso real por `campaign_code`.
 
 **`event_tracks`** (PK `id`, UNIQUE `(event_id,spotify_id)`) — canciones **copiadas** a un evento.
 - `tenant_id` · `event_id`→tenant_events · `spotify_id` · `title` · `artist` · `cover_image_url`
+  · **`added_by text`** d`'dj'` (CHECK `dj|vote`) — v23. Quién metió la fila:
+    el DJ (plantilla, carga masiva, "Abrir Fiesta") o el sistema al recibir un
+    voto (`ensure_event_track`). Es lo que permite distinguir "el DJ ha elegido"
+    de "alguien ha votado", y sin ello la regla del catálogo se rompe.
   · `total_votes int` d0 · `is_played bool` d false · `played_at timestamptz` (sello para
   ocultar 2h de la TV) · **`genre text`** (V18) · **`last_vote_at timestamptz`** (desempate V18) · `created_at`
   > ⚠️ Hoy cada evento **duplica** el catálogo (759 filas/evento). Deuda pendiente: pasar a N-a-N contra `global_tracks`.
@@ -115,7 +119,8 @@ consumo en barra e ingreso real por `campaign_code`.
 
 **`track_requests`** (PK `id`) — v23. Pedirle al DJ una canción que la sala
 **NO tiene**. Ojo con la distinción: el Jukebox ya sirve el repertorio ENTERO
-del local (`event_catalog`) y materializa la fila del evento al votar, así que
+del local cuando el DJ no ha elegido nada (`event_catalog`) y materializa la
+fila del evento al votar, así que
 lo que está guardado ya se pide desde ahí. Esto cubre lo que falta, y por eso
 va en **texto libre**.
   · `tenant_id`→tenants · `event_id`→tenant_events · `user_id`→user_profiles

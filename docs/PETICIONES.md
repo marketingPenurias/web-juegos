@@ -81,8 +81,25 @@ el Tinder se quedaba sin cartas.
 no poner esta noche, las plantillas dejan de significar nada. La fiesta debería
 ser lo que el DJ eligió.
 
-**Pendiente:** leer el cuerpo de `event_catalog` y decidir. Es más importante
-que la funcionalidad aparcada.
+**Arreglado el mismo día**, migración `51_v23_event_is_the_dj_selection.sql`.
+Leído el cuerpo: era un `LEFT JOIN` partiendo de `global_tracks`, sin ninguna
+condición — devolvía el almacén entero siempre. La regla nueva: *si el DJ ha
+cargado canciones se ven solo esas; si no ha cargado nada, se ve el almacén*.
+
+La trampa que casi la lía: «tiene canciones» no puede ser «hay filas en
+`event_tracks`», porque `ensure_event_track` crea una fila **en cada voto**.
+Una fiesta vacía donde alguien vota se habría quedado con esa única canción.
+De ahí `event_tracks.added_by` (`dj` | `vote`).
+
+**Caso raro conocido, sin arreglar:** si alguien vota en una fiesta vacía y
+DESPUÉS el DJ carga su lista, ese tema tiene votos pero ya no está en el
+catálogo — sale en el ranking de la tele y no se puede votar. La ventana es
+estrecha (votos anteriores a que el DJ prepare) y se ha preferido no repetir la
+regla en `tv_ranking`, que sería un tercer sitio donde mantenerla.
+
+**Y esto reabre lo de las peticiones:** ahora que la fiesta es de verdad la
+lista del DJ, el hueco de «no está mi canción» es mucho más grande, y pedir
+cobra bastante más sentido del que tenía.
 
 ### El aviso del Jukebox está para cerrar, no para abrir
 
