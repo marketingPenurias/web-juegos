@@ -94,15 +94,13 @@ export function Jukebox() {
 	// Filtro por género (V18).  null = todos.
 	const [genre, setGenre] = useState<string | null>(null);
 	const [requested, setRequested] = useState<Set<string>>(new Set());
-	// Peticiones al DJ: canciones que tiene guardadas pero no cargó hoy.
-	const {
-		results: library,
-		searching: searchingLibrary,
-		search: searchLibrary,
-		request: requestTrack,
-		clear: clearLibrary,
-	} = useTrackRequests(activeEventId);
-	const [asked, setAsked] = useState<Set<string>>(new Set());
+	// Peticiones al DJ: canciones que la sala NO tiene.  Lo que sí tiene ya
+	// sale aquí arriba —el catálogo es el repertorio entero del local—, así
+	// que esto sólo cubre lo que falta.
+	const { request: requestTrack } = useTrackRequests(activeEventId);
+	const [askTitle, setAskTitle] = useState("");
+	const [askArtist, setAskArtist] = useState("");
+	const [asking, setAsking] = useState(false);
 	const [boosted, setBoosted] = useState<Set<string>>(new Set());
 	const [busy, setBusy] = useState<string | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -167,26 +165,15 @@ export function Jukebox() {
 		return searchTracks(pool, query, 50);
 	}, [pool, randomFifty, query]);
 
-	// Cuando la fiesta no tiene lo que buscan, se mira el ALMACÉN de la sala.
-	//   Es el momento en que alguien decide si la app sirve o no: hasta ahora
-	//   la respuesta era el silencio.  Con retardo, porque se teclea letra a
-	//   letra y no vamos a preguntar al servidor en cada una.
-	useEffect(() => {
-		const q = query.trim();
-		if (q.length < 2 || filtered.length > 0) {
-			clearLibrary();
-			return;
-		}
-		const id = window.setTimeout(() => void searchLibrary(q), 350);
-		return () => window.clearTimeout(id);
-	}, [query, filtered.length, searchLibrary, clearLibrary]);
-
-	const askForTrack = async (track: { id: string; title: string }) => {
-		setBusy(track.id);
-		const res = await requestTrack(track.id);
-		setBusy(null);
+	const askForTrack = async () => {
+		const title = askTitle.trim();
+		if (title.length < 2 || asking) return;
+		setAsking(true);
+		const res = await requestTrack(title, askArtist.trim());
+		setAsking(false);
 		if (res.ok) {
-			setAsked((cur) => new Set(cur).add(track.id));
+			setAskTitle("");
+			setAskArtist("");
 			setTone("success");
 			setToast(
 				res.requests > 1
@@ -201,7 +188,11 @@ export function Jukebox() {
 				? t("jukebox.askLimit", { n: res.limit ?? 3 })
 				: res.error === "already_requested"
 					? t("jukebox.askedAlready")
-					: t("jukebox.askFailed"),
+					: res.error === "already_in_library"
+						? t("jukebox.askAlreadyHave", { title: res.title ?? title })
+						: res.error === "invalid_title"
+							? t("jukebox.askTooShort")
+							: t("jukebox.askFailed"),
 		);
 	};
 
@@ -490,62 +481,51 @@ export function Jukebox() {
 							{t("jukebox.noResultsHint")}
 						</p>
 
-						{/* El almacén del DJ.  Si la tiene guardada y hoy no la puso,
-						    se le puede pedir — y si la piden varios, la pone. */}
-						{searchingLibrary && (
-							<p className="text-zinc-600 text-xs font-bold mt-2">
-								{t("jukebox.askSearching")}
+						{/* El hueco de verdad: canciones que la sala NO tiene.  Lo que
+						    sí tiene ya sale en la lista de arriba, porque el catálogo
+						    es el repertorio entero del local.  Aquí se pide lo otro,
+						    que es lo que pregunta la gente en la barra. */}
+						<div className="w-full mt-4 rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 flex flex-col gap-2">
+							<p className="text-[11px] uppercase tracking-widest text-amber-300 font-black text-center">
+								{t("jukebox.askTitle")}
 							</p>
-						)}
-						{!searchingLibrary && library.length > 0 && (
-							<div className="w-full mt-3">
-								<p className="text-[11px] uppercase tracking-widest text-amber-300 font-black text-center mb-3">
-									{t("jukebox.askTitle")}
-								</p>
-								<ul className="flex flex-col gap-2">
-									{library.map((track) => {
-										const done = asked.has(track.id);
-										return (
-											<li
-												key={track.id}
-												className="flex items-center gap-3 rounded-2xl bg-zinc-900/70 border border-zinc-800 p-3"
-											>
-												<div className="w-11 h-11 rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center shrink-0">
-													{track.cover_image_url ? (
-														<img src={track.cover_image_url} alt="" className="w-full h-full object-cover" />
-													) : (
-														<Music2 className="w-4 h-4 text-zinc-600" aria-hidden="true" />
-													)}
-												</div>
-												<div className="flex-1 min-w-0 text-left">
-													<p className="text-sm font-bold text-white truncate">{track.title}</p>
-													<p className="text-xs text-zinc-500 truncate">{track.artist}</p>
-												</div>
-												<button
-													type="button"
-													disabled={done || busy === track.id}
-													onClick={() => void askForTrack(track)}
-													className={cn(
-														"h-10 px-4 rounded-xl text-xs font-black uppercase tracking-widest inline-flex items-center gap-2 active:scale-95 shrink-0",
-														done
-															? "bg-zinc-800 text-zinc-500"
-															: "bg-amber-400 text-black",
-														busy === track.id && "opacity-40",
-													)}
-												>
-													{done ? (
-														<CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-													) : (
-														<Hand className="w-4 h-4" aria-hidden="true" />
-													)}
-													{done ? t("jukebox.askedShort") : t("jukebox.ask")}
-												</button>
-											</li>
-										);
-									})}
-								</ul>
-							</div>
-						)}
+							<input
+								type="text"
+								value={askTitle}
+								onChange={(e) => setAskTitle(e.target.value)}
+								maxLength={80}
+								placeholder={t("jukebox.askSongPlaceholder")}
+								aria-label={t("jukebox.askSongPlaceholder")}
+								className="h-11 rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 text-sm font-bold text-white placeholder:text-zinc-600 placeholder:font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+							/>
+							<input
+								type="text"
+								value={askArtist}
+								onChange={(e) => setAskArtist(e.target.value)}
+								maxLength={80}
+								placeholder={t("jukebox.askArtistPlaceholder")}
+								aria-label={t("jukebox.askArtistPlaceholder")}
+								className="h-11 rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 text-sm font-bold text-white placeholder:text-zinc-600 placeholder:font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+							/>
+							<button
+								type="button"
+								disabled={asking || askTitle.trim().length < 2}
+								onClick={() => void askForTrack()}
+								className={cn(
+									"h-11 rounded-xl text-xs font-black uppercase tracking-widest inline-flex items-center justify-center gap-2 active:scale-95",
+									askTitle.trim().length < 2
+										? "bg-zinc-800 text-zinc-500"
+										: "bg-amber-400 text-black",
+									asking && "opacity-40",
+								)}
+							>
+								<Hand className="w-4 h-4" aria-hidden="true" />
+								{t("jukebox.ask")}
+							</button>
+							<p className="text-[11px] text-zinc-500 leading-relaxed text-center">
+								{t("jukebox.askFootnote")}
+							</p>
+						</div>
 					</div>
 				)}
 

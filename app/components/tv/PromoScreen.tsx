@@ -83,7 +83,7 @@ export function PromoScreen({
 	return (
 		<div
 			ref={rootRef}
-			className="absolute inset-0 z-[44] bg-black/80 backdrop-blur-xl flex items-center justify-center px-16"
+			className="absolute inset-0 z-[44] bg-black/80 backdrop-blur-xl flex items-center justify-center overflow-hidden px-8 py-8 xl:px-16"
 			aria-hidden="true"
 		>
 			{/* El búho desarmado: nodos y líneas, muy por debajo del contenido. */}
@@ -116,19 +116,24 @@ export function PromoScreen({
 				))}
 			</svg>
 
-			<div className="relative z-10 w-full max-w-[1500px] grid grid-cols-[1fr_auto] gap-20 items-center">
-				<div className="min-w-0">
+						{/* Apilado por defecto y en dos columnas sólo cuando hay sitio.  La
+			    tele del local es 16:9, pero visto en vertical el titular se
+			    montaba encima del QR y los pasos se salían por la derecha: una
+			    maquetación que sólo funciona a un ancho concreto es una que se
+			    va a romper el día que alguien cuelgue la pantalla de canto. */}
+			<div className="relative z-10 w-full max-w-[1500px] grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-10 xl:gap-20 items-center justify-items-center xl:justify-items-stretch">
+				<div className="min-w-0 text-center xl:text-left">
 					<p className="promo-in text-lg uppercase tracking-[0.5em] font-black text-zinc-500">
 						{tenant.name}
 					</p>
-					<h2 className="promo-in mt-4 text-9xl font-black italic tracking-tighter leading-[0.88]">
+					<h2 className="promo-in mt-4 text-5xl sm:text-7xl xl:text-9xl font-black italic tracking-tighter leading-[0.88]">
 						LA MÚSICA
 						<br />
 						<span style={{ color: accent }}>LA ELIGES TÚ</span>
 					</h2>
 
 					{/* El bucle, dibujado como bucle. */}
-					<div className="promo-in mt-14 flex items-center gap-5">
+					<div className="promo-in mt-8 xl:mt-14 flex flex-wrap items-center gap-3 xl:gap-5">
 						<Step icon={Music2} text="Pide tu canción" accent={accent} />
 						<ArrowRight
 							className="w-8 h-8 text-zinc-700 shrink-0"
@@ -151,7 +156,7 @@ export function PromoScreen({
 							marginSize={0}
 							fgColor="#000000"
 							bgColor="#ffffff"
-							className="w-72 h-72"
+							className="w-52 h-52 xl:w-72 xl:h-72"
 						/>
 					</div>
 					<p className="text-3xl font-black italic tracking-tight">
@@ -162,7 +167,7 @@ export function PromoScreen({
 			</div>
 
 			{/* La firma, en su sitio: pequeña y abajo. */}
-			<div className="absolute bottom-10 right-16 flex items-center gap-3 opacity-60">
+			<div className="absolute bottom-4 right-6 xl:bottom-10 xl:right-16 flex items-center gap-3 opacity-60">
 				<img
 					src="/logo-nightgraph.jpg"
 					alt=""
@@ -187,8 +192,8 @@ function Step({
 }) {
 	return (
 		<div className="flex items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-6 py-4">
-			<Icon className="w-8 h-8 shrink-0" style={{ color: accent }} aria-hidden="true" />
-			<span className="text-2xl font-black tracking-tight whitespace-nowrap">
+			<Icon className="w-6 h-6 xl:w-8 xl:h-8 shrink-0" style={{ color: accent }} aria-hidden="true" />
+			<span className="text-lg xl:text-2xl font-black tracking-tight whitespace-nowrap">
 				{text}
 			</span>
 		</div>

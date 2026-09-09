@@ -113,11 +113,15 @@ consumo en barra e ingreso real por `campaign_code`.
 - `tenant_id` · `event_id` · `track_id`→event_tracks · `user_id`→user_profiles
   · `vote_type text` (CHECK `free|boost`) · `tokens_spent int` d0
 
-**`track_requests`** (PK `id`, UNIQUE `(event_id,user_id,global_track_id)`) — v23.
-Pedirle al DJ una canción del ALMACÉN que no cargó esta noche.
+**`track_requests`** (PK `id`) — v23. Pedirle al DJ una canción que la sala
+**NO tiene**. Ojo con la distinción: el Jukebox ya sirve el repertorio ENTERO
+del local (`event_catalog`) y materializa la fila del evento al votar, así que
+lo que está guardado ya se pide desde ahí. Esto cubre lo que falta, y por eso
+va en **texto libre**.
   · `tenant_id`→tenants · `event_id`→tenant_events · `user_id`→user_profiles
-  · `global_track_id`→global_tracks (NOT NULL: se pide de la biblioteca, nunca
-    texto libre) · `status text` d`pending` (CHECK `pending|added|dismissed`)
+  · `title text` · `artist text` (opcional) · `global_track_id` (residual de la
+    49, ya opcional) · `status text` d`pending` (CHECK `pending|added|dismissed`)
+  · UNIQUE parcial `(event_id, user_id, normalize_request_key(title,artist))`
   · `created_at` · `resolved_at` · `resolved_by uuid` (uid de AUTH del staff,
     **sin foránea** — el DJ no tiene por qué ser cliente de la sala)
   · Índices: `track_requests_event_status_idx (event_id, status)`
@@ -547,20 +551,20 @@ end; $$;
 
 ### 6.4.b Peticiones de canciones (v23)
 
-- `request_track(tenant, user, event, global_track)` → `{ok, title, artist,
-  requests, remaining}`. Rechaza con `already_in_party` (que la voten, no que
-  la pidan), `already_requested` y `request_limit` (**3 por persona y noche de
-  negocio**). `requests` es cuánta gente ha pedido ESA canción — la señal que
-  usa el DJ.
-- `get_track_requests(tenant, actor, event)` → tabla agrupada POR CANCIÓN con
-  `people` y `first_asked`, ordenada por gente desc. Staff-gated (devuelve
-  vacío si no lo eres). Una fila por petición sería una bandeja de entrada;
-  agrupado es una decisión.
-- `admin_add_requested_track(tenant, actor, event, global_track)` → copia el
-  tema a `event_tracks` **con `genre` y `global_track_id`** (el sexto camino
-  de copia; los cinco anteriores se los dejaban, ver migración 45) y marca las
-  peticiones como `added`. Audita.
-- `admin_dismiss_request(tenant, actor, event, global_track)` → `dismissed`.
+- `normalize_request_key(title, artist)` → clave de agrupación (IMMUTABLE, se
+  usa en el índice único). Diez personas escriben la misma canción de ocho
+  formas distintas.
+- `request_new_track(tenant, user, event, title, artist)` → `{ok, requests,
+  remaining}`. Rechaza con `invalid_title`, `already_in_library` (devuelve el
+  título que sí tenemos, para que la busque), `already_requested` y
+  `request_limit` (**3 por persona y noche de negocio**).
+- `get_track_requests(tenant, actor, event)` → agrupada por `req_key` con
+  `people` y `first_asked`, ordenada por gente desc. Staff-gated.
+- `admin_accept_request(tenant, actor, event, req_key)` → la mete en
+  `global_tracks` **y** en `event_tracks` con `spotify_id = 'pedido:<hash>'`,
+  **sin género ni carátula** (nadie tiene esos datos a las 3 am; el prefijo
+  sirve para encontrarlas y completarlas luego). Audita.
+- `admin_dismiss_request(tenant, actor, event, req_key)` → `dismissed`.
 
 ### 6.5 Panel DJ / Staff (todas validan `is_tenant_staff` y escriben en `audit_logs`)
 
