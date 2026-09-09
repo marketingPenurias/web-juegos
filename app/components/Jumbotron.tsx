@@ -715,7 +715,14 @@ export function Jumbotron({
 	// V17: "Canción actual" (split).  Se muestra en ambas TVs cuando el DJ lo
 	// activa; ocupa la mitad derecha junto al ranking.
 	const displayNowPlaying = backdrop.showNowPlaying;
+	// Nuestra pantalla, al mismo nivel que el Top o la batalla: cuando el DJ la
+	// pone, ES la pantalla.  La batalla sigue mandando por encima porque tiene
+	// reloj y se acaba sola.
+	const displayPromo = backdrop.showPromo && !displayBattle;
 	const cleanMode = !displayBattle && !displayRanking && !displayNowPlaying;
+	// Sin cabecera ni pie cuando manda nuestra pantalla: es una composición
+	// cerrada, no una capa encima del Top.
+	const showChrome = !cleanMode && !displayPromo;
 	const inBattle = displayBattle;
 	const total = aVotes + bVotes;
 	const aPct = total > 0 ? Math.round((aVotes / total) * 100) : 50;
@@ -724,6 +731,8 @@ export function Jumbotron({
 
 	return (
 		<div ref={containerRef} style={containerStyle} className="min-h-dvh w-full bg-(--jumbo-bg) text-white relative overflow-hidden flex flex-col">
+			{displayPromo && <PromoScreen qrUrl={qrTarget} host={venueHost} />}
+
 			{/* Fondo PREMIUM dinámico — VÍDEO del local + FOTOS, controlado por
 			    el DJ desde /admin (3 modos, ver VenueBackdrop):
 			      · video    → sólo el vídeo (identidad del local)
@@ -743,7 +752,7 @@ export function Jumbotron({
 				<div className="absolute -bottom-32 -right-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-accent)/15 blur-[140px]" />
 			</div>
 
-			{!cleanMode && (
+			{showChrome && (
 			<header className="relative z-10 px-12 pt-12 pb-6 flex items-center justify-between">
 				<div className="flex items-center gap-4">
 					<div className="w-16 h-16 rounded-2xl bg-linear-to-tr from-(--jumbo-primary) to-(--jumbo-accent) p-0.5">
@@ -771,7 +780,7 @@ export function Jumbotron({
 			</header>
 			)}
 
-			{!cleanMode && (inBattle && battle ? (
+			{showChrome && (inBattle && battle ? (
 				// ── MODO DUELO ───────────────────────────────────────────────
 				<main className="relative z-10 flex-1 px-12 pb-12 flex flex-col">
 					<div className="flex items-center justify-center gap-4 mb-6">
@@ -901,18 +910,9 @@ export function Jumbotron({
 			<FlashDropAlert drop={flashDrop} qrUrl={qrTarget} />
 			<RedemptionTicker latest={lastRedemption} />
 
-			{/* La cuña de la casa.  Se calla mientras hay duelo o flash drop:
-			    los dos son momentos con reloj y no se pisan.  Y el overlay del
-			    ganador va por encima, que la celebración manda. */}
-			<PromoScreen
-				qrUrl={qrTarget}
-				host={venueHost}
-				enabled={backdrop.showPromo && !displayBattle && !flashDrop}
-			/>
-
 			{winner && <WinnerOverlay track={winner} />}
 
-			{!cleanMode && (
+			{showChrome && (
 			<footer className="relative z-10 px-12 pb-8 text-center">
 				<p className="text-xs uppercase tracking-[0.4em] text-zinc-600 font-bold">
 					Vota desde tu móvil · {venueHost}

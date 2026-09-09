@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { ArrowRight, Beer, Coins, Music2 } from "lucide-react";
 import { gsap, useGSAP } from "../../lib/gsap";
 import { useTenant } from "../../lib/tenant";
 
 /**
- * PromoScreen — la cuña de la casa en la pantalla del local.
+ * PromoScreen — nuestra pantalla en la tele del local.
  *
- *   Hasta ahora la tele sólo tenía el vídeo y las fotos que nos pasó la sala.
- *   Se agotan: la misma imagen cada dos minutos toda la noche.  Esto entra
- *   cada pocos minutos, ocupa la pantalla veinte segundos y se va.
+ *   Es UNA PANTALLA MÁS, al nivel del Top de la noche o de la batalla: el DJ
+ *   la pone cuando le conviene y se queda hasta que la quite.  Nació como una
+ *   cuña con temporizador —veinte segundos cada cinco minutos— y estaba mal
+ *   planteada: interrumpía sola, sin que nadie lo hubiera decidido, y ni el
+ *   DJ ni nosotros sabíamos qué se estaba viendo en cada momento.
  *
  *   A quién le habla: a la gente que está en la pista con una copa en la
  *   mano, a diez metros y a oscuras.  No le interesa quiénes somos nosotros
@@ -25,10 +27,6 @@ import { useTenant } from "../../lib/tenant";
  *   El fondo son nodos y líneas: es el búho de nuestro logo desarmado, que
  *   en una sala a oscuras pasa por lo que parece, una parrilla de luces.
  */
-
-const SHOW_MS = 20_000; // lo que dura en pantalla
-const CYCLE_MS = 5 * 60_000; // cada cuánto vuelve — seis veces por hora
-const FIRST_MS = 90_000; // margen antes de la primera: que la sala arranque
 
 /** Constelación fija: mismos puntos cada noche, sin sorpresas de layout. */
 const NODES: Array<[number, number]> = [
@@ -46,41 +44,15 @@ const EDGES: Array<[number, number]> = [
 export function PromoScreen({
 	qrUrl,
 	host,
-	enabled,
 }: {
 	qrUrl: string;
 	host: string;
-	enabled: boolean;
 }) {
 	const tenant = useTenant();
 	const rootRef = useRef<HTMLDivElement>(null);
-	const [visible, setVisible] = useState(false);
-
-	// Un ciclo que tiene que aguantar ocho horas encendido: un temporizador
-	// para entrar y otro para salir, y los dos se limpian.
-	useEffect(() => {
-		if (!enabled) {
-			setVisible(false);
-			return;
-		}
-		let hide: number | undefined;
-		const show = () => {
-			setVisible(true);
-			hide = window.setTimeout(() => setVisible(false), SHOW_MS);
-		};
-		const first = window.setTimeout(show, FIRST_MS);
-		const cycle = window.setInterval(show, CYCLE_MS);
-		return () => {
-			window.clearTimeout(first);
-			window.clearInterval(cycle);
-			if (hide !== undefined) window.clearTimeout(hide);
-			setVisible(false);
-		};
-	}, [enabled]);
 
 	useGSAP(
 		() => {
-			if (!visible) return;
 			// La entrada arranca en `opacity: 0`.  Si el navegador congela los
 			// fotogramas —y esta pantalla lleva ocho horas encendida sin que
 			// nadie la toque— el tween se queda a medias y la cuña son veinte
@@ -103,17 +75,15 @@ export function PromoScreen({
 				ease: "sine.inOut",
 			});
 		},
-		{ scope: rootRef, dependencies: [visible] },
+		{ scope: rootRef },
 	);
-
-	if (!visible) return null;
 
 	const accent = tenant.theme.primary ?? "#7DF9FF";
 
 	return (
 		<div
 			ref={rootRef}
-			className="absolute inset-0 z-[44] bg-black/92 backdrop-blur-xl flex items-center justify-center px-16"
+			className="absolute inset-0 z-[44] bg-black/80 backdrop-blur-xl flex items-center justify-center px-16"
 			aria-hidden="true"
 		>
 			{/* El búho desarmado: nodos y líneas, muy por debajo del contenido. */}

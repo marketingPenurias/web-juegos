@@ -19,3 +19,26 @@ export function formatEur(value: number | null | undefined): string {
 		? `${n}€`
 		: `${n.toFixed(2).replace(".", ",")}€`;
 }
+
+/**
+ * Redondea —o no— un precio según lo que use la sala.
+ *
+ *   La Pocha trabaja con euros enteros: "un 3,50 € en barra no existe".  Eso
+ *   estaba metido a pelo en el guardado, así que su regla se la comían todas
+ *   las demás salas, y una discoteca que cobre 4,50 € por un chupito no podía
+ *   ponerlo: el panel le aceptaba el número y guardaba otro.
+ *
+ *   Ahora es un ajuste del local (`tenants.features.pricing.whole_euros`).
+ *   Por defecto NO se redondea: descartar en silencio lo que alguien acaba de
+ *   teclear es peor que enseñar un decimal de más.
+ */
+export function normalizePriceEur(value: number, wholeEuros: boolean): number {
+	return wholeEuros ? Math.round(value) : Math.round(value * 100) / 100;
+}
+
+/** Lee el ajuste del `features` jsonb de la sala. */
+export function usesWholeEuros(features: unknown): boolean {
+	const pricing = (features as { pricing?: { whole_euros?: unknown } } | null)
+		?.pricing;
+	return pricing?.whole_euros === true;
+}

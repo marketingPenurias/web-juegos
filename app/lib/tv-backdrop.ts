@@ -21,7 +21,7 @@ export type TvBackdrop = {
 	showRanking: boolean;
 	showBattle: boolean;
 	showNowPlaying: boolean;
-	/** Cuña de NightGraph cada pocos minutos (ver `PromoScreen`). */
+	/** Nuestra pantalla, al nivel del Top o la batalla (ver `PromoScreen`). */
 	showPromo: boolean;
 };
 
@@ -35,9 +35,9 @@ export const DEFAULT_TV_BACKDROP: TvBackdrop = {
 	showBattle: true,
 	// Apagado salvo que el DJ lo encienda: cambia el reparto de la pantalla.
 	showNowPlaying: false,
-	// Encendida por defecto.  Es nuestra cuña y sale seis veces por hora
-	// durante veinte segundos; el DJ la puede apagar en un toque.
-	showPromo: true,
+	// Apagada salvo que el DJ la ponga: cuando está encendida ES la pantalla,
+	// igual que el Top o la batalla, y nadie quiere que aparezca sola.
+	showPromo: false,
 };
 
 export function normalizeTvBackdrop(raw: RawTvBackdrop): TvBackdrop {
@@ -48,6 +48,6 @@ export function normalizeTvBackdrop(raw: RawTvBackdrop): TvBackdrop {
 		showRanking: raw?.showRanking !== false,
 		showBattle: raw?.showBattle !== false,
 		showNowPlaying: raw?.showNowPlaying === true,
-		showPromo: raw?.showPromo !== false,
+		showPromo: raw?.showPromo === true,
 	};
 }

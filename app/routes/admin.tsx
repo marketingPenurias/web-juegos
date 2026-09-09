@@ -722,7 +722,7 @@ type TvState = {
 	showBattle: boolean;
 	// V17: partir la pantalla mostrando la canción que suena ahora.
 	showNowPlaying: boolean;
-	// La cuña de NightGraph cada pocos minutos.
+	// Nuestra pantalla (NightGraph), al nivel del ranking o la batalla.
 	showPromo: boolean;
 };
 
@@ -741,7 +741,7 @@ function TvControlPanel({ slug, busy, onSet }: {
 		showRanking: true,
 		showBattle: true,
 		showNowPlaying: false,
-		showPromo: true,
+		showPromo: false,
 	});
 
 	// Aplica un cambio parcial: actualiza el estado local Y lo envía entero
@@ -819,16 +819,16 @@ function TvControlPanel({ slug, busy, onSet }: {
 					busy={busy}
 					onToggle={() => apply({ showNowPlaying: !sel.showNowPlaying })}
 				/>
-				{/* La cuña de la casa: 20 s cada 5 min, salvo duelo o flash drop. */}
+				{/* Nuestra pantalla: cuando se enciende, ocupa la tele entera. */}
 				<LayerToggle
-					label="Cuña NightGraph"
+					label="Pantalla NightGraph"
 					on={sel.showPromo}
 					busy={busy}
 					onToggle={() => apply({ showPromo: !sel.showPromo })}
 				/>
 			</div>
 			<p className="text-[10px] text-zinc-600 px-1">
-				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo. Activa <span className="text-cyan-300 font-bold">Canción actual</span> para partir la pantalla: ranking a la izquierda y la canción que suena a la derecha. La <span className="text-cyan-300 font-bold">cuña</span> ocupa la pantalla 20 segundos cada 5 minutos con el QR y cómo se juega; se calla sola durante una batalla o un flash drop.
+				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo. Activa <span className="text-cyan-300 font-bold">Canción actual</span> para partir la pantalla: ranking a la izquierda y la canción que suena a la derecha. La <span className="text-cyan-300 font-bold">pantalla NightGraph</span> es una pantalla más: mientras esté puesta ocupa la tele con el QR y cómo se juega, y una batalla en vivo sigue mandando por encima.
 			</p>
 
 			{/* Fijar una FOTO concreta (mode='photo') */}

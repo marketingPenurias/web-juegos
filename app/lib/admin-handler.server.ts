@@ -2,6 +2,7 @@ import type { AppLoadContext } from "react-router";
 import { jsonResponse, preflight, verifyAuthToken } from "./api.server";
 import { getServiceSupabase } from "./supabase.server";
 import { pickTenantSlug } from "./tenant-resolver.server";
+import { normalizePriceEur, usesWholeEuros } from "./money";
 
 /**
  * Handler de `/api/admin` — consola del DJ/Staff.
@@ -175,13 +176,16 @@ export async function handleAdminAction(
 	// Tenant
 	const { data: tenant } = await supabase
 		.from("tenants")
-		.select("id")
+		.select("id, features")
 		.eq("slug", slugResult.slug)
 		.maybeSingle();
 	if (!tenant) {
 		return jsonResponse({ ok: false, error: "unknown_tenant" }, { status: 404, request });
 	}
 	const tenant_id = tenant.id as string;
+	// ¿Esta sala trabaja con euros enteros?  La Pocha sí; otra discoteca puede
+	// cobrar 4,50 € por un chupito y tiene que poder ponerlo.
+	const wholeEuros = usesWholeEuros(tenant.features);
 
 	// ¿Es staff?  (gate único para todo el panel)
 	const { data: isStaff } = await supabase.rpc("is_tenant_staff", {
@@ -353,9 +357,9 @@ export async function handleAdminAction(
 			// V17: "Canción actual" (split view).  Default APAGADO (false) para
 			// no alterar el layout clásico salvo que el DJ lo active.
 			const showNowPlaying = body.tv_show_now_playing === true;
-			// La cuña de NightGraph.  Default ENCENDIDA: es nuestra, sale seis
-			// veces por hora y el DJ la apaga en un toque si estorba.
-			const showPromo = body.tv_show_promo !== false;
+			// Nuestra pantalla.  Default APAGADA: cuando se enciende ocupa la
+			// tele entera, así que la pone el DJ, no aparece sola.
+			const showPromo = body.tv_show_promo === true;
 			const tvBackdrop = { mode, url, showRanking, showBattle, showNowPlaying, showPromo };
 			// Read-modify-write del jsonb (un solo DJ lo toca; sin carrera real).
 			const { data: ev } = await supabase
@@ -828,15 +832,17 @@ export async function handleAdminAction(
 			if (!id) return jsonResponse({ ok: false, error: "product_required" }, { status: 400, request });
 			const patch: Record<string, unknown> = {};
 			if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 80);
-			// Precios sin decimales: es una regla del local, no una preferencia
-			// de formato — un "3,50 €" en barra no existe.
+			// Los euros enteros son la regla de ALGUNAS salas, no de todas.
+			// Estaba a pelo aquí, así que la preferencia de La Pocha se la
+			// comían las demás: quien pusiera 4,50 € veía cómo el panel se lo
+			// aceptaba y guardaba 5.
 			for (const key of ["list_price_eur", "promo_price_eur"] as const) {
 				const v = body[key];
 				if (v === undefined) continue;
 				if (!Number.isFinite(Number(v)) || Number(v) < 0) {
 					return jsonResponse({ ok: false, error: "invalid_price" }, { status: 400, request });
 				}
-				patch[key] = Math.round(Number(v));
+				patch[key] = normalizePriceEur(Number(v), wholeEuros);
 			}
 			if (typeof body.is_active === "boolean") patch.is_active = body.is_active;
 			if (Object.keys(patch).length === 0) {
@@ -922,7 +928,10 @@ export async function handleAdminAction(
 				days: days && days.length > 0 ? days : null,
 				hour_from: hf,
 				hour_to: ht,
-				promo_price_eur: body.promo_price_eur == null ? null : Math.round(Number(body.promo_price_eur)),
+				promo_price_eur:
+					body.promo_price_eur == null
+						? null
+						: normalizePriceEur(Number(body.promo_price_eur), wholeEuros),
 				max_per_night: body.max_per_night == null ? null : Number(body.max_per_night),
 				label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 80) : null,
 				is_active: body.is_active !== false,
