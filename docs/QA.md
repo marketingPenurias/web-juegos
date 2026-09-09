@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **8 de septiembre de 2026** · **37 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
+Estado a **9 de septiembre de 2026** · **52 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -44,6 +44,20 @@ que mirarla antes de desplegar.
 | Aplicar una plantilla | Conserva género y enlace |
 | Aplicar la misma plantilla dos veces | Añade 0 · no duplica |
 | Añadir dos veces la misma canción | Rechazada |
+
+### Pedirle una canción al DJ · v23
+
+| Caso | Resultado |
+| :-- | :-- |
+| Pedir una que el DJ tiene pero no cargó hoy | Aceptada |
+| Pedir una que ya está en la fiesta | Rechazada · que la voten |
+| La misma persona, dos veces | Rechazada |
+| **Otra persona pide la misma** | **La señal sube a 2** |
+| Cuarta petición de la noche | Rechazada · 3 por persona |
+| Lo que ve el DJ | Una fila por canción, la más pedida arriba |
+| Un cliente mirando el panel | No ve nada |
+| El DJ la acepta | Entra **con género y enlace al almacén** |
+| Aceptada o descartada | Sale de pendientes |
 
 ### Reset de votos al pinchar · v23
 

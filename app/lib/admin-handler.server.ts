@@ -18,7 +18,8 @@ import { normalizePriceEur, usesWholeEuros } from "./money";
  *     bootstrap · open_party · create_event · activate_event · update_event ·
  *     bulk_global · add_track · update_track · remove_track · now_playing ·
  *     stop_now_playing · start_battle · force_close_battle · metrics ·
- *     save_template · apply_template · delete_template
+ *     save_template · apply_template · delete_template ·
+ *     track_requests · add_requested_track · dismiss_request
  */
 
 type AdminBody = {
@@ -384,6 +385,45 @@ export async function handleAdminAction(
 				table_name: "tenant_events", record_id: eventId, new_data: tvBackdrop,
 			});
 			return jsonResponse({ ok: true, backdrop: tvBackdrop }, { request });
+		}
+
+		// ── Peticiones de la sala (v23) ───────────────────────────────
+		//
+		//   Lo que la gente le ha pedido al DJ desde el móvil, agrupado por
+		//   canción.  Lo que decide no es la petición suelta sino cuánta
+		//   gente pide lo mismo, así que el RPC ya viene ordenado por eso.
+		case "track_requests": {
+			const eventId = String(body.event_id ?? "");
+			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("get_track_requests", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId, p_event_id: eventId,
+			});
+			if (error) return jsonResponse({ ok: false, error: "requests_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse({ ok: true, requests: data ?? [] }, { request });
+		}
+
+		case "add_requested_track": {
+			const eventId = String(body.event_id ?? "");
+			const globalId = String(body.global_id ?? "");
+			if (!eventId || !globalId) return jsonResponse({ ok: false, error: "event_and_track_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("admin_add_requested_track", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: eventId, p_global_track_id: globalId,
+			});
+			if (error) return jsonResponse({ ok: false, error: "add_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
+		}
+
+		case "dismiss_request": {
+			const eventId = String(body.event_id ?? "");
+			const globalId = String(body.global_id ?? "");
+			if (!eventId || !globalId) return jsonResponse({ ok: false, error: "event_and_track_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("admin_dismiss_request", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: eventId, p_global_track_id: globalId,
+			});
+			if (error) return jsonResponse({ ok: false, error: "dismiss_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
 		case "now_playing": {

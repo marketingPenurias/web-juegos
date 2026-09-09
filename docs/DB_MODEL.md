@@ -112,6 +112,17 @@ consumo en barra e ingreso real por `campaign_code`.
 **`track_votes`** (PK `id`, UNIQUE `(event_id,track_id,user_id)`) — un voto por canción por usuario.
 - `tenant_id` · `event_id` · `track_id`→event_tracks · `user_id`→user_profiles
   · `vote_type text` (CHECK `free|boost`) · `tokens_spent int` d0
+
+**`track_requests`** (PK `id`, UNIQUE `(event_id,user_id,global_track_id)`) — v23.
+Pedirle al DJ una canción del ALMACÉN que no cargó esta noche.
+  · `tenant_id`→tenants · `event_id`→tenant_events · `user_id`→user_profiles
+  · `global_track_id`→global_tracks (NOT NULL: se pide de la biblioteca, nunca
+    texto libre) · `status text` d`pending` (CHECK `pending|added|dismissed`)
+  · `created_at` · `resolved_at` · `resolved_by uuid` (uid de AUTH del staff,
+    **sin foránea** — el DJ no tiene por qué ser cliente de la sala)
+  · Índices: `track_requests_event_status_idx (event_id, status)`
+  · RLS: SELECT lo tuyo **o** staff del tenant · UPDATE sólo staff · el INSERT
+    va por `request_track` (SECURITY DEFINER), nunca a mano.
   · **`context text`** (V19: `jukebox`/`livebattle`/… para el presupuesto de jukebox) · `created_at`
 
 **`live_battles`** (PK `id`) — duelo de 2 temas.
@@ -534,6 +545,23 @@ begin
 end; $$;
 ```
 
+### 6.4.b Peticiones de canciones (v23)
+
+- `request_track(tenant, user, event, global_track)` → `{ok, title, artist,
+  requests, remaining}`. Rechaza con `already_in_party` (que la voten, no que
+  la pidan), `already_requested` y `request_limit` (**3 por persona y noche de
+  negocio**). `requests` es cuánta gente ha pedido ESA canción — la señal que
+  usa el DJ.
+- `get_track_requests(tenant, actor, event)` → tabla agrupada POR CANCIÓN con
+  `people` y `first_asked`, ordenada por gente desc. Staff-gated (devuelve
+  vacío si no lo eres). Una fila por petición sería una bandeja de entrada;
+  agrupado es una decisión.
+- `admin_add_requested_track(tenant, actor, event, global_track)` → copia el
+  tema a `event_tracks` **con `genre` y `global_track_id`** (el sexto camino
+  de copia; los cinco anteriores se los dejaban, ver migración 45) y marca las
+  peticiones como `added`. Audita.
+- `admin_dismiss_request(tenant, actor, event, global_track)` → `dismissed`.
+
 ### 6.5 Panel DJ / Staff (todas validan `is_tenant_staff` y escriben en `audit_logs`)
 
 - `admin_open_party(tenant, actor, name?)` → crea/devuelve la fiesta activa (10h).
@@ -550,6 +578,19 @@ end; $$;
   checkins_today, active_players}` (todo por `business_night`). **v23:
   `total_votes` se cuenta desde `track_votes` (boost pondera 5), no sumando
   `event_tracks.total_votes`** — ese contador ahora se resetea al pinchar.
+
+### 6.5.b Cambios de v23 en la pantalla y la carta
+
+- **`tenants.features`** admite `pricing.whole_euros` (bool, default **false**).
+  Los euros enteros son la regla de La Pocha, no de todas las salas: estaba a
+  pelo en el guardado y una discoteca que cobre 4,50 € no podía ponerlo. Lo lee
+  `admin-handler` (`usesWholeEuros`) y lo aplica `normalizePriceEur`.
+- **`tenant_events.metadata.tv_backdrop`** gana `showPromo` (default `false`) —
+  nuestra pantalla en la tele, al nivel del Top o la batalla. La forma y los
+  valores por defecto viven SÓLO en `app/lib/tv-backdrop.ts`; antes estaban
+  copiados en cuatro sitios.
+- **`product_availability`** ahora se sirve a la TV con `valid_from`, para
+  distinguir un flash drop recién lanzado de uno que lleva media hora.
 
 ### 6.6 Check-in / fidelidad
 

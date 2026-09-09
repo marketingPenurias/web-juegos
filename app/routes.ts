@@ -15,6 +15,7 @@ export default [
 	route("api/checkin", "routes/api.checkin.ts"),
 	route("api/admin", "routes/api.admin.ts"),
 	route("api/tv", "routes/api.tv.ts"),
+	route("api/requests", "routes/api.requests.ts"),
 	route("auth/callback", "routes/auth.callback.tsx"),
 	route("checkin", "routes/checkin.tsx"),
 	route("admin", "routes/admin.tsx"),
