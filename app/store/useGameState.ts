@@ -207,7 +207,13 @@ export const useGameState = create<GameState>()(
 			tokens: 450,
 			streak: 3,
 			currentScreen: "onboarding",
-			friends: ["Andrea", "Mario", "Lucía", "Carlos"],
+			// Arranca VACÍA a propósito.  Antes venían cuatro nombres
+			// inventados ("Andrea", "Mario"…) y en la pantalla eso no se lee
+			// como un ejemplo: se lee como una lista ya hecha.  Nadie toca lo
+			// que parece correcto, así que la gente giraba la ruleta con los
+			// nombres de unos desconocidos.  Dos huecos vacíos —el mínimo para
+			// jugar— piden que los rellenes.
+			friends: ["", ""],
 
 			userProfileId: null,
 			lifetimeEarned: 0,

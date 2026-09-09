@@ -91,6 +91,11 @@ se mueve: ruleta (+15), Tinder (+25), batalla (+10) y reto de mesa (+40).
 | Caso | Resultado |
 | :-- | :-- |
 | **Ruleta de Rondas** | Gira, elige, y paga **+15** · 75 → 90 |
+| La ruleta arranca vacía | Sí · ya no vienen 4 nombres inventados |
+| Un sector por nombre escrito | Sí · y desaparece al borrarlo |
+| No se puede girar sin gente | El botón dice cuántos nombres faltan |
+| **La flecha señala al que paga** | **Sí, también a partir de la 2ª tirada** |
+| Los nombres de la rueda | Del derecho en las dos mitades |
 | **Tinder Musical** | 5 swipes, paga **+25** · 90 → 115 |
 | Los «temazo» del Tinder cuentan como voto | 3 votos registrados |
 | **Jukebox** | Catálogo completo, 759 temas |
@@ -166,6 +171,9 @@ Sirve para saber dónde mirar la próxima vez:
 | **El cliente pregunta una sola vez** | La fiesta activa, que se queda vieja en el móvil |
 | **Un valor de maqueta que sobrevivió** | «Día 1 de piloto» |
 | **El orden de dos acciones importa y nadie lo dice** | Activar la fiesta antes de cargar las canciones |
+| **Un dato de ejemplo que parece un dato real** | Los cuatro nombres de la ruleta |
+| **Un acumulador que no se normaliza** | El giro de la ruleta, que desde la 2ª tirada apuntaba a otro |
+| **La animación decide si se ve la interfaz** | La entrada con `opacity: 0` de la ruleta |
 
 Cuatro de los seis **no dan error**: devuelven un dato válido pero equivocado.
 Por eso el QA tiene que comparar contra lo esperado, y no solo comprobar que
