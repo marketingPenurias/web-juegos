@@ -2,6 +2,7 @@ import type { AppLoadContext } from "react-router";
 import { jsonResponse, preflight, verifyAuthToken } from "./api.server";
 import { getServiceSupabase } from "./supabase.server";
 import { pickTenantSlug } from "./tenant-resolver.server";
+import { normalizePriceEur, usesWholeEuros } from "./money";
 
 /**
  * Handler de `/api/admin` — consola del DJ/Staff.
@@ -17,7 +18,8 @@ import { pickTenantSlug } from "./tenant-resolver.server";
  *     bootstrap · open_party · create_event · activate_event · update_event ·
  *     bulk_global · add_track · update_track · remove_track · now_playing ·
  *     stop_now_playing · start_battle · force_close_battle · metrics ·
- *     save_template · apply_template · delete_template
+ *     save_template · apply_template · delete_template ·
+ *     track_requests · add_requested_track · dismiss_request
  */
 
 type AdminBody = {
@@ -50,6 +52,7 @@ type AdminBody = {
 	// V17: partir la pantalla mostrando la canción que suena ahora (mitad
 	// derecha) junto al ranking (mitad izquierda).
 	tv_show_now_playing?: boolean;
+	tv_show_promo?: boolean;
 	// V21: Flash Drops — promoción con caducidad y stock lanzada por el DJ.
 	product_id?: string;
 	promo_price_eur?: number;
@@ -174,13 +177,16 @@ export async function handleAdminAction(
 	// Tenant
 	const { data: tenant } = await supabase
 		.from("tenants")
-		.select("id")
+		.select("id, features")
 		.eq("slug", slugResult.slug)
 		.maybeSingle();
 	if (!tenant) {
 		return jsonResponse({ ok: false, error: "unknown_tenant" }, { status: 404, request });
 	}
 	const tenant_id = tenant.id as string;
+	// ¿Esta sala trabaja con euros enteros?  La Pocha sí; otra discoteca puede
+	// cobrar 4,50 € por un chupito y tiene que poder ponerlo.
+	const wholeEuros = usesWholeEuros(tenant.features);
 
 	// ¿Es staff?  (gate único para todo el panel)
 	const { data: isStaff } = await supabase.rpc("is_tenant_staff", {
@@ -352,7 +358,10 @@ export async function handleAdminAction(
 			// V17: "Canción actual" (split view).  Default APAGADO (false) para
 			// no alterar el layout clásico salvo que el DJ lo active.
 			const showNowPlaying = body.tv_show_now_playing === true;
-			const tvBackdrop = { mode, url, showRanking, showBattle, showNowPlaying };
+			// Nuestra pantalla.  Default APAGADA: cuando se enciende ocupa la
+			// tele entera, así que la pone el DJ, no aparece sola.
+			const showPromo = body.tv_show_promo === true;
+			const tvBackdrop = { mode, url, showRanking, showBattle, showNowPlaying, showPromo };
 			// Read-modify-write del jsonb (un solo DJ lo toca; sin carrera real).
 			const { data: ev } = await supabase
 				.from("tenant_events")
@@ -376,6 +385,45 @@ export async function handleAdminAction(
 				table_name: "tenant_events", record_id: eventId, new_data: tvBackdrop,
 			});
 			return jsonResponse({ ok: true, backdrop: tvBackdrop }, { request });
+		}
+
+		// ── Peticiones de la sala (v23) ───────────────────────────────
+		//
+		//   Lo que la gente le ha pedido al DJ desde el móvil, agrupado por
+		//   canción.  Lo que decide no es la petición suelta sino cuánta
+		//   gente pide lo mismo, así que el RPC ya viene ordenado por eso.
+		case "track_requests": {
+			const eventId = String(body.event_id ?? "");
+			if (!eventId) return jsonResponse({ ok: false, error: "event_id_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("get_track_requests", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId, p_event_id: eventId,
+			});
+			if (error) return jsonResponse({ ok: false, error: "requests_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse({ ok: true, requests: data ?? [] }, { request });
+		}
+
+		case "add_requested_track": {
+			const eventId = String(body.event_id ?? "");
+			const globalId = String(body.global_id ?? "");
+			if (!eventId || !globalId) return jsonResponse({ ok: false, error: "event_and_track_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("admin_add_requested_track", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: eventId, p_global_track_id: globalId,
+			});
+			if (error) return jsonResponse({ ok: false, error: "add_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
+		}
+
+		case "dismiss_request": {
+			const eventId = String(body.event_id ?? "");
+			const globalId = String(body.global_id ?? "");
+			if (!eventId || !globalId) return jsonResponse({ ok: false, error: "event_and_track_required" }, { status: 400, request });
+			const { data, error } = await supabase.rpc("admin_dismiss_request", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: eventId, p_global_track_id: globalId,
+			});
+			if (error) return jsonResponse({ ok: false, error: "dismiss_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
 		case "now_playing": {
@@ -824,15 +872,17 @@ export async function handleAdminAction(
 			if (!id) return jsonResponse({ ok: false, error: "product_required" }, { status: 400, request });
 			const patch: Record<string, unknown> = {};
 			if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 80);
-			// Precios sin decimales: es una regla del local, no una preferencia
-			// de formato — un "3,50 €" en barra no existe.
+			// Los euros enteros son la regla de ALGUNAS salas, no de todas.
+			// Estaba a pelo aquí, así que la preferencia de La Pocha se la
+			// comían las demás: quien pusiera 4,50 € veía cómo el panel se lo
+			// aceptaba y guardaba 5.
 			for (const key of ["list_price_eur", "promo_price_eur"] as const) {
 				const v = body[key];
 				if (v === undefined) continue;
 				if (!Number.isFinite(Number(v)) || Number(v) < 0) {
 					return jsonResponse({ ok: false, error: "invalid_price" }, { status: 400, request });
 				}
-				patch[key] = Math.round(Number(v));
+				patch[key] = normalizePriceEur(Number(v), wholeEuros);
 			}
 			if (typeof body.is_active === "boolean") patch.is_active = body.is_active;
 			if (Object.keys(patch).length === 0) {
@@ -918,7 +968,10 @@ export async function handleAdminAction(
 				days: days && days.length > 0 ? days : null,
 				hour_from: hf,
 				hour_to: ht,
-				promo_price_eur: body.promo_price_eur == null ? null : Math.round(Number(body.promo_price_eur)),
+				promo_price_eur:
+					body.promo_price_eur == null
+						? null
+						: normalizePriceEur(Number(body.promo_price_eur), wholeEuros),
 				max_per_night: body.max_per_night == null ? null : Number(body.max_per_night),
 				label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 80) : null,
 				is_active: body.is_active !== false,

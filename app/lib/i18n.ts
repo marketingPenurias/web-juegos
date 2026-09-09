@@ -15,6 +15,10 @@ const resources = {
 			},
 			lang: { es: "ES", en: "EN", switch: "Cambiar idioma" },
 			nav: { hub: "Hub", live: "Live", menu: "Menú", ticket: "Ticket", battleLive: "¡Batalla!" },
+			splash: {
+				loading: "Preparando tu noche…",
+				slow: "La conexión del local va lenta. Seguimos intentándolo.",
+			},
 			birthGate: {
 				title: "¿Cuándo es tu cumple?",
 				subtitle:
@@ -202,6 +206,13 @@ const resources = {
 				errGeneric: "No se pudo guardar el premio",
 				miniGame: "Mini-juego",
 				title: "Ruleta Rusa de Rondas",
+				whoPlays: "¿Quién juega?",
+				namePlaceholder: "Escribe un nombre",
+				removeThis: "Quitar a la persona {{n}}",
+				emptyWheel: "Escribid vuestros nombres y la ruleta se monta sola",
+				stake: "Al que le toque, paga la ronda",
+				needNames_one: "Falta 1 nombre",
+				needNames_other: "Faltan {{count}} nombres",
 				friend: "Amigo {{n}}",
 				friendName: "Nombre amigo {{n}}",
 				players: "{{n}} jugadores",
@@ -255,6 +266,19 @@ const resources = {
 				title: "Pídele al DJ",
 				subtitle:
 					"Pedir es gratis. Boostea con 50 tokens y tu canción salta al primer puesto.",
+				// Lucía, tras una noche en la sala: la gente busca su tema, no está,
+				// y concluye "vaya mierda, esto no funciona".  El problema no es que
+				// falte: es que nadie le ha dicho que la lista la elige el DJ.
+				djOnly: "Solo puedes pedir las canciones que ha elegido el DJ.",
+				ask: "Pedirla",
+				askTitle: "El DJ tiene estas guardadas · pídeselas",
+				askSearching: "Mirando lo que tiene el DJ…",
+				asked: "Pedida · el DJ la verá en su panel",
+				askedShort: "Pedida",
+				askedWithOthers: "Pedida · ya sois {{n}} pidiéndola",
+				askedAlready: "Esta ya la habías pedido",
+				askLimit: "Puedes pedir {{n}} canciones por noche",
+				askFailed: "No se pudo pedir · inténtalo otra vez",
 				searchPlaceholder: "Busca una canción o artista…",
 				request: "Pedir",
 				requested: "Pedida",
@@ -262,6 +286,8 @@ const resources = {
 				boostAria: "Boost por {{n}} tokens",
 				boostedTag: "TOP",
 				noResults: "No hay canciones que coincidan",
+				noResultsHint:
+					"La lista la elige el DJ de la sala, así que no están todas las canciones del mundo. Prueba con otro artista.",
 				genreAll: "Todos",
 				toastRequested: "Pedida al DJ ✓",
 				toastBoosted: "🔥 Boost activado · primera de la cola",
@@ -314,6 +340,10 @@ const resources = {
 			},
 			lang: { es: "ES", en: "EN", switch: "Change language" },
 			nav: { hub: "Hub", live: "Live", menu: "Menu", ticket: "Ticket", battleLive: "Battle!" },
+			splash: {
+				loading: "Getting your night ready…",
+				slow: "The venue's connection is slow. Still trying.",
+			},
 			birthGate: {
 				title: "When's your birthday?",
 				subtitle:
@@ -461,6 +491,13 @@ const resources = {
 			ruleta: {
 				miniGame: "Mini-game",
 				title: "Round Russian Roulette",
+				whoPlays: "Who's playing?",
+				namePlaceholder: "Type a name",
+				removeThis: "Remove person {{n}}",
+				emptyWheel: "Type your names and the wheel builds itself",
+				stake: "Whoever it lands on buys the round",
+				needNames_one: "1 name missing",
+				needNames_other: "{{count}} names missing",
 				friend: "Friend {{n}}",
 				friendName: "Friend {{n}} name",
 				players: "{{n}} players",
@@ -506,6 +543,16 @@ const resources = {
 				title: "Tell the DJ",
 				subtitle:
 					"Requests are free. Spend 50 tokens to boost your song to the top of the queue.",
+				djOnly: "You can only request songs the DJ has picked.",
+				ask: "Ask for it",
+				askTitle: "The DJ has these saved · ask for them",
+				askSearching: "Checking what the DJ has…",
+				asked: "Asked · the DJ will see it",
+				askedShort: "Asked",
+				askedWithOthers: "Asked · {{n}} of you have asked for it",
+				askedAlready: "You already asked for this one",
+				askLimit: "You can ask for {{n}} songs a night",
+				askFailed: "Couldn't ask · try again",
 				searchPlaceholder: "Search a song or artist…",
 				request: "Request",
 				requested: "Sent",
@@ -513,6 +560,8 @@ const resources = {
 				boostAria: "Boost for {{n}} tokens",
 				boostedTag: "TOP",
 				noResults: "No matching songs",
+				noResultsHint:
+					"The venue's DJ picks the list, so it isn't every song in the world. Try another artist.",
 				genreAll: "All",
 				toastRequested: "Request sent ✓",
 				toastBoosted: "🔥 Boost on · first in queue",

@@ -9,6 +9,7 @@ import { BottomNav } from "./BottomNav";
 import { RedemptionScreen } from "./RedemptionScreen";
 import { CheckinResultModal } from "./CheckinResultModal";
 import { BirthDateGate } from "./BirthDateGate";
+import { SplashLoader } from "./SplashLoader";
 import { NowPlaying } from "./NowPlaying";
 import { Onboarding } from "../screens/Onboarding";
 import { Hub } from "../screens/Hub";
@@ -31,6 +32,14 @@ export default function LaPochaApp() {
 	// Un único canal para saber si hay duelo en vivo → aviso flotante en el nav.
 	useActiveBattle();
 	const currentScreen = useGameState((s) => s.currentScreen);
+	// Mientras no sepamos quién es el que ha entrado no se pinta la app: el
+	// store arranca con los valores de maqueta (450 fichas, racha 3) y
+	// `currentScreen` está persistido, así que quien vuelve caería en el Hub
+	// viendo un saldo que no es el suyo.  Onboarding se excluye porque ahí no
+	// hay nada que falsear y es la primera pantalla del que no ha entrado
+	// nunca.
+	const sessionPending = useGameState((s) => s.sessionPending);
+	const booting = sessionPending && currentScreen !== "onboarding";
 	const activeRedemption = useGameState((s) => s.activeRedemption);
 	const closeRedemption = useGameState((s) => s.closeRedemption);
 	const { consume } = useRewards();
@@ -54,9 +63,15 @@ export default function LaPochaApp() {
 			<div className="ambient-blob top-[30%] left-[55%] w-[35vw] h-[35vw] max-w-[600px] max-h-[600px] bg-blue-700/20 hidden sm:block" />
 
 			<AppFrame>
-				<ScreenRouter screen={currentScreen} />
-				{showNav && <NowPlaying />}
-				{showNav && <BottomNav />}
+				{booting ? (
+					<SplashLoader />
+				) : (
+					<>
+						<ScreenRouter screen={currentScreen} />
+						{showNav && <NowPlaying />}
+						{showNav && <BottomNav />}
+					</>
+				)}
 			</AppFrame>
 
 			{activeRedemption && (

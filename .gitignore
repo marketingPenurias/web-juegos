@@ -206,3 +206,7 @@ dist
 ### graphify (grafo local regenerable; contiene rutas de máquina) ###
 graphify-out/
 .deck-inversion/
+
+# Material comercial/financiero: NUNCA en el repo.
+docs/*.docx
+docs/*.xlsx

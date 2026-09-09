@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **4 de septiembre de 2026** · **27 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
+Estado a **9 de septiembre de 2026** · **52 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -45,6 +45,34 @@ que mirarla antes de desplegar.
 | Aplicar la misma plantilla dos veces | Añade 0 · no duplica |
 | Añadir dos veces la misma canción | Rechazada |
 
+### Pedirle una canción al DJ · v23
+
+| Caso | Resultado |
+| :-- | :-- |
+| Pedir una que el DJ tiene pero no cargó hoy | Aceptada |
+| Pedir una que ya está en la fiesta | Rechazada · que la voten |
+| La misma persona, dos veces | Rechazada |
+| **Otra persona pide la misma** | **La señal sube a 2** |
+| Cuarta petición de la noche | Rechazada · 3 por persona |
+| Lo que ve el DJ | Una fila por canción, la más pedida arriba |
+| Un cliente mirando el panel | No ve nada |
+| El DJ la acepta | Entra **con género y enlace al almacén** |
+| Aceptada o descartada | Sale de pendientes |
+
+### Reset de votos al pinchar · v23
+
+| Caso | Resultado |
+| :-- | :-- |
+| Votar un tema | El contador sube a 1 |
+| **Javi la pincha** | **El contador vuelve a 0** · y se limpia el desempate |
+| El voto | **NO se pierde** · sigue en `track_votes` |
+| El panel del DJ | Lo sigue contando |
+| El ranking de la TV | La saca al momento, sin esperar 2h |
+| Quien ya la votó | No la puede revotar (`already_voted`) |
+| Quien no la había votado | La sube otra vez, desde 1 |
+| El total acumulado | Suma · no se resetea |
+| **Pinchar un tema en duelo** | **NO lo deja a 0** · perdería la batalla solo |
+
 ### Check-in y referidos
 
 | Caso | Resultado |
@@ -77,6 +105,11 @@ se mueve: ruleta (+15), Tinder (+25), batalla (+10) y reto de mesa (+40).
 | Caso | Resultado |
 | :-- | :-- |
 | **Ruleta de Rondas** | Gira, elige, y paga **+15** · 75 → 90 |
+| La ruleta arranca vacía | Sí · ya no vienen 4 nombres inventados |
+| Un sector por nombre escrito | Sí · y desaparece al borrarlo |
+| No se puede girar sin gente | El botón dice cuántos nombres faltan |
+| **La flecha señala al que paga** | **Sí, también a partir de la 2ª tirada** |
+| Los nombres de la rueda | Del derecho en las dos mitades |
 | **Tinder Musical** | 5 swipes, paga **+25** · 90 → 115 |
 | Los «temazo» del Tinder cuentan como voto | 3 votos registrados |
 | **Jukebox** | Catálogo completo, 759 temas |
@@ -94,6 +127,15 @@ se mueve: ruleta (+15), Tinder (+25), batalla (+10) y reto de mesa (+40).
 | Precio del drop con decimales | «2,50€», no «3€» |
 | Racha en la app | La real, no «Día 1 de piloto» |
 
+### Arranque de la app
+
+| Caso | Resultado |
+| :-- | :-- |
+| Entrar por el QR estando ya registrado | Splash con el logo, **no** el Hub con 450 fichas |
+| Onboarding | Sin splash · no hay nada que falsear |
+| La sesión tarda | A los 4 s avisa de que la conexión va lenta |
+| La sesión no llega nunca | A los 8 s deja pasar igualmente · no se queda colgado |
+
 ---
 
 ## Ámbar · no probado todavía
@@ -105,11 +147,17 @@ que no lo sabemos.**
   de punta a punta; la parte del DJ (lanzar y cerrar) sí está probada.
 - **Pedir y boostear una canción** desde el Jukebox. El catálogo carga, pero
   no se ha pulsado PEDIR ni BOOST.
+- **El aviso nuevo del Jukebox** («solo las canciones que ha elegido el DJ»)
+  está escrito y compila, pero no se ha visto con una sesión real delante.
 - **Las pantallas de TV.** Ni el jumbotron ni el dashboard de pantalla.
 - **El circuito de invitación desde dos teléfonos.** La maquinaria está
   probada y paga bien; falta el recorrido humano: A comparte, B abre el enlace,
   B se registra, B escanea.
 - **Subida de fotos y vídeo del local**, y el carrusel de fondo.
+- **La cuña de NightGraph en la TV.** Maquetada y vista en 16:9, pero no se ha
+  visto entrar y salir sola en una pantalla real durante una noche.
+- **El aviso de lanzamiento del flash drop.** Igual: maquetado, pero no se ha
+  visto saltar al lanzar un drop de verdad ni callarse en una reconexión.
 - **Comportamiento con mala conexión**, que es la condición normal de un local.
 
 ---
@@ -137,10 +185,13 @@ Sirve para saber dónde mirar la próxima vez:
 | :-- | :-- |
 | **Una regla comparaba la magnitud equivocada** | Elegir la oferta por euros cuando se paga en fichas |
 | **Un dato se cae al copiarlo de una tabla a otra** | El género al meter canciones en una fiesta |
-| **Formato que redondea** | «3€» cuando son 2,50 € |
+| **Formato que redondea** | «3€» cuando son 2,50 € · dos veces: en la BD y otra vez en la TV |
 | **El cliente pregunta una sola vez** | La fiesta activa, que se queda vieja en el móvil |
 | **Un valor de maqueta que sobrevivió** | «Día 1 de piloto» |
 | **El orden de dos acciones importa y nadie lo dice** | Activar la fiesta antes de cargar las canciones |
+| **Un dato de ejemplo que parece un dato real** | Los cuatro nombres de la ruleta |
+| **Un acumulador que no se normaliza** | El giro de la ruleta, que desde la 2ª tirada apuntaba a otro |
+| **La animación decide si se ve la interfaz** | La entrada con `opacity: 0` de la ruleta |
 
 Cuatro de los seis **no dan error**: devuelven un dato válido pero equivocado.
 Por eso el QA tiene que comparar contra lo esperado, y no solo comprobar que

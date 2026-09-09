@@ -12,6 +12,14 @@ import {
 } from "./tv/RedemptionTicker";
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { VenueBackdrop } from "./VenueBackdrop";
+import { PromoScreen } from "./tv/PromoScreen";
+import { FlashDropAlert } from "./tv/FlashDropAlert";
+import {
+	DEFAULT_TV_BACKDROP,
+	normalizeTvBackdrop,
+	type RawTvBackdrop,
+	type TvBackdrop,
+} from "../lib/tv-backdrop";
 import { cn } from "../lib/utils";
 import type { Track } from "./tv/types";
 import { DuelSide } from "./tv/DuelSide";
@@ -41,15 +49,11 @@ type Battle = { id: string; endsAt: string; a: Track; b: Track };
  *          photo    → una foto fija (`url`), vídeo pausado
  *          carousel → MIXTO: vídeo de base + fotos rotando encima
  *   showRanking → mostrar el Top de la noche (false = sólo fondo)
- *   showBattle  → mostrar la batalla de temas cuando haya una en vivo */
-type TvBackdrop = {
-	mode: "video" | "photo" | "carousel";
-	url: string | null;
-	showRanking: boolean;
-	showBattle: boolean;
-	// V17: partir la pantalla mostrando "Canción actual" en la mitad derecha.
-	showNowPlaying: boolean;
-};
+ *   showBattle  → mostrar la batalla de temas cuando haya una en vivo
+ *   showPromo   → la cuña de NightGraph cada pocos minutos
+ *
+ *   La forma y los valores por defecto viven en `lib/tv-backdrop`, que es el
+ *   único sitio que los conoce. */
 
 type Props = {
 	tenantId: string;
@@ -69,9 +73,6 @@ type Props = {
 const ROW_HEIGHT = 96; // px — must match the row's CSS height
 const MAX_ROWS = 8;
 
-// Ventana de ocultación V17: una canción sonada no vuelve al ranking hasta
-// pasadas 2h (mientras, is_played la oculta; después, played_at).
-const HIDE_MS = 2 * 60 * 60 * 1000;
 // Red de la TV: Realtime PRIMARIO (event_tracks votos + is_played,
 // live_battles ganador, tenant_events fondo) y este poll como FALLBACK de
 // seguridad — con 1 pantalla por local el coste es despreciable.
@@ -117,7 +118,7 @@ export function Jumbotron({
 	// no dupliquen el mismo canje.
 	const announcedRef = useRef<Set<string>>(new Set());
 	const [backdrop, setBackdrop] = useState<TvBackdrop>(
-		initialBackdrop ?? { mode: "carousel", url: null, showRanking: true, showBattle: true, showNowPlaying: false },
+		initialBackdrop ?? DEFAULT_TV_BACKDROP,
 	);
 	// Vídeo de fondo del local (siempre disponible si el tenant lo configuró).
 	const bgVideoUrl = tenant.bgVideoUrl ?? null;
@@ -194,25 +195,30 @@ export function Jumbotron({
 	};
 	const qrTarget = buildQrTarget();
 
-	// Ranking visible (V20).  MISMA regla que el RPC `tv_ranking` de la BD —
+	// Ranking visible (V23).  MISMA regla que el RPC `tv_ranking` de la BD —
 	// aquí se replica porque el Realtime entrega filas sueltas y no queremos que
 	// se cuelen ni un frame antes del siguiente poll:
 	//   · sólo temas CON votos (fuera el relleno sin votar);
-	//   · fuera el que suena ahora;
-	//   · un tema ya sonado vuelve SÓLO si lo re-votan (last_vote_at > played_at)
-	//     o si han pasado 2h desde que sonó.
-	// Nada de esto borra datos: total_votes y track_votes quedan intactos, así
-	// que al reaparecer conserva TODOS sus votos.
+	//   · fuera el que suena ahora.
+	//
+	// Antes había una tercera regla —esconder 2h la que ya había sonado— que
+	// existía para tapar un agujero: el contador no se reseteaba al pincharla,
+	// así que volvía al ranking con todos sus votos y se plantaba arriba.  El
+	// 05/09, 33 de las 48 del ranking eran eso.
+	//
+	// Desde la migración 48, `admin_set_now_playing` pone el contador a cero,
+	// y el filtro `total_votes > 0` la deja fuera él solo.  Si alguien que aún
+	// no la había votado la vota, vuelve a subir desde cero: eso es demanda
+	// nueva, no el eco de hace tres horas.
+	//
+	// Los votos NO se pierden: viven en `track_votes`, que es de donde salen
+	// las métricas.  Lo que se resetea es el contador del ranking.
 	const sorted = useMemo(() => {
-		const cutoff = Date.now() - HIDE_MS;
 		return [...tracks]
 			.filter((t) => {
 				if (t.total_votes <= 0) return false;
 				if (t.is_played) return false;
-				if (!t.played_at) return true;
-				const playedAt = Date.parse(t.played_at);
-				const reVoted = t.last_vote_at && Date.parse(t.last_vote_at) > playedAt;
-				return Boolean(reVoted) || playedAt < cutoff;
+				return true;
 			})
 			.sort((a, b) => {
 				if (b.total_votes !== a.total_votes) return b.total_votes - a.total_votes;
@@ -299,17 +305,9 @@ export function Jumbotron({
 				{ event: "UPDATE", schema: "public", table: "tenant_events", filter: `id=eq.${eventId}` },
 				(payload) => {
 					const meta = (payload.new as { metadata?: Record<string, unknown> })?.metadata ?? null;
-					const raw = (meta?.tv_backdrop ?? null) as
-						| { mode?: string; url?: string | null; showRanking?: boolean; showBattle?: boolean; showNowPlaying?: boolean }
-						| null;
-					const m = raw?.mode;
-					setBackdrop({
-						mode: m === "video" || m === "photo" ? m : "carousel",
-						url: typeof raw?.url === "string" ? raw.url : null,
-						showRanking: raw?.showRanking !== false, // default true
-						showBattle: raw?.showBattle !== false, // default true
-						showNowPlaying: raw?.showNowPlaying === true, // default false
-					});
+					setBackdrop(
+						normalizeTvBackdrop((meta?.tv_backdrop ?? null) as RawTvBackdrop),
+					);
 				},
 			)
 			.subscribe();
@@ -352,6 +350,8 @@ export function Jumbotron({
 							? (cur?.promo_price_eur ?? null)
 							: Number(row.promo_price_eur),
 					list_price_eur: cur?.list_price_eur ?? null,
+					valid_from:
+						(row.valid_from as string | null) ?? cur?.valid_from ?? null,
 					valid_to: (row.valid_to as string | null) ?? null,
 					stock_total:
 						row.stock_total === null || row.stock_total === undefined
@@ -497,8 +497,7 @@ export function Jumbotron({
 		setConnected(true);
 
 		// 1) Ranking — RPC `tv_ranking`: la regla de visibilidad vive UNA sola vez
-		//    (en SQL) y la comparte servidor y TV.  Hace falta porque compara dos
-		//    columnas (last_vote_at > played_at) y PostgREST no puede expresarlo.
+		//    (en SQL) y la comparte servidor y TV.
 		const { data: top } = await supabase.rpc("tv_ranking", {
 			p_event_id: eventId,
 			p_limit: MAX_ROWS + 2,
@@ -716,7 +715,14 @@ export function Jumbotron({
 	// V17: "Canción actual" (split).  Se muestra en ambas TVs cuando el DJ lo
 	// activa; ocupa la mitad derecha junto al ranking.
 	const displayNowPlaying = backdrop.showNowPlaying;
+	// Nuestra pantalla, al mismo nivel que el Top o la batalla: cuando el DJ la
+	// pone, ES la pantalla.  La batalla sigue mandando por encima porque tiene
+	// reloj y se acaba sola.
+	const displayPromo = backdrop.showPromo && !displayBattle;
 	const cleanMode = !displayBattle && !displayRanking && !displayNowPlaying;
+	// Sin cabecera ni pie cuando manda nuestra pantalla: es una composición
+	// cerrada, no una capa encima del Top.
+	const showChrome = !cleanMode && !displayPromo;
 	const inBattle = displayBattle;
 	const total = aVotes + bVotes;
 	const aPct = total > 0 ? Math.round((aVotes / total) * 100) : 50;
@@ -725,6 +731,8 @@ export function Jumbotron({
 
 	return (
 		<div ref={containerRef} style={containerStyle} className="min-h-dvh w-full bg-(--jumbo-bg) text-white relative overflow-hidden flex flex-col">
+			{displayPromo && <PromoScreen qrUrl={qrTarget} host={venueHost} />}
+
 			{/* Fondo PREMIUM dinámico — VÍDEO del local + FOTOS, controlado por
 			    el DJ desde /admin (3 modos, ver VenueBackdrop):
 			      · video    → sólo el vídeo (identidad del local)
@@ -744,7 +752,7 @@ export function Jumbotron({
 				<div className="absolute -bottom-32 -right-32 w-[40vw] h-[40vw] rounded-full bg-(--jumbo-accent)/15 blur-[140px]" />
 			</div>
 
-			{!cleanMode && (
+			{showChrome && (
 			<header className="relative z-10 px-12 pt-12 pb-6 flex items-center justify-between">
 				<div className="flex items-center gap-4">
 					<div className="w-16 h-16 rounded-2xl bg-linear-to-tr from-(--jumbo-primary) to-(--jumbo-accent) p-0.5">
@@ -772,7 +780,7 @@ export function Jumbotron({
 			</header>
 			)}
 
-			{!cleanMode && (inBattle && battle ? (
+			{showChrome && (inBattle && battle ? (
 				// ── MODO DUELO ───────────────────────────────────────────────
 				<main className="relative z-10 flex-1 px-12 pb-12 flex flex-col">
 					<div className="flex items-center justify-center gap-4 mb-6">
@@ -791,9 +799,13 @@ export function Jumbotron({
 							{/* V20: QR del DUELO — escanear = check-in + entrar directo a
 							    la batalla (`next=live`).  Antes el duelo no tenía QR y se
 							    perdía el momento de máxima atención de la sala. */}
+							{/* Tamaño: este QR se escanea desde la pista, a varios metros
+							    de la tele.  Iba a 144 px —la mitad que el de la pantalla
+							    normal— y en la sala no había forma de cogerlo.  Se sube a
+							    256, a la altura del otro, que sí funciona. */}
 							{showQr && (
-								<div className="mt-2 flex flex-col items-center gap-2 rounded-2xl border border-(--jumbo-primary)/40 bg-black/50 backdrop-blur-md p-4">
-									<div className="w-36 h-36 rounded-xl bg-black/40 border border-white/10 p-2 flex items-center justify-center">
+								<div className="mt-2 flex flex-col items-center gap-3 rounded-2xl border border-(--jumbo-primary)/40 bg-black/50 backdrop-blur-md p-5">
+									<div className="w-64 h-64 rounded-xl bg-black/40 border border-white/10 p-3 flex items-center justify-center">
 										<QRCodeSVG
 											value={buildQrTarget("live")}
 											level="M"
@@ -804,7 +816,7 @@ export function Jumbotron({
 											aria-label="QR para votar en la batalla"
 										/>
 									</div>
-									<p className="text-sm font-black italic tracking-tight text-white text-center leading-tight">
+									<p className="text-xl font-black italic tracking-tight text-white text-center leading-tight">
 										Escanea y vota
 									</p>
 								</div>
@@ -891,11 +903,16 @@ export function Jumbotron({
 			{/* Debajo del overlay del ganador: la celebración manda durante sus
 			    segundos, la promoción sigue ahí después. */}
 			<FlashDropBanner drop={flashDrop} />
+			{/* El lanzamiento tiene su momento; la banda se queda de recordatorio.
+			    Orden de la pantalla, de abajo a arriba: apuntes (30) · banda (40)
+			    · cuña (44) · lanzamiento del drop (48) · ganador (50).  Manda
+			    siempre lo que menos dura. */}
+			<FlashDropAlert drop={flashDrop} qrUrl={qrTarget} />
 			<RedemptionTicker latest={lastRedemption} />
 
 			{winner && <WinnerOverlay track={winner} />}
 
-			{!cleanMode && (
+			{showChrome && (
 			<footer className="relative z-10 px-12 pb-8 text-center">
 				<p className="text-xs uppercase tracking-[0.4em] text-zinc-600 font-bold">
 					Vota desde tu móvil · {venueHost}

@@ -15,6 +15,7 @@ import { VENUE_TZ, toLocalInput, fromLocalInput } from "../lib/madrid-time";
 import { FlashDropPanel } from "../components/admin/FlashDropPanel";
 import { PromoConfigPanel } from "../components/admin/PromoConfigPanel";
 import { NameModerationPanel } from "../components/admin/NameModerationPanel";
+import { TrackRequestsPanel } from "../components/admin/TrackRequestsPanel";
 
 /**
  * /admin — Consola del DJ / Staff (Bloque 4).
@@ -384,6 +385,12 @@ export default function Admin() {
 									onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
 								/>
 
+								<TrackRequestsPanel
+									call={call}
+									eventId={event.id}
+									onToast={flash}
+								/>
+
 								<TvControlPanel
 									slug={tenantSlugFromHost()}
 									busy={busy}
@@ -397,6 +404,7 @@ export default function Admin() {
 												tv_show_ranking: s.showRanking,
 												tv_show_battle: s.showBattle,
 												tv_show_now_playing: s.showNowPlaying,
+												tv_show_promo: s.showPromo,
 											},
 											s.mode === "photo"
 												? "📌 Foto fijada en la TV"
@@ -721,6 +729,8 @@ type TvState = {
 	showBattle: boolean;
 	// V17: partir la pantalla mostrando la canción que suena ahora.
 	showNowPlaying: boolean;
+	// Nuestra pantalla (NightGraph), al nivel del ranking o la batalla.
+	showPromo: boolean;
 };
 
 function TvControlPanel({ slug, busy, onSet }: {
@@ -738,6 +748,7 @@ function TvControlPanel({ slug, busy, onSet }: {
 		showRanking: true,
 		showBattle: true,
 		showNowPlaying: false,
+		showPromo: false,
 	});
 
 	// Aplica un cambio parcial: actualiza el estado local Y lo envía entero
@@ -794,8 +805,8 @@ function TvControlPanel({ slug, busy, onSet }: {
 				</button>
 			</div>
 
-			{/* Toggles de CAPAS: ranking, batalla y canción actual */}
-			<div className="grid grid-cols-3 gap-3">
+			{/* Toggles de CAPAS: ranking, batalla, canción actual y cuña */}
+			<div className="grid grid-cols-2 gap-3">
 				<LayerToggle
 					label="Ranking"
 					on={sel.showRanking}
@@ -815,9 +826,16 @@ function TvControlPanel({ slug, busy, onSet }: {
 					busy={busy}
 					onToggle={() => apply({ showNowPlaying: !sel.showNowPlaying })}
 				/>
+				{/* Nuestra pantalla: cuando se enciende, ocupa la tele entera. */}
+				<LayerToggle
+					label="Pantalla NightGraph"
+					on={sel.showPromo}
+					busy={busy}
+					onToggle={() => apply({ showPromo: !sel.showPromo })}
+				/>
 			</div>
 			<p className="text-[10px] text-zinc-600 px-1">
-				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo. Activa <span className="text-cyan-300 font-bold">Canción actual</span> para partir la pantalla: ranking a la izquierda y la canción que suena a la derecha.
+				Oculta el ranking y la batalla para dejar la pantalla sólo con el fondo. Activa <span className="text-cyan-300 font-bold">Canción actual</span> para partir la pantalla: ranking a la izquierda y la canción que suena a la derecha. La <span className="text-cyan-300 font-bold">pantalla NightGraph</span> es una pantalla más: mientras esté puesta ocupa la tele con el QR y cómo se juega, y una batalla en vivo sigue mandando por encima.
 			</p>
 
 			{/* Fijar una FOTO concreta (mode='photo') */}

@@ -4,6 +4,8 @@ import {
 	ArrowLeft,
 	CheckCircle2,
 	Disc3,
+	Info,
+	Hand,
 	Music2,
 	Search,
 	Ticket,
@@ -13,6 +15,7 @@ import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useMusic, type MusicTrack } from "../lib/useMusic";
 import { searchTracks } from "../lib/search";
+import { useTrackRequests } from "../lib/useTrackRequests";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { cn } from "../lib/utils";
@@ -91,6 +94,15 @@ export function Jukebox() {
 	// Filtro por género (V18).  null = todos.
 	const [genre, setGenre] = useState<string | null>(null);
 	const [requested, setRequested] = useState<Set<string>>(new Set());
+	// Peticiones al DJ: canciones que tiene guardadas pero no cargó hoy.
+	const {
+		results: library,
+		searching: searchingLibrary,
+		search: searchLibrary,
+		request: requestTrack,
+		clear: clearLibrary,
+	} = useTrackRequests(activeEventId);
+	const [asked, setAsked] = useState<Set<string>>(new Set());
 	const [boosted, setBoosted] = useState<Set<string>>(new Set());
 	const [busy, setBusy] = useState<string | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -154,6 +166,44 @@ export function Jukebox() {
 		if (!query.trim()) return randomFifty;
 		return searchTracks(pool, query, 50);
 	}, [pool, randomFifty, query]);
+
+	// Cuando la fiesta no tiene lo que buscan, se mira el ALMACÉN de la sala.
+	//   Es el momento en que alguien decide si la app sirve o no: hasta ahora
+	//   la respuesta era el silencio.  Con retardo, porque se teclea letra a
+	//   letra y no vamos a preguntar al servidor en cada una.
+	useEffect(() => {
+		const q = query.trim();
+		if (q.length < 2 || filtered.length > 0) {
+			clearLibrary();
+			return;
+		}
+		const id = window.setTimeout(() => void searchLibrary(q), 350);
+		return () => window.clearTimeout(id);
+	}, [query, filtered.length, searchLibrary, clearLibrary]);
+
+	const askForTrack = async (track: { id: string; title: string }) => {
+		setBusy(track.id);
+		const res = await requestTrack(track.id);
+		setBusy(null);
+		if (res.ok) {
+			setAsked((cur) => new Set(cur).add(track.id));
+			setTone("success");
+			setToast(
+				res.requests > 1
+					? t("jukebox.askedWithOthers", { n: res.requests })
+					: t("jukebox.asked"),
+			);
+			return;
+		}
+		setTone("warning");
+		setToast(
+			res.error === "request_limit"
+				? t("jukebox.askLimit", { n: res.limit ?? 3 })
+				: res.error === "already_requested"
+					? t("jukebox.askedAlready")
+					: t("jukebox.askFailed"),
+		);
+	};
 
 	const flashRow = (id: string, color: "amber" | "cyan") => {
 		const row = rowRefs.current.get(id);
@@ -396,6 +446,14 @@ export function Jukebox() {
 				<p className="text-[11px] text-zinc-500 mt-2 px-1">
 					{t("jukebox.subtitle")}
 				</p>
+				{/* Decirlo ANTES de que busquen.  Quien viene a pedir su tema y no
+				    lo encuentra da por hecho que la app está rota — pasó en La
+				    Pocha y lo dijo más de uno.  No falta la canción: es que la
+				    lista la elige el DJ, y eso hay que contarlo. */}
+				<p className="text-[11px] text-zinc-400 mt-1 px-1 inline-flex items-start gap-1.5">
+					<Info className="w-3 h-3 mt-0.5 shrink-0 text-zinc-500" aria-hidden="true" />
+					<span>{t("jukebox.djOnly")}</span>
+				</p>
 			</section>
 
 			<main className="flex-1 px-6 pt-4 pb-6 overflow-y-auto no-scrollbar">
@@ -419,10 +477,76 @@ export function Jukebox() {
 						</button>
 					</div>
 				)}
+				{/* El vacío es el momento crítico: es cuando alguien decide si esto
+				    funciona o no.  Antes decía solo "no hay coincidencias", que es
+				    cierto y no explica nada. */}
 				{activeEventId && !loading && filtered.length === 0 && !error && (
-					<p className="text-center text-zinc-500 text-sm py-8">
-						{t("jukebox.noResults")}
-					</p>
+					<div className="py-8 px-2 flex flex-col items-center gap-3">
+						<Info className="w-6 h-6 text-zinc-600" aria-hidden="true" />
+						<p className="text-zinc-300 text-sm font-bold text-center">
+							{t("jukebox.noResults")}
+						</p>
+						<p className="text-zinc-500 text-xs leading-relaxed max-w-[34ch] text-center">
+							{t("jukebox.noResultsHint")}
+						</p>
+
+						{/* El almacén del DJ.  Si la tiene guardada y hoy no la puso,
+						    se le puede pedir — y si la piden varios, la pone. */}
+						{searchingLibrary && (
+							<p className="text-zinc-600 text-xs font-bold mt-2">
+								{t("jukebox.askSearching")}
+							</p>
+						)}
+						{!searchingLibrary && library.length > 0 && (
+							<div className="w-full mt-3">
+								<p className="text-[11px] uppercase tracking-widest text-amber-300 font-black text-center mb-3">
+									{t("jukebox.askTitle")}
+								</p>
+								<ul className="flex flex-col gap-2">
+									{library.map((track) => {
+										const done = asked.has(track.id);
+										return (
+											<li
+												key={track.id}
+												className="flex items-center gap-3 rounded-2xl bg-zinc-900/70 border border-zinc-800 p-3"
+											>
+												<div className="w-11 h-11 rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 flex items-center justify-center shrink-0">
+													{track.cover_image_url ? (
+														<img src={track.cover_image_url} alt="" className="w-full h-full object-cover" />
+													) : (
+														<Music2 className="w-4 h-4 text-zinc-600" aria-hidden="true" />
+													)}
+												</div>
+												<div className="flex-1 min-w-0 text-left">
+													<p className="text-sm font-bold text-white truncate">{track.title}</p>
+													<p className="text-xs text-zinc-500 truncate">{track.artist}</p>
+												</div>
+												<button
+													type="button"
+													disabled={done || busy === track.id}
+													onClick={() => void askForTrack(track)}
+													className={cn(
+														"h-10 px-4 rounded-xl text-xs font-black uppercase tracking-widest inline-flex items-center gap-2 active:scale-95 shrink-0",
+														done
+															? "bg-zinc-800 text-zinc-500"
+															: "bg-amber-400 text-black",
+														busy === track.id && "opacity-40",
+													)}
+												>
+													{done ? (
+														<CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+													) : (
+														<Hand className="w-4 h-4" aria-hidden="true" />
+													)}
+													{done ? t("jukebox.askedShort") : t("jukebox.ask")}
+												</button>
+											</li>
+										);
+									})}
+								</ul>
+							</div>
+						)}
+					</div>
 				)}
 
 				{filtered.length > 0 && (

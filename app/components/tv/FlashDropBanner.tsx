@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Zap } from "lucide-react";
 import { gsap, useGSAP } from "../../lib/gsap";
+import { formatEur as eur } from "../../lib/money";
 
 /**
  * FlashDropBanner — el Flash Drop en la pantalla del local.
@@ -26,14 +27,11 @@ export type TvFlashDrop = {
 	product_name: string;
 	promo_price_eur: number | null;
 	list_price_eur: number | null;
+	valid_from: string | null;
 	valid_to: string | null;
 	stock_total: number | null;
 	stock_used: number;
 };
-
-function eur(v: number | null): string {
-	return v === null ? "—" : `${Math.round(v)}€`;
-}
 
 /** mm:ss que queda. Vacío cuando ya terminó. */
 function countdown(ms: number): string {
