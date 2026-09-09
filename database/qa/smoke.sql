@@ -27,6 +27,7 @@ declare
 	v_b uuid; v_sb_ini int; v_ref_ini uuid; v_code text;
 	r jsonb; v_err text; v_n int;
 	v_r1 uuid; v_r2 uuid; v_r3 uuid; v_votos int; v_lva timestamptz; v_base int;
+	v_q1 uuid; v_q2 uuid; v_q3 uuid; v_q4 uuid; v_q5 uuid; v_people int;
 begin
 	select id into v_t    from tenants where slug='prueba';
 	select id into v_otro from tenants where slug='lapocha';
@@ -313,15 +314,81 @@ begin
 		v_votos::text, case when v_votos=1 then 'ok' else 'FALLO' end);
 	update live_battles set status='closed' where event_id=v_ev and status='live';
 
+	-- ═══ PEDIRLE UNA CANCIÓN AL DJ (v23) ════════════════════════════════
+	--
+	--   Lo que decide no es la petición suelta sino cuánta gente pide lo
+	--   mismo, así que se comprueba que la señal suma y que el panel agrupa.
+	insert into global_tracks(tenant_id,spotify_id,title,artist,genre)
+	select v_t,'qareq'||g,'QA petición '||g,'QA','QA género' from generate_series(1,5) g;
+	select id into v_q1 from global_tracks where tenant_id=v_t and spotify_id='qareq1';
+	select id into v_q2 from global_tracks where tenant_id=v_t and spotify_id='qareq2';
+	select id into v_q3 from global_tracks where tenant_id=v_t and spotify_id='qareq3';
+	select id into v_q4 from global_tracks where tenant_id=v_t and spotify_id='qareq4';
+	select id into v_q5 from global_tracks where tenant_id=v_t and spotify_id='qareq5';
+	insert into event_tracks(tenant_id,event_id,spotify_id,title,artist,genre,global_track_id,total_votes,is_played)
+	values (v_t,v_ev,'qareq4','QA petición 4','QA','QA género',v_q4,0,false);
+
+	r := request_track(v_t, v_u, v_ev, v_q1);
+	insert into qa values ('Peticiones','pedir una que el DJ no cargó hoy','aceptada',
+		coalesce(r->>'ok','—'), case when (r->>'ok')::boolean then 'ok' else 'FALLO' end);
+
+	r := request_track(v_t, v_u, v_ev, v_q1);
+	insert into qa values ('Peticiones','la misma persona, dos veces','already_requested',
+		coalesce(r->>'error','la aceptó'),
+		case when r->>'error'='already_requested' then 'ok' else 'FALLO' end);
+
+	r := request_track(v_t, v_u, v_ev, v_q4);
+	insert into qa values ('Peticiones','pedir una que ya suena esta noche','already_in_party',
+		coalesce(r->>'error','la aceptó'),
+		case when r->>'error'='already_in_party' then 'ok' else 'FALLO' end);
+
+	r := request_track(v_t, v_b, v_ev, v_q1);
+	insert into qa values ('Peticiones','otra persona pide la misma · la señal sube','2',
+		coalesce(r->>'requests','—'),
+		case when r->>'requests'='2' then 'ok' else 'FALLO' end);
+
+	r := request_track(v_t, v_u, v_ev, v_q2);
+	r := request_track(v_t, v_u, v_ev, v_q3);
+	r := request_track(v_t, v_u, v_ev, v_q5);
+	insert into qa values ('Peticiones','la cuarta de la noche ya no','request_limit',
+		coalesce(r->>'error','la aceptó'),
+		case when r->>'error'='request_limit' then 'ok' else 'FALLO' end);
+
+	select people into v_people from get_track_requests(v_t, v_actor, v_ev) limit 1;
+	insert into qa values ('Peticiones','el DJ ve arriba la más pedida','2',
+		coalesce(v_people::text,'—'), case when v_people=2 then 'ok' else 'FALLO' end);
+	select count(*) into v_n from get_track_requests(v_t, v_actor, v_ev);
+	insert into qa values ('Peticiones','una fila por canción, no por petición','3',
+		v_n::text, case when v_n=3 then 'ok' else 'FALLO' end);
+	select count(*) into v_n from get_track_requests(v_t, v_u, v_ev);
+	insert into qa values ('Peticiones','un cliente no ve el panel del DJ','0',
+		v_n::text, case when v_n=0 then 'ok' else 'FALLO' end);
+
+	r := admin_add_requested_track(v_t, v_actor, v_ev, v_q1);
+	select count(*) into v_n from event_tracks
+	 where event_id=v_ev and spotify_id='qareq1' and genre='QA género' and global_track_id=v_q1;
+	insert into qa values ('Peticiones','al aceptarla llega con género y enlace','1',
+		v_n::text, case when v_n=1 then 'ok' else 'FALLO' end);
+	select count(*) into v_n from get_track_requests(v_t, v_actor, v_ev);
+	insert into qa values ('Peticiones','y sale de pendientes','2',
+		v_n::text, case when v_n=2 then 'ok' else 'FALLO' end);
+
+	r := admin_dismiss_request(v_t, v_actor, v_ev, v_q2);
+	select count(*) into v_n from get_track_requests(v_t, v_actor, v_ev);
+	insert into qa values ('Peticiones','descartar también la saca','1',
+		v_n::text, case when v_n=1 then 'ok' else 'FALLO' end);
+
 	-- ═══ DESHACER ═══════════════════════════════════════════════════════
 	-- Orden importa: los movimientos de cartera apuntan a la fiesta con una
 	-- clave foránea, así que se van ANTES que ella.
+	delete from track_requests where event_id = v_ev;
 	delete from track_votes   where event_id = v_ev;
 	delete from user_rewards  where event_id = v_ev;
 	delete from wallet_ledger where event_id = v_ev;
 	delete from live_battles  where event_id = v_ev;
 	delete from event_tracks where event_id = v_ev;
 	delete from tenant_events where id = v_ev;
+	delete from global_tracks where tenant_id = v_t and spotify_id like 'qareq%';
 	delete from venue_visits  where user_id = v_b
 	  and business_night(entry_time) = business_night(now());
 	delete from wallet_ledger where user_id in (v_u, v_b)
