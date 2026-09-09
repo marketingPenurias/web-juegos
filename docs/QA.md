@@ -45,7 +45,11 @@ que mirarla antes de desplegar.
 | Aplicar la misma plantilla dos veces | Añade 0 · no duplica |
 | Añadir dos veces la misma canción | Rechazada |
 
-### Pedirle una canción que la sala no tiene · v23
+### Pedirle una canción que la sala no tiene · v23 · **EN REPOSO**
+
+La maquinaria está probada y aplicada, pero **desconectada de la interfaz** a la
+espera de decidir cómo hacerla bien (ver `PETICIONES.md`). Las comprobaciones
+siguen pasando y protegen lo que hay en la base de datos.
 
 | Caso | Resultado |
 | :-- | :-- |
@@ -146,8 +150,6 @@ que no lo sabemos.**
   de punta a punta; la parte del DJ (lanzar y cerrar) sí está probada.
 - **Pedir y boostear una canción** desde el Jukebox. El catálogo carga, pero
   no se ha pulsado PEDIR ni BOOST.
-- **El aviso nuevo del Jukebox** («solo las canciones que ha elegido el DJ»)
-  está escrito y compila, pero no se ha visto con una sesión real delante.
 - **Las pantallas de TV.** Ni el jumbotron ni el dashboard de pantalla.
 - **El circuito de invitación desde dos teléfonos.** La maquinaria está
   probada y paga bien; falta el recorrido humano: A comparte, B abre el enlace,
@@ -163,6 +165,10 @@ que no lo sabemos.**
 
 ## Rojo · conocido y sin arreglar
 
+- **El Jukebox no respeta la selección del DJ.** Se quitó un tema de la fiesta
+  y seguía apareciendo y dejándose pedir: `event_catalog` sirve el repertorio
+  del local, no la lista de la noche. Con eso, las plantillas no significan
+  nada. Ver `PETICIONES.md`.
 - **Quien invita no ve nada** hasta que su amigo hace check-in. El enlace se
   usó, el sistema lo sabe, y la persona que invitó no se entera. Es lo que
   confundió al DJ el 3 de septiembre.

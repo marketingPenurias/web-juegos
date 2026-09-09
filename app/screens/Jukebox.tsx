@@ -5,7 +5,6 @@ import {
 	CheckCircle2,
 	Disc3,
 	Info,
-	Hand,
 	Music2,
 	Search,
 	Ticket,
@@ -15,7 +14,6 @@ import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
 import { useMusic, type MusicTrack } from "../lib/useMusic";
 import { searchTracks } from "../lib/search";
-import { useTrackRequests } from "../lib/useTrackRequests";
 import { TokenBadge } from "../components/TokenBadge";
 import { Toast } from "../components/Toast";
 import { cn } from "../lib/utils";
@@ -94,13 +92,6 @@ export function Jukebox() {
 	// Filtro por género (V18).  null = todos.
 	const [genre, setGenre] = useState<string | null>(null);
 	const [requested, setRequested] = useState<Set<string>>(new Set());
-	// Peticiones al DJ: canciones que la sala NO tiene.  Lo que sí tiene ya
-	// sale aquí arriba —el catálogo es el repertorio entero del local—, así
-	// que esto sólo cubre lo que falta.
-	const { request: requestTrack } = useTrackRequests(activeEventId);
-	const [askTitle, setAskTitle] = useState("");
-	const [askArtist, setAskArtist] = useState("");
-	const [asking, setAsking] = useState(false);
 	const [boosted, setBoosted] = useState<Set<string>>(new Set());
 	const [busy, setBusy] = useState<string | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -165,36 +156,6 @@ export function Jukebox() {
 		return searchTracks(pool, query, 50);
 	}, [pool, randomFifty, query]);
 
-	const askForTrack = async () => {
-		const title = askTitle.trim();
-		if (title.length < 2 || asking) return;
-		setAsking(true);
-		const res = await requestTrack(title, askArtist.trim());
-		setAsking(false);
-		if (res.ok) {
-			setAskTitle("");
-			setAskArtist("");
-			setTone("success");
-			setToast(
-				res.requests > 1
-					? t("jukebox.askedWithOthers", { n: res.requests })
-					: t("jukebox.asked"),
-			);
-			return;
-		}
-		setTone("warning");
-		setToast(
-			res.error === "request_limit"
-				? t("jukebox.askLimit", { n: res.limit ?? 3 })
-				: res.error === "already_requested"
-					? t("jukebox.askedAlready")
-					: res.error === "already_in_library"
-						? t("jukebox.askAlreadyHave", { title: res.title ?? title })
-						: res.error === "invalid_title"
-							? t("jukebox.askTooShort")
-							: t("jukebox.askFailed"),
-		);
-	};
 
 	const flashRow = (id: string, color: "amber" | "cyan") => {
 		const row = rowRefs.current.get(id);
@@ -481,51 +442,6 @@ export function Jukebox() {
 							{t("jukebox.noResultsHint")}
 						</p>
 
-						{/* El hueco de verdad: canciones que la sala NO tiene.  Lo que
-						    sí tiene ya sale en la lista de arriba, porque el catálogo
-						    es el repertorio entero del local.  Aquí se pide lo otro,
-						    que es lo que pregunta la gente en la barra. */}
-						<div className="w-full mt-4 rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 flex flex-col gap-2">
-							<p className="text-[11px] uppercase tracking-widest text-amber-300 font-black text-center">
-								{t("jukebox.askTitle")}
-							</p>
-							<input
-								type="text"
-								value={askTitle}
-								onChange={(e) => setAskTitle(e.target.value)}
-								maxLength={80}
-								placeholder={t("jukebox.askSongPlaceholder")}
-								aria-label={t("jukebox.askSongPlaceholder")}
-								className="h-11 rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 text-sm font-bold text-white placeholder:text-zinc-600 placeholder:font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-							/>
-							<input
-								type="text"
-								value={askArtist}
-								onChange={(e) => setAskArtist(e.target.value)}
-								maxLength={80}
-								placeholder={t("jukebox.askArtistPlaceholder")}
-								aria-label={t("jukebox.askArtistPlaceholder")}
-								className="h-11 rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 text-sm font-bold text-white placeholder:text-zinc-600 placeholder:font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-							/>
-							<button
-								type="button"
-								disabled={asking || askTitle.trim().length < 2}
-								onClick={() => void askForTrack()}
-								className={cn(
-									"h-11 rounded-xl text-xs font-black uppercase tracking-widest inline-flex items-center justify-center gap-2 active:scale-95",
-									askTitle.trim().length < 2
-										? "bg-zinc-800 text-zinc-500"
-										: "bg-amber-400 text-black",
-									asking && "opacity-40",
-								)}
-							>
-								<Hand className="w-4 h-4" aria-hidden="true" />
-								{t("jukebox.ask")}
-							</button>
-							<p className="text-[11px] text-zinc-500 leading-relaxed text-center">
-								{t("jukebox.askFootnote")}
-							</p>
-						</div>
 					</div>
 				)}
 

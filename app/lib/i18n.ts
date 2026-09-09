@@ -269,7 +269,7 @@ const resources = {
 				// Lucía, tras una noche en la sala: la gente busca su tema, no está,
 				// y concluye "vaya mierda, esto no funciona".  El problema no es que
 				// falte: es que nadie le ha dicho que la lista la elige el DJ.
-				djOnly: "Aquí está todo el repertorio de la sala. Si no aparece, pídesela al DJ.",
+				djOnly: "Aquí no están todas las canciones del mundo. Si no la encuentras, esta noche no suena.",
 				ask: "Pedírsela al DJ",
 				askTitle: "¿No está? Pídesela",
 				askSongPlaceholder: "Nombre de la canción",
@@ -290,7 +290,7 @@ const resources = {
 				boostedTag: "TOP",
 				noResults: "No hay canciones que coincidan",
 				noResultsHint:
-					"Aquí sale todo lo que tiene la sala. Si no está, escríbela abajo y el DJ la verá.",
+					"No está en la lista de esta noche. Prueba con otro tema o con otro artista.",
 				genreAll: "Todos",
 				toastRequested: "Pedida al DJ ✓",
 				toastBoosted: "🔥 Boost activado · primera de la cola",
@@ -546,7 +546,7 @@ const resources = {
 				title: "Tell the DJ",
 				subtitle:
 					"Requests are free. Spend 50 tokens to boost your song to the top of the queue.",
-				djOnly: "This is the venue's whole library. Not here? Ask the DJ for it.",
+				djOnly: "Not every song in the world is here. If you can't find it, it isn't playing tonight.",
 				ask: "Ask the DJ",
 				askTitle: "Not here? Ask for it",
 				askSongPlaceholder: "Song name",
@@ -567,7 +567,7 @@ const resources = {
 				boostedTag: "TOP",
 				noResults: "No matching songs",
 				noResultsHint:
-					"This is everything the venue has. Not here? Type it below and the DJ will see it.",
+					"It isn't in tonight's list. Try another song or another artist.",
 				genreAll: "All",
 				toastRequested: "Request sent ✓",
 				toastBoosted: "🔥 Boost on · first in queue",
