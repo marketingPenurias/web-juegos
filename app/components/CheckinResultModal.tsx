@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { CheckCircle2, Coins, Flame, GlassWater, XCircle } from "lucide-react";
 import { gsap, useGSAP } from "../lib/gsap";
 import { useGameState } from "../store/useGameState";
+import { formatEur } from "../lib/money";
 
 /**
  * CheckinResultModal — celebración del check-in procesado en la app.
@@ -90,7 +91,7 @@ export function CheckinResultModal() {
 									<span className="text-cyan-300">
 										{result.hint.affordable.name}
 									</span>{" "}
-									por {Math.round(result.hint.affordable.promo_price_eur)}€
+									por {formatEur(result.hint.affordable.promo_price_eur)}
 								</p>
 							</div>
 						) : result.hint?.next ? (

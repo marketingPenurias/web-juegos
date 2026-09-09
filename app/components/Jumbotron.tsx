@@ -13,6 +13,7 @@ import {
 import { useVenuePhotos } from "../lib/useVenuePhotos";
 import { VenueBackdrop } from "./VenueBackdrop";
 import { PromoScreen } from "./tv/PromoScreen";
+import { FlashDropAlert } from "./tv/FlashDropAlert";
 import {
 	DEFAULT_TV_BACKDROP,
 	normalizeTvBackdrop,
@@ -349,6 +350,8 @@ export function Jumbotron({
 							? (cur?.promo_price_eur ?? null)
 							: Number(row.promo_price_eur),
 					list_price_eur: cur?.list_price_eur ?? null,
+					valid_from:
+						(row.valid_from as string | null) ?? cur?.valid_from ?? null,
 					valid_to: (row.valid_to as string | null) ?? null,
 					stock_total:
 						row.stock_total === null || row.stock_total === undefined
@@ -891,6 +894,11 @@ export function Jumbotron({
 			{/* Debajo del overlay del ganador: la celebración manda durante sus
 			    segundos, la promoción sigue ahí después. */}
 			<FlashDropBanner drop={flashDrop} />
+			{/* El lanzamiento tiene su momento; la banda se queda de recordatorio.
+			    Orden de la pantalla, de abajo a arriba: apuntes (30) · banda (40)
+			    · cuña (44) · lanzamiento del drop (48) · ganador (50).  Manda
+			    siempre lo que menos dura. */}
+			<FlashDropAlert drop={flashDrop} qrUrl={qrTarget} />
 			<RedemptionTicker latest={lastRedemption} />
 
 			{/* La cuña de la casa.  Se calla mientras hay duelo o flash drop:

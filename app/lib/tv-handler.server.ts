@@ -206,6 +206,11 @@ export async function handleTvAction(
 		product_name: string;
 		promo_price_eur: number | null;
 		list_price_eur: number | null;
+		// Cuándo empezó.  La TV lo necesita para distinguir un drop RECIÉN
+		// lanzado —que merece el aviso a pantalla completa— de uno que lleva
+		// veinte minutos corriendo: si no, una pantalla que se reinicia
+		// anunciaría como nuevo algo que la sala ya vio.
+		valid_from: string | null;
 		valid_to: string | null;
 		stock_total: number | null;
 		stock_used: number;
@@ -215,7 +220,7 @@ export async function handleTvAction(
 		const { data, error: dropErr } = await supabase
 			.from("product_availability")
 			.select(
-				"id, label, promo_price_eur, valid_to, stock_total, stock_used, " +
+				"id, label, promo_price_eur, valid_from, valid_to, stock_total, stock_used, " +
 					"product:tenant_products(name, list_price_eur, promo_price_eur)",
 			)
 			.eq("tenant_id", tenant_id)
@@ -238,6 +243,7 @@ export async function handleTvAction(
 					id: string;
 					label: string | null;
 					promo_price_eur: number | null;
+					valid_from: string | null;
 					valid_to: string | null;
 					stock_total: number | null;
 					stock_used: number | null;
@@ -257,6 +263,7 @@ export async function handleTvAction(
 					prod?.list_price_eur === null || prod?.list_price_eur === undefined
 						? null
 						: Number(prod.list_price_eur),
+				valid_from: row.valid_from ?? null,
 				valid_to: row.valid_to ?? null,
 				stock_total: row.stock_total ?? null,
 				stock_used: Number(row.stock_used ?? 0),

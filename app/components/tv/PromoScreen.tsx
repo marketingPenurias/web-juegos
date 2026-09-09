@@ -113,7 +113,7 @@ export function PromoScreen({
 	return (
 		<div
 			ref={rootRef}
-			className="absolute inset-0 z-60 bg-black/92 backdrop-blur-xl flex items-center justify-center px-16"
+			className="absolute inset-0 z-[44] bg-black/92 backdrop-blur-xl flex items-center justify-center px-16"
 			aria-hidden="true"
 		>
 			{/* El búho desarmado: nodos y líneas, muy por debajo del contenido. */}

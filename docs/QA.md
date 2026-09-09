@@ -142,6 +142,8 @@ que no lo sabemos.**
 - **Subida de fotos y vídeo del local**, y el carrusel de fondo.
 - **La cuña de NightGraph en la TV.** Maquetada y vista en 16:9, pero no se ha
   visto entrar y salir sola en una pantalla real durante una noche.
+- **El aviso de lanzamiento del flash drop.** Igual: maquetado, pero no se ha
+  visto saltar al lanzar un drop de verdad ni callarse en una reconexión.
 - **Comportamiento con mala conexión**, que es la condición normal de un local.
 
 ---
@@ -169,7 +171,7 @@ Sirve para saber dónde mirar la próxima vez:
 | :-- | :-- |
 | **Una regla comparaba la magnitud equivocada** | Elegir la oferta por euros cuando se paga en fichas |
 | **Un dato se cae al copiarlo de una tabla a otra** | El género al meter canciones en una fiesta |
-| **Formato que redondea** | «3€» cuando son 2,50 € |
+| **Formato que redondea** | «3€» cuando son 2,50 € · dos veces: en la BD y otra vez en la TV |
 | **El cliente pregunta una sola vez** | La fiesta activa, que se queda vieja en el móvil |
 | **Un valor de maqueta que sobrevivió** | «Día 1 de piloto» |
 | **El orden de dos acciones importa y nadie lo dice** | Activar la fiesta antes de cargar las canciones |
