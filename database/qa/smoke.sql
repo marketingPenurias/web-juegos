@@ -452,6 +452,27 @@ begin
 		coalesce(r->>'error','la aceptó'),
 		case when r->>'error' = 'invalid_tracks' then 'ok' else 'FALLO' end);
 
+	-- La pista del DJ no es el catálogo de la sala (v23 · 2b).  El catálogo
+	-- esconde lo que no se puede votar —lo que suena y lo vetado—; el DJ
+	-- necesita verlo justo para pararlo o para deshacer el veto.
+	delete from live_battles where event_id = v_sel;
+	delete from event_tracks where event_id = v_sel;
+	r := admin_set_now_playing_global(v_t, v_actor, v_sel, v_g);
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g2, true);
+	insert into qa values ('Pista DJ','ve la que suena y la vetada','2',
+		(select count(*)::text from admin_event_pista(v_t, v_actor, v_sel) p
+		  where p.global_track_id in (v_g, v_g2)),
+		case when (select count(*) from admin_event_pista(v_t, v_actor, v_sel) p
+		            where p.global_track_id in (v_g, v_g2)) = 2 then 'ok' else 'FALLO' end);
+	select count(*) into v_n from event_catalog(v_sel, 100000, null)
+	 where global_track_id in (v_g, v_g2);
+	insert into qa values ('Pista DJ','y la sala no ve ninguna de las dos','0',
+		v_n::text, case when v_n = 0 then 'ok' else 'FALLO' end);
+	insert into qa values ('Pista DJ','un cliente no ve la pista del DJ','0',
+		(select count(*)::text from admin_event_pista(v_t, v_u, v_sel)),
+		case when (select count(*) from admin_event_pista(v_t, v_u, v_sel)) = 0
+		     then 'ok' else 'FALLO' end);
+
 	delete from live_battles where event_id = v_sel;
 	delete from track_votes  where event_id = v_sel;
 	delete from event_tracks where event_id = v_sel;

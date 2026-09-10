@@ -571,6 +571,24 @@ end; $$;
   sirve para encontrarlas y completarlas luego). Audita.
 - `admin_dismiss_request(tenant, actor, event, req_key)` → `dismissed`.
 
+### 6.4.c La pista del DJ vs. el catálogo de la sala (v23)
+
+Son **dos preguntas distintas** y por eso son dos funciones. Confundirlas es
+como acabamos con `event_catalog` sirviendo el almacén entero a todo el mundo.
+
+- `event_catalog(event, limit, exclude_voted_by)` → lo que **la sala** puede
+  votar. Esconde lo que suena y lo vetado, y respeta la selección del DJ.
+- `admin_event_pista(tenant, actor, event)` → lo que **el DJ** gestiona: el
+  almacén completo con el estado de la noche pegado y tres banderas —
+  `is_played`, `excluded`, `in_list`— más `curated`. Incluye lo que suena
+  (para pararlo) y lo vetado (para deshacerlo). Staff-gated.
+- `admin_event_pista` ordena por *lo que suena primero*: a las tres de la
+  mañana es lo primero que busca el DJ.
+- `admin_update_global_track(...)` → editar una canción arregla el **almacén**,
+  no sólo esa noche, y refresca la copia de las noches que aún no han sonado.
+  Antes `update_track` escribía en `event_tracks` y la corrección duraba una
+  noche.
+
 ### 6.5 Panel DJ / Staff (todas validan `is_tenant_staff` y escriben en `audit_logs`)
 
 - `admin_open_party(tenant, actor, name?)` → crea/devuelve la fiesta activa (10h).
