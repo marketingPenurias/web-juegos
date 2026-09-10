@@ -16,7 +16,7 @@ import { normalizePriceEur, usesWholeEuros } from "./money";
  *
  *   Operaciones (`op`):
  *     bootstrap · open_party · create_event · activate_event · update_event ·
- *     bulk_global · add_track · update_track · remove_track · now_playing ·
+ *     bulk_global · add_track · update_track · exclude_track · now_playing ·
  *     stop_now_playing · start_battle · force_close_battle · metrics ·
  *     exclude_track ·
  *     save_template · apply_template · delete_template ·
