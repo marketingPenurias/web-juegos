@@ -16,8 +16,9 @@ import { normalizePriceEur, usesWholeEuros } from "./money";
  *
  *   Operaciones (`op`):
  *     bootstrap · open_party · create_event · activate_event · update_event ·
- *     bulk_global · add_track · update_track · remove_track · now_playing ·
+ *     bulk_global · add_track · update_track · exclude_track · now_playing ·
  *     stop_now_playing · start_battle · force_close_battle · metrics ·
+ *     exclude_track ·
  *     save_template · apply_template · delete_template ·
  *     track_requests · accept_request · dismiss_request
  */
@@ -54,6 +55,7 @@ type AdminBody = {
 	tv_show_now_playing?: boolean;
 	tv_show_promo?: boolean;
 	req_key?: string;
+	excluded?: boolean;
 	// V21: Flash Drops — promoción con caducidad y stock lanzada por el DJ.
 	product_id?: string;
 	promo_price_eur?: number;
@@ -202,7 +204,7 @@ export async function handleAdminAction(
 		if (!staff) {
 			return jsonResponse({ ok: true, is_staff: false }, { request });
 		}
-		return jsonResponse(await bootstrap(supabase, tenant_id), { request });
+		return jsonResponse(await bootstrap(supabase, tenant_id, verifiedId), { request });
 	}
 
 	if (!staff) {
@@ -305,33 +307,36 @@ export async function handleAdminAction(
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
 		}
 
+		// Corregir una errata arregla el ALMACÉN, que es la verdad.  Antes se
+		// escribía en `event_tracks` y la corrección duraba UNA noche.
 		case "update_track": {
 			const trackId = String(body.track_id ?? "");
 			if (!trackId) return jsonResponse({ ok: false, error: "track_id_required" }, { status: 400, request });
-			const patch: Record<string, unknown> = {};
-			if (typeof body.title === "string" && body.title.trim()) patch.title = body.title.trim().slice(0, 256);
-			if (typeof body.artist === "string" && body.artist.trim()) patch.artist = body.artist.trim().slice(0, 256);
-			if (typeof body.cover_image_url === "string") patch.cover_image_url = body.cover_image_url.trim() || null;
-			if (Object.keys(patch).length === 0) return jsonResponse({ ok: false, error: "nothing_to_update" }, { status: 400, request });
-			const { error } = await supabase.from("event_tracks").update(patch).eq("id", trackId).eq("tenant_id", tenant_id);
-			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
-			await supabase.from("audit_logs").insert({
-				tenant_id, actor_id: verifiedId, action: "update_event_track",
-				table_name: "event_tracks", record_id: trackId, new_data: patch,
+			const { data, error } = await supabase.rpc("admin_update_global_track", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_global_track_id: trackId,
+				p_title: typeof body.title === "string" ? body.title.slice(0, 256) : null,
+				p_artist: typeof body.artist === "string" ? body.artist.slice(0, 256) : null,
+				p_cover: typeof body.cover_image_url === "string" ? body.cover_image_url : null,
 			});
-			return jsonResponse({ ok: true }, { request });
+			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
-		case "remove_track": {
+		// "Quitar" ya no borra: VETA para esta noche.  Sin filas clonadas,
+		// borrar no excluye nada — el catálogo devolvería la canción otra vez
+		// desde el almacén.  Y se puede deshacer.
+		case "exclude_track": {
 			const trackId = String(body.track_id ?? "");
 			if (!trackId) return jsonResponse({ ok: false, error: "track_id_required" }, { status: 400, request });
-			const { error } = await supabase.from("event_tracks").delete().eq("id", trackId).eq("tenant_id", tenant_id);
-			if (error) return jsonResponse({ ok: false, error: "delete_failed", detail: error.message }, { status: 500, request });
-			await supabase.from("audit_logs").insert({
-				tenant_id, actor_id: verifiedId, action: "remove_event_track",
-				table_name: "event_tracks", record_id: trackId,
+			const { data, error } = await supabase.rpc("admin_exclude_track", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: String(body.event_id ?? ""),
+				p_global_track_id: trackId,
+				p_excluded: body.excluded !== false,
 			});
-			return jsonResponse({ ok: true }, { request });
+			if (error) return jsonResponse({ ok: false, error: "exclude_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
 		// Control remoto del FONDO de la TV (V1.7).  Persistimos en
@@ -417,10 +422,13 @@ export async function handleAdminAction(
 			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
+		// v23 · 2b: el panel identifica las canciones por la del ALMACÉN,
+		// porque la fila del evento puede no existir todavía.
 		case "now_playing": {
-			const { data } = await supabase.rpc("admin_set_now_playing", {
+			const { data } = await supabase.rpc("admin_set_now_playing_global", {
 				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
-				p_event_id: String(body.event_id ?? ""), p_track_id: String(body.track_id ?? ""),
+				p_event_id: String(body.event_id ?? ""),
+				p_global_track_id: String(body.track_id ?? ""),
 			});
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
 		}
@@ -488,13 +496,25 @@ export async function handleAdminAction(
 			// Es lo que tumbó la noche del 3 de septiembre: se activó diez
 			// minutos antes de cargar las canciones, y nadie avisó de nada.
 			// Ahora hay que confirmarlo a propósito.
+			// ¿Va a ver algo la sala?
+			//
+			//   Esto contaba filas de `event_tracks`, y desde v23 estar vacío
+			//   es el estado NORMAL: significa "suena todo el almacén".  El DJ
+			//   se habría comido una advertencia falsa cada vez que activa una
+			//   fiesta sin preparar, que es la mejor forma de enseñarle a
+			//   ignorar los avisos.
+			//
+			//   La pregunta buena no es "¿hay filas?" sino "¿va a poder votar
+			//   algo la gente?", y eso lo contesta el mismo catálogo que ve la
+			//   sala.  Además cubre un caso que antes se escapaba: una fiesta
+			//   con lista donde el DJ lo ha vetado o pinchado todo.
 			if (body.confirm_empty !== true) {
-				const { count } = await supabase
-					.from("event_tracks")
-					.select("id", { count: "exact", head: true })
-					.eq("tenant_id", tenant_id)
-					.eq("event_id", eventId);
-				if ((count ?? 0) === 0) {
+				const { data: peek } = await supabase.rpc("event_catalog", {
+					p_event_id: eventId,
+					p_limit: 1,
+					p_exclude_voted_by: null,
+				});
+				if (((peek as unknown[] | null) ?? []).length === 0) {
 					return jsonResponse(
 						{ ok: false, error: "event_has_no_tracks" },
 						{ status: 409, request },
@@ -525,6 +545,12 @@ export async function handleAdminAction(
 
 		case "start_battle": {
 			// El DJ ELIGE las dos pistas (control creativo, V1.6 B6).
+			//
+			// v23 · 2a: ahora se eligen del CATÁLOGO, no de las filas del
+			// evento.  Con las filas perezosas, la mayoría de canciones no
+			// tienen fila y los desplegables se quedaban casi vacíos justo al
+			// principio de la noche, que es cuando se monta la batalla.  El
+			// RPC valida que las dos se puedan enfrentar y las materializa.
 			const trackA = String(body.track_a ?? "");
 			const trackB = String(body.track_b ?? "");
 			if (!trackA || !trackB) {
@@ -533,10 +559,10 @@ export async function handleAdminAction(
 			if (trackA === trackB) {
 				return jsonResponse({ ok: false, error: "tracks_must_differ" }, { status: 400, request });
 			}
-			const { data } = await supabase.rpc("admin_start_battle", {
+			const { data } = await supabase.rpc("admin_start_battle_global", {
 				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
 				p_event_id: String(body.event_id ?? ""),
-				p_track_a: trackA, p_track_b: trackB,
+				p_global_a: trackA, p_global_b: trackB,
 				p_minutes: Number.isInteger(body.minutes) ? Number(body.minutes) : 3,
 			});
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
@@ -1048,6 +1074,9 @@ export async function handleAdminAction(
 async function bootstrap(
 	supabase: ReturnType<typeof getServiceSupabase>,
 	tenant_id: string,
+	// v23 · 2b: `admin_event_pista` valida que quien pregunta sea staff, así
+	// que hace falta el uid del actor aquí dentro.
+	actor_uid: string,
 ) {
 	// V20 · FASE 1 — Nunca más listas vacías por un error tragado.  Antes cada
 	// query hacía `const { data } = await …` y descartaba el error: cuando a
@@ -1110,17 +1139,31 @@ async function bootstrap(
 	if (globalErr) warn("global_tracks", globalErr.message);
 
 	let eventTracks: unknown[] = [];
+	let catalog: unknown[] = [];
 	let battle: unknown = null;
 	if (event) {
-		const { data: et, error: etErr } = await supabase
-			.from("event_tracks")
-			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played, genre")
-			.eq("tenant_id", tenant_id)
-			.eq("event_id", event.id)
-			.order("total_votes", { ascending: false })
-			.order("title", { ascending: true });
-		if (etErr) warn("event_tracks", etErr.message);
+		// La PISTA del DJ (v23 · 2b).  No es el catálogo de la sala: incluye lo
+		// que suena —para poder pararlo— y lo vetado —para poder deshacerlo—,
+		// con banderas para pintar la diferencia.  Ver `admin_event_pista`.
+		const { data: et, error: etErr } = await supabase.rpc("admin_event_pista", {
+			p_tenant_id: tenant_id,
+			p_actor_uid: actor_uid,
+			p_event_id: event.id,
+		});
+		if (etErr) warn("admin_event_pista", etErr.message);
 		eventTracks = et ?? [];
+
+		// Catálogo del evento (v23 · paso 2a).  Es lo que la sala ve de verdad:
+		// el almacén si el DJ no ha elegido nada, o su lista si ha elegido.
+		// Se añade SIN tocar `event_tracks`, que sigue alimentando el listado,
+		// el selector y el Realtime — así este paso no puede romperlos.
+		const { data: cat, error: catErr } = await supabase.rpc("event_catalog", {
+			p_event_id: event.id,
+			p_limit: 100000,
+			p_exclude_voted_by: null,
+		});
+		if (catErr) warn("event_catalog", catErr.message);
+		catalog = cat ?? [];
 
 		const { data: b, error: bErr } = await supabase
 			.from("live_battles")
@@ -1144,6 +1187,7 @@ async function bootstrap(
 		templates,
 		global_tracks: globalTracks ?? [],
 		event_tracks: eventTracks,
+		catalog,
 		battle,
 		// Vacío = todo cargó bien.  Con contenido, el panel avisa en vez de
 		// mostrar secciones vacías como si no hubiera datos (F1).

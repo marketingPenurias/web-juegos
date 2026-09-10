@@ -27,7 +27,7 @@ declare
 	v_b uuid; v_sb_ini int; v_ref_ini uuid; v_code text;
 	r jsonb; v_err text; v_n int;
 	v_r1 uuid; v_r2 uuid; v_r3 uuid; v_votos int; v_lva timestamptz; v_base int;
-	v_reqkey text; v_sel uuid; v_lib int; v_g uuid; v_et uuid;
+	v_reqkey text; v_sel uuid; v_lib int; v_g uuid; v_g2 uuid; v_g3 uuid; v_et uuid;
 begin
 	select id into v_t    from tenants where slug='prueba';
 	select id into v_otro from tenants where slug='lapocha';
@@ -375,7 +375,9 @@ begin
 	insert into qa values ('Selección','fiesta vacía · se ve todo el almacén',
 		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
 
-	select id into v_g from global_tracks where tenant_id=v_t order by title limit 1;
+	select id into v_g  from global_tracks where tenant_id=v_t order by title limit 1;
+	select id into v_g2 from global_tracks where tenant_id=v_t order by title offset 1 limit 1;
+	select id into v_g3 from global_tracks where tenant_id=v_t order by title offset 2 limit 1;
 	v_et := ensure_event_track(v_t, v_sel, v_g);
 	select count(*) into v_n from event_catalog(v_sel, 5000, null);
 	insert into qa values ('Selección','un voto NO convierte la fiesta en lista',
@@ -399,6 +401,82 @@ begin
 	insert into qa values ('Selección','el DJ quita una · desaparece de verdad','2',
 		v_n::text, case when v_n = 2 then 'ok' else 'FALLO' end);
 
+	-- Vetar (v23 · paso perezoso): "Quitar" pasa a ser "excluir de esta
+	-- noche", y deshacerlo tiene que borrar la fila — si sólo se apaga el
+	-- veto, esa fila queda como "lista del DJ de una canción" y la fiesta se
+	-- vacía.  Es la trampa del voto por otro lado; la cazó este banco.
+	delete from event_tracks where event_id = v_sel;
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g, true);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','vetar una · suena todo menos ésa',
+		(v_lib - 1)::text, v_n::text, case when v_n = v_lib - 1 then 'ok' else 'FALLO' end);
+
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g, false);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','deshacer el veto · vuelve todo',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+	insert into qa values ('Selección','y no deja fila detrás','0',
+		(select count(*)::text from event_tracks where event_id = v_sel),
+		case when not exists(select 1 from event_tracks where event_id = v_sel)
+		     then 'ok' else 'FALLO' end);
+
+	-- Curar NO es operar.  Poner una canción necesita una fila donde guardar
+	-- el estado, pero no es elegir el repertorio: si contara como lista, el
+	-- DJ marcando la primera canción de la noche dejaría el catálogo en CERO
+	-- (la lista sería esa canción, y está sonando, así que se filtra).
+	delete from event_tracks where event_id = v_sel;
+	r := admin_set_now_playing_global(v_t, v_actor, v_sel, v_g);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','poner la 1ª sin curar · el catálogo NO se vacía',
+		(v_lib - 1)::text, v_n::text, case when v_n = v_lib - 1 then 'ok' else 'FALLO' end);
+	insert into qa values ('Selección','y esa fila no cuenta como lista del DJ','vote',
+		(select added_by from event_tracks where event_id = v_sel and global_track_id = v_g),
+		case when (select added_by from event_tracks where event_id = v_sel and global_track_id = v_g) = 'vote'
+		     then 'ok' else 'FALLO' end);
+
+	-- Batalla desde el catálogo (v23 · 2a).  Montar un duelo tampoco es
+	-- curar: si estas dos filas contaran como lista, la fiesta se reduciría
+	-- a las dos canciones enfrentadas.
+	delete from event_tracks where event_id = v_sel;
+	r := admin_start_battle_global(v_t, v_actor, v_sel, v_g, v_g2, 3);
+	insert into qa values ('Selección','batalla en fiesta vacía · se puede montar','ok',
+		coalesce(r->>'ok','—'), case when (r->>'ok')::boolean then 'ok' else 'FALLO' end);
+	select count(*) into v_n from event_catalog(v_sel, 100000, null);
+	insert into qa values ('Selección','y el duelo NO reduce el repertorio a dos',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+	update live_battles set status='closed' where event_id = v_sel;
+
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g3, true);
+	r := admin_start_battle_global(v_t, v_actor, v_sel, v_g3, v_g, 3);
+	insert into qa values ('Selección','no se puede enfrentar una vetada','invalid_tracks',
+		coalesce(r->>'error','la aceptó'),
+		case when r->>'error' = 'invalid_tracks' then 'ok' else 'FALLO' end);
+
+	-- La pista del DJ no es el catálogo de la sala (v23 · 2b).  El catálogo
+	-- esconde lo que no se puede votar —lo que suena y lo vetado—; el DJ
+	-- necesita verlo justo para pararlo o para deshacer el veto.
+	delete from live_battles where event_id = v_sel;
+	delete from event_tracks where event_id = v_sel;
+	r := admin_set_now_playing_global(v_t, v_actor, v_sel, v_g);
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g2, true);
+	insert into qa values ('Pista DJ','ve la que suena y la vetada','2',
+		(select count(*)::text from admin_event_pista(v_t, v_actor, v_sel) p
+		  where p.global_track_id in (v_g, v_g2)),
+		case when (select count(*) from admin_event_pista(v_t, v_actor, v_sel) p
+		            where p.global_track_id in (v_g, v_g2)) = 2 then 'ok' else 'FALLO' end);
+	select count(*) into v_n from event_catalog(v_sel, 100000, null)
+	 where global_track_id in (v_g, v_g2);
+	insert into qa values ('Pista DJ','y la sala no ve ninguna de las dos','0',
+		v_n::text, case when v_n = 0 then 'ok' else 'FALLO' end);
+	insert into qa values ('Pista DJ','un cliente no ve la pista del DJ','0',
+		(select count(*)::text from admin_event_pista(v_t, v_u, v_sel)),
+		case when (select count(*) from admin_event_pista(v_t, v_u, v_sel)) = 0
+		     then 'ok' else 'FALLO' end);
+
+	-- Abrir la fiesta ya no clona el almacén (v23 · paso 3).  Con la regla de
+	-- la 51, una fiesta sin canciones del DJ significa "suena todo": clonar
+	-- las 759 dejó de arreglar nada y volvió a ser el problema que V20 quitó.
+	delete from live_battles where event_id = v_sel;
 	delete from track_votes  where event_id = v_sel;
 	delete from event_tracks where event_id = v_sel;
 	delete from tenant_events where id = v_sel;

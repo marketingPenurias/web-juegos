@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **9 de septiembre de 2026** · **47 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
+Estado a **10 de septiembre de 2026** · **63 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -74,6 +74,18 @@ siempre, así que las plantillas no acotaban nada y «Quitar» no quitaba.
 | Esa fila queda marcada | `added_by = 'vote'` |
 | El DJ carga 3 temas | Solo se ven esos 3 |
 | El DJ quita uno | **Desaparece de verdad** |
+| **Vetar una en fiesta vacía** | Suena todo menos ésa · **1 fila, no 759** |
+| **Deshacer el veto** | Vuelve todo · y no deja fila detrás |
+| Poner una que nadie había tocado | Se materializa y suena |
+| **Poner la 1ª en una fiesta sin curar** | **El catálogo NO se vacía** · sigue sonando todo |
+| Montar una batalla con la fiesta vacía | Se puede · y **no reduce el repertorio a esas dos** |
+| Enfrentar una canción vetada | Rechazado |
+| El DJ ve lo que suena y lo vetado | Sí · la sala no |
+| Un cliente leyendo la pista del DJ | No ve nada |
+| Editar una canción | Corrige el **almacén**, no solo esa noche |
+| Editar y una noche ya cerrada | Se queda como estaba · es histórico |
+| **Abrir Fiesta de Hoy** | **0 filas clonadas** · y la sala ve las 759 |
+| Volver a pulsar «Abrir Fiesta» | Devuelve la misma · no duplica |
 
 ### Reset de votos al pinchar · v23
 
