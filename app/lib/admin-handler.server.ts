@@ -1139,7 +1139,6 @@ async function bootstrap(
 	if (globalErr) warn("global_tracks", globalErr.message);
 
 	let eventTracks: unknown[] = [];
-	let catalog: unknown[] = [];
 	let battle: unknown = null;
 	if (event) {
 		// La PISTA del DJ (v23 · 2b).  No es el catálogo de la sala: incluye lo
@@ -1152,18 +1151,6 @@ async function bootstrap(
 		});
 		if (etErr) warn("admin_event_pista", etErr.message);
 		eventTracks = et ?? [];
-
-		// Catálogo del evento (v23 · paso 2a).  Es lo que la sala ve de verdad:
-		// el almacén si el DJ no ha elegido nada, o su lista si ha elegido.
-		// Se añade SIN tocar `event_tracks`, que sigue alimentando el listado,
-		// el selector y el Realtime — así este paso no puede romperlos.
-		const { data: cat, error: catErr } = await supabase.rpc("event_catalog", {
-			p_event_id: event.id,
-			p_limit: 100000,
-			p_exclude_voted_by: null,
-		});
-		if (catErr) warn("event_catalog", catErr.message);
-		catalog = cat ?? [];
 
 		const { data: b, error: bErr } = await supabase
 			.from("live_battles")
@@ -1187,7 +1174,6 @@ async function bootstrap(
 		templates,
 		global_tracks: globalTracks ?? [],
 		event_tracks: eventTracks,
-		catalog,
 		battle,
 		// Vacío = todo cargó bien.  Con contenido, el panel avisa en vez de
 		// mostrar secciones vacías como si no hubiera datos (F1).
