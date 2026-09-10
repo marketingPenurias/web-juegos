@@ -100,13 +100,24 @@ begin
 	set title = v_title, artist = v_artist, cover_image_url = v_cover
 	where id = p_global_track_id and tenant_id = p_tenant_id;
 
-	-- Las filas de evento guardan una copia del texto para leer rápido.  Se
-	-- refrescan las que todavía no han sonado; las que ya sonaron se quedan
-	-- como estaban, que son histórico.
-	update public.event_tracks
+	-- Las filas de evento guardan una copia del texto para leer rápido, y hay
+	-- que refrescarla.  Pero SÓLO en las noches que siguen abiertas.
+	--
+	--   · Una noche cerrada es histórico: se queda con el texto que tenía
+	--     cuando sonó.  Reescribirla sería falsear lo que pasó.
+	--   · Y es lo que acota la escritura.  Sin el filtro por estado, corregir
+	--     una errata recorre TODAS las filas no sonadas del local, de todas
+	--     las noches: hoy son 12 fiestas, con un año de historial es una
+	--     escritura sin techo.  Un local tiene una o dos noches abiertas a la
+	--     vez, así que el coste deja de crecer.
+	update public.event_tracks et
 	set title = v_title, artist = v_artist, cover_image_url = v_cover
-	where global_track_id = p_global_track_id and tenant_id = p_tenant_id
-	  and is_played = false;
+	from public.tenant_events e
+	where e.id = et.event_id
+	  and et.global_track_id = p_global_track_id
+	  and et.tenant_id = p_tenant_id
+	  and et.is_played = false
+	  and e.status in ('draft', 'scheduled', 'active');
 
 	insert into public.audit_logs (tenant_id, actor_id, action, table_name, record_id, new_data)
 	values (p_tenant_id, p_actor_uid, 'update_global_track', 'global_tracks',

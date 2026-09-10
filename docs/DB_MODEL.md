@@ -585,9 +585,20 @@ como acabamos con `event_catalog` sirviendo el almacén entero a todo el mundo.
 - `admin_event_pista` ordena por *lo que suena primero*: a las tres de la
   mañana es lo primero que busca el DJ.
 - `admin_update_global_track(...)` → editar una canción arregla el **almacén**,
-  no sólo esa noche, y refresca la copia de las noches que aún no han sonado.
-  Antes `update_track` escribía en `event_tracks` y la corrección duraba una
-  noche.
+  no sólo esa noche. Antes `update_track` escribía en `event_tracks` y la
+  corrección duraba una noche: al día siguiente volvía el título mal.
+
+  **Dos avisos para cuando escalemos:**
+
+  1. El refresco de la copia sólo toca noches en `draft|scheduled|active`. Una
+     noche cerrada es histórico y se queda con el texto que tenía cuando sonó
+     — y es lo que **acota la escritura**: sin ese filtro, corregir una errata
+     recorre todas las filas no sonadas del local, de todas las noches, y el
+     coste crece con cada noche que pasa.
+  2. Hoy `global_tracks` es **por sala** (`UNIQUE (tenant_id, spotify_id)`),
+     así que editar sólo afecta a ese local. **Si algún día se comparte un
+     catálogo maestro entre salas, esta función hay que replantearla**: pasaría
+     a ser "un DJ renombra una canción para todas las discotecas".
 
 ### 6.5 Panel DJ / Staff (todas validan `is_tenant_staff` y escriben en `audit_logs`)
 
