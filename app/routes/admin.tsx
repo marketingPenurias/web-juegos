@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { gsap, useGSAP } from "../lib/gsap";
 import {
 	Loader2, Lock, PartyPopper, Plus, Check, Radio, Trophy,
-	Music2, Pencil, Trash2, Save, X, Flame, Users, Coins, BarChart3,
+	Music2, Pencil, Trash2, RotateCcw, Save, X, Flame, Users, Coins, BarChart3,
 	Square, Search, CalendarClock, CalendarPlus, Play, ListMusic, Copy,
 	Library, FolderPlus, Tv, Images, Eye, EyeOff, Zap,
 } from "lucide-react";
@@ -31,7 +31,27 @@ import { NameModerationPanel } from "../components/admin/NameModerationPanel";
 
 type EventRow = { id: string; name: string; start_time: string; end_time: string | null; status: string };
 type GlobalTrack = { id: string; spotify_id: string; title: string; artist: string; cover_image_url: string | null };
-type EventTrack = GlobalTrack & { total_votes: number; is_played: boolean };
+/**
+ * Una canción en la PISTA del DJ (RPC `admin_event_pista`).
+ *
+ *   No es lo mismo que el catálogo de la sala: aquí sale TODO, incluido lo
+ *   que suena —para poder pararlo— y lo vetado —para poder deshacerlo—.  Las
+ *   banderas son lo que permite pintar la diferencia.
+ *
+ *   `id` es la de `global_tracks`, no la del evento: desde v23 la fila del
+ *   evento puede no existir todavía, así que lo único estable es la canción
+ *   del almacén.
+ */
+type EventTrack = GlobalTrack & {
+	total_votes: number;
+	is_played: boolean;
+	/** Vetada por el DJ esta noche: la sala no la ve. */
+	excluded: boolean;
+	/** Está en la selección del DJ (y por tanto la sala la ve). */
+	in_list: boolean;
+	/** ¿Ha elegido el DJ algo esta noche? Igual en todas las filas. */
+	curated: boolean;
+};
 /**
  * Una canción tal y como la ve la sala esta noche (RPC `event_catalog`).
  *
@@ -133,7 +153,21 @@ export default function Admin() {
 			eventsHistory: (data.events_history as EventRow[]) ?? [],
 			templates: (data.templates as Template[]) ?? [],
 			globalTracks: (data.global_tracks as GlobalTrack[]) ?? [],
-			eventTracks: (data.event_tracks as EventTrack[]) ?? [],
+			// La RPC devuelve `global_track_id`; el panel trabaja con `id`.
+			eventTracks: ((data.event_tracks as Array<Record<string, unknown>>) ?? []).map(
+				(t) => ({
+					id: String(t.global_track_id ?? ""),
+					spotify_id: String(t.spotify_id ?? ""),
+					title: String(t.title ?? ""),
+					artist: String(t.artist ?? ""),
+					cover_image_url: (t.cover_image_url as string | null) ?? null,
+					total_votes: Number(t.total_votes ?? 0),
+					is_played: t.is_played === true,
+					excluded: t.excluded === true,
+					in_list: t.in_list === true,
+					curated: t.curated === true,
+				}),
+			),
 			catalog: (data.catalog as CatalogTrack[]) ?? [],
 			battle: (data.battle as Battle) ?? null,
 			warnings: (data.warnings as string[]) ?? [],
@@ -159,40 +193,38 @@ export default function Admin() {
 	}) => {
 		setBoot((prev) => {
 			if (prev.phase !== "ready") return prev;
-			if (payload.eventType === "DELETE") {
-				const oldId = String(payload.old?.id ?? "");
-				return oldId
-					? { ...prev, eventTracks: prev.eventTracks.filter((t) => t.id !== oldId) }
-					: prev;
-			}
-			const row = payload.new ?? {};
-			const id = String(row.id ?? "");
-			if (!id) return prev;
-			let found = false;
-			let next = prev.eventTracks.map((t) => {
-				if (t.id !== id) return t;
-				found = true;
+			// v23 · 2c: la pista se identifica por la canción del ALMACÉN.  La
+			// fila del evento nace y muere según haga falta, así que su `id`
+			// no sirve para emparejar: el payload trae `global_track_id`.
+			const row = (payload.eventType === "DELETE" ? payload.old : payload.new) ?? {};
+			const gid = String(row.global_track_id ?? "");
+			if (!gid) return prev;
+
+			// Borrar la fila NO saca la canción de la pista del DJ: sigue en el
+			// almacén y él tiene que poder verla.  Lo que se pierde es su
+			// estado de esta noche.
+			const borrada = payload.eventType === "DELETE";
+			const next = prev.eventTracks.map((t) => {
+				if (t.id !== gid) return t;
+				if (borrada) {
+					return { ...t, total_votes: 0, is_played: false, excluded: false, in_list: false };
+				}
 				return {
 					...t,
 					total_votes: Number(row.total_votes ?? t.total_votes),
 					is_played: typeof row.is_played === "boolean" ? row.is_played : t.is_played,
+					excluded: typeof row.excluded === "boolean" ? row.excluded : t.excluded,
+					in_list: row.added_by === "dj" && row.excluded !== true,
 					title: String(row.title ?? t.title),
 					artist: String(row.artist ?? t.artist),
 					cover_image_url: (row.cover_image_url as string | null) ?? t.cover_image_url,
 				};
 			});
-			if (!found) {
-				next = [...next, {
-					id,
-					spotify_id: String(row.spotify_id ?? ""),
-					title: String(row.title ?? ""),
-					artist: String(row.artist ?? ""),
-					cover_image_url: (row.cover_image_url as string | null) ?? null,
-					total_votes: Number(row.total_votes ?? 0),
-					is_played: row.is_played === true,
-				}];
-			}
-			next = next.slice().sort((a, b) => b.total_votes - a.total_votes || a.title.localeCompare(b.title));
+			next.sort((a, b) =>
+				Number(b.is_played) - Number(a.is_played) ||
+				b.total_votes - a.total_votes ||
+				a.title.localeCompare(b.title),
+			);
 			return { ...prev, eventTracks: next };
 		});
 	}, []);
@@ -311,18 +343,35 @@ export default function Admin() {
 	// Borrado OPTIMISTA de una pista: la sacamos del estado local AL INSTANTE
 	// (UI responde sin esperar a la red) y luego confirmamos contra el backend.
 	// Si falla, revalidamos para "deshacer" el borrado optimista.
-	const removeTrackOptimistic = async (trackId: string) => {
+	/**
+	 * "Quitar" ya no borra: VETA la canción para esta noche, y se puede
+	 * deshacer.  Sin filas clonadas, borrar no excluía nada — el catálogo se
+	 * la devolvía a la sala desde el almacén.
+	 *
+	 * La fila no desaparece de la pista del DJ: se queda marcada, porque si
+	 * no, no habría forma de deshacer el veto.
+	 */
+	const toggleExcluded = async (trackId: string, excluded: boolean) => {
 		setBoot((prev) =>
 			prev.phase === "ready"
-				? { ...prev, eventTracks: prev.eventTracks.filter((t) => t.id !== trackId) }
+				? {
+						...prev,
+						eventTracks: prev.eventTracks.map((t) =>
+							t.id === trackId ? { ...t, excluded } : t,
+						),
+					}
 				: prev,
 		);
-		const r = await call("remove_track", { track_id: trackId });
+		const r = await call("exclude_track", {
+			event_id: eventId,
+			track_id: trackId,
+			excluded,
+		});
 		if (r.ok === true) {
-			flash("Canción quitada");
+			flash(excluded ? "Vetada esta noche" : "Vuelve a sonar");
 		} else {
 			flash(`⚠️ ${String(r.error ?? "error")}`);
-			await refresh(); // re-sincroniza: la canción vuelve si no se borró
+			await refresh();
 		}
 	};
 
@@ -338,7 +387,14 @@ export default function Admin() {
 	}
 
 	const { event, eventsHistory, templates, globalTracks, eventTracks, catalog, battle, warnings } = boot;
-	const eventSpotifyIds = new Set(eventTracks.map((t) => t.spotify_id));
+	// "Ya está en la fiesta" = está en la SELECCIÓN del DJ.  Antes bastaba con
+	// que existiera fila, y desde v23 hay filas que sólo guardan estado (un
+	// voto, la que suena) sin que el DJ la haya elegido.
+	const eventSpotifyIds = new Set(
+		eventTracks.filter((t) => t.in_list).map((t) => t.spotify_id),
+	);
+	// ¿Ha elegido el DJ algo esta noche?  Viene igual en todas las filas.
+	const curated = eventTracks.some((t) => t.curated);
 
 	return (
 		<div className="min-h-dvh w-full bg-zinc-950 text-white">
@@ -426,7 +482,9 @@ export default function Admin() {
 								/>
 
 								{eventTracks.length === 0 ? (
-									// Pista vacía → llamada a la acción gigante centrada.
+									// Almacén vacío → llamada a la acción gigante centrada.
+									// Ojo: desde v23 la pista SIEMPRE trae el almacén, así que
+									// esto sólo pasa si el local no tiene ni una canción.
 									<button
 										type="button"
 										onClick={() => setLoadOpen(true)}
@@ -436,7 +494,7 @@ export default function Admin() {
 											<Plus className="w-9 h-9 text-cyan-300" strokeWidth={2.5} />
 										</div>
 										<span className="text-2xl font-black italic tracking-tight">Cargar Canciones</span>
-										<span className="text-sm text-zinc-400 font-bold">Inyecta temas desde la biblioteca o una plantilla</span>
+										<span className="text-sm text-zinc-400 font-bold">Este local no tiene ninguna canción en el almacén todavía</span>
 									</button>
 								) : (
 									<>
@@ -450,6 +508,7 @@ export default function Admin() {
 										</button>
 										<PlaylistPanel
 											tracks={eventTracks}
+											curated={curated}
 											busy={busy}
 											pulse={pulse}
 											flashSpotifyId={flashSpotifyId}
@@ -457,7 +516,7 @@ export default function Admin() {
 											onNowPlaying={(id) => run("now_playing", { event_id: event.id, track_id: id }, "Sonando ahora ▶")}
 											onStopAll={() => run("stop_now_playing", { event_id: event.id }, "⏹ Nada sonando")}
 											onUpdate={(id, patch) => run("update_track", { track_id: id, ...patch }, "Canción actualizada")}
-											onRemove={(id) => removeTrackOptimistic(id)}
+											onToggleExcluded={toggleExcluded}
 										/>
 										{/* Al final de la pista: guardar la sesión como plantilla. */}
 										<button
@@ -967,15 +1026,15 @@ function LibraryPanel({ tracks, busy, onBulk }: {
 	);
 }
 
-function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, pulse = 0, onNowPlaying, onStopAll, onUpdate, onRemove }: {
-	tracks: EventTrack[]; busy: boolean;
+function PlaylistPanel({ tracks, curated, busy, flashSpotifyId, onFlashDone, pulse = 0, onNowPlaying, onStopAll, onUpdate, onToggleExcluded }: {
+	tracks: EventTrack[]; curated: boolean; busy: boolean;
 	flashSpotifyId: string | null;
 	onFlashDone: () => void;
 	pulse?: number; // se incrementa tras una inyección masiva → feedback visual
 	onNowPlaying: (id: string) => void;
 	onStopAll: () => void;
 	onUpdate: (id: string, patch: Record<string, unknown>) => void;
-	onRemove: (id: string) => void;
+	onToggleExcluded: (id: string, excluded: boolean) => void;
 }) {
 	const [editing, setEditing] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
@@ -1011,6 +1070,21 @@ function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, pulse = 0, o
 		<section ref={sectionRef} className="rounded-3xl bg-zinc-900/70 border border-zinc-800 p-5 flex flex-col gap-3 min-h-0 scroll-mt-20">
 			<div className="flex items-center justify-between gap-2">
 				<h2 ref={headerRef} className="font-black flex items-center gap-2"><Radio className="w-5 h-5 text-lime-400" /> Control de Pista (esta noche)</h2>
+				{/* Que el DJ sepa en qué estado está sin tener que deducirlo: o
+				    suena todo el almacén, o suena lo que él ha elegido. */}
+				<span
+					className={cn(
+						"shrink-0 text-[10px] uppercase tracking-widest font-black px-2.5 py-1 rounded-full border",
+						curated
+							? "text-lime-300 bg-lime-500/10 border-lime-500/40"
+							: "text-zinc-400 bg-zinc-800/60 border-zinc-700",
+					)}
+					title={curated
+						? "Sólo suena lo que has elegido"
+						: "No has elegido nada, así que suena todo el almacén"}
+				>
+					{curated ? "Tu lista" : "Suena todo"}
+				</span>
 				<button
 					type="button"
 					disabled={busy || !somethingPlaying}
@@ -1039,7 +1113,7 @@ function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, pulse = 0, o
 						onCancel={() => setEditing(null)}
 						onNowPlaying={() => onNowPlaying(tk.id)}
 						onSave={(patch) => { onUpdate(tk.id, patch); setEditing(null); }}
-						onRemove={() => onRemove(tk.id)}
+						onToggleExcluded={() => onToggleExcluded(tk.id, !tk.excluded)}
 					/>
 				))}
 			</div>
@@ -1047,11 +1121,11 @@ function PlaylistPanel({ tracks, busy, flashSpotifyId, onFlashDone, pulse = 0, o
 	);
 }
 
-function PlaylistRow({ track, busy, editing, flash, onFlashDone, onEdit, onCancel, onNowPlaying, onSave, onRemove }: {
+function PlaylistRow({ track, busy, editing, flash, onFlashDone, onEdit, onCancel, onNowPlaying, onSave, onToggleExcluded }: {
 	track: EventTrack; busy: boolean; editing: boolean;
 	flash: boolean; onFlashDone: () => void;
 	onEdit: () => void; onCancel: () => void; onNowPlaying: () => void;
-	onSave: (patch: Record<string, unknown>) => void; onRemove: () => void;
+	onSave: (patch: Record<string, unknown>) => void; onToggleExcluded: () => void;
 }) {
 	const [title, setTitle] = useState(track.title);
 	const [artist, setArtist] = useState(track.artist);
@@ -1126,15 +1200,29 @@ function PlaylistRow({ track, busy, editing, flash, onFlashDone, onEdit, onCance
 				</button>
 			)}
 			<button type="button" onClick={onEdit} title="Editar canción" className="shrink-0 w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 flex items-center justify-center active:scale-95"><Pencil className="w-4 h-4" /></button>
+			{/* Vetar ya no borra nada, así que se puede deshacer.  Antes esto
+			    borraba la fila y la canción volvía sola desde el almacén: el DJ
+			    la quitaba y seguía saliéndole a la sala. */}
 			<button
 				type="button"
 				disabled={busy}
-				onClick={onRemove}
-				title="Quitar de la pista de esta noche"
-				aria-label={`Quitar ${track.title}`}
-				className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-lg bg-rose-600 text-white border border-rose-400 font-black text-xs active:scale-95 disabled:opacity-50 shadow-[0_0_12px_rgba(244,63,94,0.4)]"
+				onClick={onToggleExcluded}
+				title={track.excluded
+					? "Devolverla a la noche"
+					: "Que no suene esta noche"}
+				aria-label={`${track.excluded ? "Devolver" : "Quitar"} ${track.title}`}
+				className={cn(
+					"shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border font-black text-xs active:scale-95 disabled:opacity-50",
+					track.excluded
+						? "bg-zinc-800 text-zinc-300 border-zinc-600"
+						: "bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.4)]",
+				)}
 			>
-				<Trash2 className="w-4 h-4" /> Quitar
+				{track.excluded ? (
+					<><RotateCcw className="w-4 h-4" /> Devolver</>
+				) : (
+					<><Trash2 className="w-4 h-4" /> Quitar</>
+				)}
 			</button>
 		</div>
 	);

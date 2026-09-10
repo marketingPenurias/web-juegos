@@ -18,6 +18,7 @@ import { normalizePriceEur, usesWholeEuros } from "./money";
  *     bootstrap · open_party · create_event · activate_event · update_event ·
  *     bulk_global · add_track · update_track · remove_track · now_playing ·
  *     stop_now_playing · start_battle · force_close_battle · metrics ·
+ *     exclude_track ·
  *     save_template · apply_template · delete_template ·
  *     track_requests · accept_request · dismiss_request
  */
@@ -54,6 +55,7 @@ type AdminBody = {
 	tv_show_now_playing?: boolean;
 	tv_show_promo?: boolean;
 	req_key?: string;
+	excluded?: boolean;
 	// V21: Flash Drops — promoción con caducidad y stock lanzada por el DJ.
 	product_id?: string;
 	promo_price_eur?: number;
@@ -202,7 +204,7 @@ export async function handleAdminAction(
 		if (!staff) {
 			return jsonResponse({ ok: true, is_staff: false }, { request });
 		}
-		return jsonResponse(await bootstrap(supabase, tenant_id), { request });
+		return jsonResponse(await bootstrap(supabase, tenant_id, verifiedId), { request });
 	}
 
 	if (!staff) {
@@ -305,33 +307,36 @@ export async function handleAdminAction(
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
 		}
 
+		// Corregir una errata arregla el ALMACÉN, que es la verdad.  Antes se
+		// escribía en `event_tracks` y la corrección duraba UNA noche.
 		case "update_track": {
 			const trackId = String(body.track_id ?? "");
 			if (!trackId) return jsonResponse({ ok: false, error: "track_id_required" }, { status: 400, request });
-			const patch: Record<string, unknown> = {};
-			if (typeof body.title === "string" && body.title.trim()) patch.title = body.title.trim().slice(0, 256);
-			if (typeof body.artist === "string" && body.artist.trim()) patch.artist = body.artist.trim().slice(0, 256);
-			if (typeof body.cover_image_url === "string") patch.cover_image_url = body.cover_image_url.trim() || null;
-			if (Object.keys(patch).length === 0) return jsonResponse({ ok: false, error: "nothing_to_update" }, { status: 400, request });
-			const { error } = await supabase.from("event_tracks").update(patch).eq("id", trackId).eq("tenant_id", tenant_id);
-			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
-			await supabase.from("audit_logs").insert({
-				tenant_id, actor_id: verifiedId, action: "update_event_track",
-				table_name: "event_tracks", record_id: trackId, new_data: patch,
+			const { data, error } = await supabase.rpc("admin_update_global_track", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_global_track_id: trackId,
+				p_title: typeof body.title === "string" ? body.title.slice(0, 256) : null,
+				p_artist: typeof body.artist === "string" ? body.artist.slice(0, 256) : null,
+				p_cover: typeof body.cover_image_url === "string" ? body.cover_image_url : null,
 			});
-			return jsonResponse({ ok: true }, { request });
+			if (error) return jsonResponse({ ok: false, error: "update_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
-		case "remove_track": {
+		// "Quitar" ya no borra: VETA para esta noche.  Sin filas clonadas,
+		// borrar no excluye nada — el catálogo devolvería la canción otra vez
+		// desde el almacén.  Y se puede deshacer.
+		case "exclude_track": {
 			const trackId = String(body.track_id ?? "");
 			if (!trackId) return jsonResponse({ ok: false, error: "track_id_required" }, { status: 400, request });
-			const { error } = await supabase.from("event_tracks").delete().eq("id", trackId).eq("tenant_id", tenant_id);
-			if (error) return jsonResponse({ ok: false, error: "delete_failed", detail: error.message }, { status: 500, request });
-			await supabase.from("audit_logs").insert({
-				tenant_id, actor_id: verifiedId, action: "remove_event_track",
-				table_name: "event_tracks", record_id: trackId,
+			const { data, error } = await supabase.rpc("admin_exclude_track", {
+				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
+				p_event_id: String(body.event_id ?? ""),
+				p_global_track_id: trackId,
+				p_excluded: body.excluded !== false,
 			});
-			return jsonResponse({ ok: true }, { request });
+			if (error) return jsonResponse({ ok: false, error: "exclude_failed", detail: error.message }, { status: 500, request });
+			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
 		// Control remoto del FONDO de la TV (V1.7).  Persistimos en
@@ -417,10 +422,13 @@ export async function handleAdminAction(
 			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 
+		// v23 · 2b: el panel identifica las canciones por la del ALMACÉN,
+		// porque la fila del evento puede no existir todavía.
 		case "now_playing": {
-			const { data } = await supabase.rpc("admin_set_now_playing", {
+			const { data } = await supabase.rpc("admin_set_now_playing_global", {
 				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
-				p_event_id: String(body.event_id ?? ""), p_track_id: String(body.track_id ?? ""),
+				p_event_id: String(body.event_id ?? ""),
+				p_global_track_id: String(body.track_id ?? ""),
 			});
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
 		}
@@ -1054,6 +1062,9 @@ export async function handleAdminAction(
 async function bootstrap(
 	supabase: ReturnType<typeof getServiceSupabase>,
 	tenant_id: string,
+	// v23 · 2b: `admin_event_pista` valida que quien pregunta sea staff, así
+	// que hace falta el uid del actor aquí dentro.
+	actor_uid: string,
 ) {
 	// V20 · FASE 1 — Nunca más listas vacías por un error tragado.  Antes cada
 	// query hacía `const { data } = await …` y descartaba el error: cuando a
@@ -1119,14 +1130,15 @@ async function bootstrap(
 	let catalog: unknown[] = [];
 	let battle: unknown = null;
 	if (event) {
-		const { data: et, error: etErr } = await supabase
-			.from("event_tracks")
-			.select("id, spotify_id, title, artist, cover_image_url, total_votes, is_played, genre")
-			.eq("tenant_id", tenant_id)
-			.eq("event_id", event.id)
-			.order("total_votes", { ascending: false })
-			.order("title", { ascending: true });
-		if (etErr) warn("event_tracks", etErr.message);
+		// La PISTA del DJ (v23 · 2b).  No es el catálogo de la sala: incluye lo
+		// que suena —para poder pararlo— y lo vetado —para poder deshacerlo—,
+		// con banderas para pintar la diferencia.  Ver `admin_event_pista`.
+		const { data: et, error: etErr } = await supabase.rpc("admin_event_pista", {
+			p_tenant_id: tenant_id,
+			p_actor_uid: actor_uid,
+			p_event_id: event.id,
+		});
+		if (etErr) warn("admin_event_pista", etErr.message);
 		eventTracks = et ?? [];
 
 		// Catálogo del evento (v23 · paso 2a).  Es lo que la sala ve de verdad:
