@@ -32,6 +32,21 @@ import { NameModerationPanel } from "../components/admin/NameModerationPanel";
 type EventRow = { id: string; name: string; start_time: string; end_time: string | null; status: string };
 type GlobalTrack = { id: string; spotify_id: string; title: string; artist: string; cover_image_url: string | null };
 type EventTrack = GlobalTrack & { total_votes: number; is_played: boolean };
+/**
+ * Una canción tal y como la ve la sala esta noche (RPC `event_catalog`).
+ *
+ *   `event_track_id` es null mientras nadie la haya tocado: desde v23 la fila
+ *   del evento se crea sólo cuando hace falta.  Por eso lo que identifica a
+ *   una canción aquí es la del ALMACÉN, que siempre existe.
+ */
+type CatalogTrack = {
+	global_track_id: string;
+	event_track_id: string | null;
+	title: string;
+	artist: string;
+	total_votes: number;
+	is_played: boolean;
+};
 type Battle = { id: string; status: string; ends_at: string } | null;
 type Metrics = { total_votes: number; tokens_spent_today: number; checkins_today: number; active_players: number };
 type Template = { id: string; name: string; created_at: string; track_count: number };
@@ -51,6 +66,7 @@ type Boot =
 			templates: Template[];
 			globalTracks: GlobalTrack[];
 			eventTracks: EventTrack[];
+			catalog: CatalogTrack[];
 			battle: Battle;
 			/** Secciones que fallaron al cargar (V20 · F1).  Vacío = todo OK. */
 			warnings: string[];
@@ -118,6 +134,7 @@ export default function Admin() {
 			templates: (data.templates as Template[]) ?? [],
 			globalTracks: (data.global_tracks as GlobalTrack[]) ?? [],
 			eventTracks: (data.event_tracks as EventTrack[]) ?? [],
+			catalog: (data.catalog as CatalogTrack[]) ?? [],
 			battle: (data.battle as Battle) ?? null,
 			warnings: (data.warnings as string[]) ?? [],
 		});
@@ -320,7 +337,7 @@ export default function Admin() {
 		return <Center><Lock className="w-12 h-12 text-rose-500" /><h1 className="text-2xl font-black italic text-white mt-3">Acceso restringido</h1><p className="text-zinc-400 mt-1">Tu cuenta no tiene rol de staff en este local.</p></Center>;
 	}
 
-	const { event, eventsHistory, templates, globalTracks, eventTracks, battle, warnings } = boot;
+	const { event, eventsHistory, templates, globalTracks, eventTracks, catalog, battle, warnings } = boot;
 	const eventSpotifyIds = new Set(eventTracks.map((t) => t.spotify_id));
 
 	return (
@@ -378,7 +395,7 @@ export default function Admin() {
 							<div className="flex flex-col gap-5">
 								<BattlePanel
 									battle={battle}
-									tracks={eventTracks}
+									tracks={catalog}
 									busy={busy}
 									onStart={(trackA, trackB, minutes) => run("start_battle", { event_id: event.id, track_a: trackA, track_b: trackB, minutes }, "¡Batalla iniciada!")}
 									onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
@@ -633,7 +650,7 @@ function MetricsRow({ metrics }: { metrics: Metrics | null }) {
 }
 
 function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
-	battle: Battle; tracks: EventTrack[]; busy: boolean;
+	battle: Battle; tracks: CatalogTrack[]; busy: boolean;
 	onStart: (trackA: string, trackB: string, minutes: number) => void;
 	onForceClose: () => void;
 }) {
@@ -642,7 +659,8 @@ function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
 	const [trackB, setTrackB] = useState("");
 	const live = battle && battle.status === "live";
 
-	// Sólo pistas elegibles: no sonadas (el RPC también lo valida server-side).
+	// Sólo pistas elegibles: no sonadas (el RPC también lo valida server-side,
+	// y además comprueba que sigan visibles en el catálogo del evento).
 	const eligible = tracks.filter((t) => !t.is_played);
 	const canStart = !!trackA && !!trackB && trackA !== trackB;
 
@@ -676,7 +694,7 @@ function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
 						</button>
 					</div>
 					{eligible.length < 2 && (
-						<p className="text-[11px] text-zinc-500">Necesitas al menos 2 canciones sin sonar en la fiesta para montar una batalla.</p>
+						<p className="text-[11px] text-zinc-500">Necesitas al menos 2 canciones disponibles esta noche para montar una batalla.</p>
 					)}
 				</>
 			) : (
@@ -688,7 +706,7 @@ function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
 
 function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 	label: string; value: string; onChange: (v: string) => void;
-	tracks: EventTrack[]; disabledId: string; accent: "cyan" | "amber";
+	tracks: CatalogTrack[]; disabledId: string; accent: "cyan" | "amber";
 }) {
 	const ring = accent === "cyan" ? "border-cyan-500/40" : "border-amber-500/40";
 	return (
@@ -701,7 +719,11 @@ function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 			>
 				<option value="">— Elegir canción —</option>
 				{tracks.map((t) => (
-					<option key={t.id} value={t.id} disabled={t.id === disabledId}>
+					<option
+						key={t.global_track_id}
+						value={t.global_track_id}
+						disabled={t.global_track_id === disabledId}
+					>
 						{t.title} · {t.artist} ({t.total_votes})
 					</option>
 				))}

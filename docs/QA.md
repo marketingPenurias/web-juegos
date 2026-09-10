@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **10 de septiembre de 2026** · **52 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
+Estado a **10 de septiembre de 2026** · **55 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -78,6 +78,8 @@ siempre, así que las plantillas no acotaban nada y «Quitar» no quitaba.
 | **Deshacer el veto** | Vuelve todo · y no deja fila detrás |
 | Poner una que nadie había tocado | Se materializa y suena |
 | **Poner la 1ª en una fiesta sin curar** | **El catálogo NO se vacía** · sigue sonando todo |
+| Montar una batalla con la fiesta vacía | Se puede · y **no reduce el repertorio a esas dos** |
+| Enfrentar una canción vetada | Rechazado |
 
 ### Reset de votos al pinchar · v23
 

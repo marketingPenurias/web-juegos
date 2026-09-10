@@ -27,7 +27,7 @@ declare
 	v_b uuid; v_sb_ini int; v_ref_ini uuid; v_code text;
 	r jsonb; v_err text; v_n int;
 	v_r1 uuid; v_r2 uuid; v_r3 uuid; v_votos int; v_lva timestamptz; v_base int;
-	v_reqkey text; v_sel uuid; v_lib int; v_g uuid; v_et uuid;
+	v_reqkey text; v_sel uuid; v_lib int; v_g uuid; v_g2 uuid; v_g3 uuid; v_et uuid;
 begin
 	select id into v_t    from tenants where slug='prueba';
 	select id into v_otro from tenants where slug='lapocha';
@@ -375,7 +375,9 @@ begin
 	insert into qa values ('Selección','fiesta vacía · se ve todo el almacén',
 		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
 
-	select id into v_g from global_tracks where tenant_id=v_t order by title limit 1;
+	select id into v_g  from global_tracks where tenant_id=v_t order by title limit 1;
+	select id into v_g2 from global_tracks where tenant_id=v_t order by title offset 1 limit 1;
+	select id into v_g3 from global_tracks where tenant_id=v_t order by title offset 2 limit 1;
 	v_et := ensure_event_track(v_t, v_sel, v_g);
 	select count(*) into v_n from event_catalog(v_sel, 5000, null);
 	insert into qa values ('Selección','un voto NO convierte la fiesta en lista',
@@ -432,6 +434,25 @@ begin
 		case when (select added_by from event_tracks where event_id = v_sel and global_track_id = v_g) = 'vote'
 		     then 'ok' else 'FALLO' end);
 
+	-- Batalla desde el catálogo (v23 · 2a).  Montar un duelo tampoco es
+	-- curar: si estas dos filas contaran como lista, la fiesta se reduciría
+	-- a las dos canciones enfrentadas.
+	delete from event_tracks where event_id = v_sel;
+	r := admin_start_battle_global(v_t, v_actor, v_sel, v_g, v_g2, 3);
+	insert into qa values ('Selección','batalla en fiesta vacía · se puede montar','ok',
+		coalesce(r->>'ok','—'), case when (r->>'ok')::boolean then 'ok' else 'FALLO' end);
+	select count(*) into v_n from event_catalog(v_sel, 100000, null);
+	insert into qa values ('Selección','y el duelo NO reduce el repertorio a dos',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+	update live_battles set status='closed' where event_id = v_sel;
+
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g3, true);
+	r := admin_start_battle_global(v_t, v_actor, v_sel, v_g3, v_g, 3);
+	insert into qa values ('Selección','no se puede enfrentar una vetada','invalid_tracks',
+		coalesce(r->>'error','la aceptó'),
+		case when r->>'error' = 'invalid_tracks' then 'ok' else 'FALLO' end);
+
+	delete from live_battles where event_id = v_sel;
 	delete from track_votes  where event_id = v_sel;
 	delete from event_tracks where event_id = v_sel;
 	delete from tenant_events where id = v_sel;

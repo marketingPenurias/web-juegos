@@ -525,6 +525,12 @@ export async function handleAdminAction(
 
 		case "start_battle": {
 			// El DJ ELIGE las dos pistas (control creativo, V1.6 B6).
+			//
+			// v23 · 2a: ahora se eligen del CATÁLOGO, no de las filas del
+			// evento.  Con las filas perezosas, la mayoría de canciones no
+			// tienen fila y los desplegables se quedaban casi vacíos justo al
+			// principio de la noche, que es cuando se monta la batalla.  El
+			// RPC valida que las dos se puedan enfrentar y las materializa.
 			const trackA = String(body.track_a ?? "");
 			const trackB = String(body.track_b ?? "");
 			if (!trackA || !trackB) {
@@ -533,10 +539,10 @@ export async function handleAdminAction(
 			if (trackA === trackB) {
 				return jsonResponse({ ok: false, error: "tracks_must_differ" }, { status: 400, request });
 			}
-			const { data } = await supabase.rpc("admin_start_battle", {
+			const { data } = await supabase.rpc("admin_start_battle_global", {
 				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
 				p_event_id: String(body.event_id ?? ""),
-				p_track_a: trackA, p_track_b: trackB,
+				p_global_a: trackA, p_global_b: trackB,
 				p_minutes: Number.isInteger(body.minutes) ? Number(body.minutes) : 3,
 			});
 			return jsonResponse(data ?? { ok: false, error: "rpc_failed" }, { request });
@@ -1110,6 +1116,7 @@ async function bootstrap(
 	if (globalErr) warn("global_tracks", globalErr.message);
 
 	let eventTracks: unknown[] = [];
+	let catalog: unknown[] = [];
 	let battle: unknown = null;
 	if (event) {
 		const { data: et, error: etErr } = await supabase
@@ -1121,6 +1128,18 @@ async function bootstrap(
 			.order("title", { ascending: true });
 		if (etErr) warn("event_tracks", etErr.message);
 		eventTracks = et ?? [];
+
+		// Catálogo del evento (v23 · paso 2a).  Es lo que la sala ve de verdad:
+		// el almacén si el DJ no ha elegido nada, o su lista si ha elegido.
+		// Se añade SIN tocar `event_tracks`, que sigue alimentando el listado,
+		// el selector y el Realtime — así este paso no puede romperlos.
+		const { data: cat, error: catErr } = await supabase.rpc("event_catalog", {
+			p_event_id: event.id,
+			p_limit: 100000,
+			p_exclude_voted_by: null,
+		});
+		if (catErr) warn("event_catalog", catErr.message);
+		catalog = cat ?? [];
 
 		const { data: b, error: bErr } = await supabase
 			.from("live_battles")
@@ -1144,6 +1163,7 @@ async function bootstrap(
 		templates,
 		global_tracks: globalTracks ?? [],
 		event_tracks: eventTracks,
+		catalog,
 		battle,
 		// Vacío = todo cargó bien.  Con contenido, el panel avisa en vez de
 		// mostrar secciones vacías como si no hubiera datos (F1).
