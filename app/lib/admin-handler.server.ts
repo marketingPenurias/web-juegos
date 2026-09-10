@@ -19,7 +19,7 @@ import { normalizePriceEur, usesWholeEuros } from "./money";
  *     bulk_global · add_track · update_track · remove_track · now_playing ·
  *     stop_now_playing · start_battle · force_close_battle · metrics ·
  *     save_template · apply_template · delete_template ·
- *     track_requests · add_requested_track · dismiss_request
+ *     track_requests · accept_request · dismiss_request
  */
 
 type AdminBody = {
@@ -53,6 +53,7 @@ type AdminBody = {
 	// derecha) junto al ranking (mitad izquierda).
 	tv_show_now_playing?: boolean;
 	tv_show_promo?: boolean;
+	req_key?: string;
 	// V21: Flash Drops — promoción con caducidad y stock lanzada por el DJ.
 	product_id?: string;
 	promo_price_eur?: number;
@@ -402,27 +403,17 @@ export async function handleAdminAction(
 			return jsonResponse({ ok: true, requests: data ?? [] }, { request });
 		}
 
-		case "add_requested_track": {
-			const eventId = String(body.event_id ?? "");
-			const globalId = String(body.global_id ?? "");
-			if (!eventId || !globalId) return jsonResponse({ ok: false, error: "event_and_track_required" }, { status: 400, request });
-			const { data, error } = await supabase.rpc("admin_add_requested_track", {
-				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
-				p_event_id: eventId, p_global_track_id: globalId,
-			});
-			if (error) return jsonResponse({ ok: false, error: "add_failed", detail: error.message }, { status: 500, request });
-			return jsonResponse((data ?? { ok: false }) as object, { request });
-		}
-
+		case "accept_request":
 		case "dismiss_request": {
 			const eventId = String(body.event_id ?? "");
-			const globalId = String(body.global_id ?? "");
-			if (!eventId || !globalId) return jsonResponse({ ok: false, error: "event_and_track_required" }, { status: 400, request });
-			const { data, error } = await supabase.rpc("admin_dismiss_request", {
+			const reqKey = String(body.req_key ?? "");
+			if (!eventId || !reqKey) return jsonResponse({ ok: false, error: "event_and_request_required" }, { status: 400, request });
+			const rpc = op === "accept_request" ? "admin_accept_request" : "admin_dismiss_request";
+			const { data, error } = await supabase.rpc(rpc, {
 				p_tenant_id: tenant_id, p_actor_uid: verifiedId,
-				p_event_id: eventId, p_global_track_id: globalId,
+				p_event_id: eventId, p_req_key: reqKey,
 			});
-			if (error) return jsonResponse({ ok: false, error: "dismiss_failed", detail: error.message }, { status: 500, request });
+			if (error) return jsonResponse({ ok: false, error: "resolve_failed", detail: error.message }, { status: 500, request });
 			return jsonResponse((data ?? { ok: false }) as object, { request });
 		}
 

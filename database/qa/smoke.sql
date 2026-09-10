@@ -27,6 +27,7 @@ declare
 	v_b uuid; v_sb_ini int; v_ref_ini uuid; v_code text;
 	r jsonb; v_err text; v_n int;
 	v_r1 uuid; v_r2 uuid; v_r3 uuid; v_votos int; v_lva timestamptz; v_base int;
+	v_reqkey text; v_sel uuid; v_lib int; v_g uuid; v_et uuid;
 begin
 	select id into v_t    from tenants where slug='prueba';
 	select id into v_otro from tenants where slug='lapocha';
@@ -313,15 +314,106 @@ begin
 		v_votos::text, case when v_votos=1 then 'ok' else 'FALLO' end);
 	update live_battles set status='closed' where event_id=v_ev and status='live';
 
+	-- ═══ PEDIRLE UNA CANCIÓN QUE NO TENEMOS (v23) ═══════════════════════
+	--
+	--   El Jukebox ya sirve el repertorio entero de la sala, así que lo que
+	--   está guardado NO es una petición.  Esto cubre lo que falta, en texto
+	--   libre, y lo que decide es cuánta gente pide lo mismo.
+	r := request_new_track(v_t, v_u, v_ev, 'Zzz Tema Inexistente QA', 'QA Artista');
+	insert into qa values ('Peticiones','pedir algo que la sala no tiene','aceptada',
+		coalesce(r->>'ok','—'), case when (r->>'ok')::boolean then 'ok' else 'FALLO' end);
+
+	r := request_new_track(v_t, v_u, v_ev, '  zzz  tema   inexistente qa ', 'qa artista');
+	insert into qa values ('Peticiones','la misma escrita distinta no cuela dos veces',
+		'already_requested', coalesce(r->>'error','la aceptó'),
+		case when r->>'error'='already_requested' then 'ok' else 'FALLO' end);
+
+	r := request_new_track(v_t, v_b, v_ev, 'Zzz Tema Inexistente QA', 'QA Artista');
+	insert into qa values ('Peticiones','otra persona pide la misma · la señal sube','2',
+		coalesce(r->>'requests','—'),
+		case when r->>'requests'='2' then 'ok' else 'FALLO' end);
+
+	r := request_new_track(v_t, v_u, v_ev, 'QA tema 1', null);
+	insert into qa values ('Peticiones','pedir algo que SÍ tenemos','already_in_library',
+		coalesce(r->>'error','la aceptó'),
+		case when r->>'error'='already_in_library' then 'ok' else 'FALLO' end);
+
+	r := request_new_track(v_t, v_u, v_ev, 'x', null);
+	insert into qa values ('Peticiones','un título de una letra','invalid_title',
+		coalesce(r->>'error','la aceptó'),
+		case when r->>'error'='invalid_title' then 'ok' else 'FALLO' end);
+
+	select count(*) into v_n from get_track_requests(v_t, v_actor, v_ev);
+	insert into qa values ('Peticiones','una fila por canción, no por petición','1',
+		v_n::text, case when v_n=1 then 'ok' else 'FALLO' end);
+	select count(*) into v_n from get_track_requests(v_t, v_u, v_ev);
+	insert into qa values ('Peticiones','un cliente no ve el panel del DJ','0',
+		v_n::text, case when v_n=0 then 'ok' else 'FALLO' end);
+
+	select req_key into v_reqkey from get_track_requests(v_t, v_actor, v_ev) limit 1;
+	r := admin_accept_request(v_t, v_actor, v_ev, v_reqkey);
+	select count(*) into v_n from event_tracks
+	 where event_id=v_ev and spotify_id like 'pedido:%';
+	insert into qa values ('Peticiones','al aceptarla entra en la fiesta','1',
+		v_n::text, case when v_n=1 then 'ok' else 'FALLO' end);
+	select count(*) into v_n from get_track_requests(v_t, v_actor, v_ev);
+	insert into qa values ('Peticiones','y sale de pendientes','0',
+		v_n::text, case when v_n=0 then 'ok' else 'FALLO' end);
+
+	-- ═══ LA FIESTA ES LO QUE HA ELEGIDO EL DJ (v23) ═════════════════════
+	--
+	--   La trampa está en el segundo caso: `ensure_event_track` crea una fila
+	--   en CADA voto, así que "la fiesta tiene canciones" no puede significar
+	--   "hay filas en event_tracks" — una fiesta vacía donde alguien vota se
+	--   quedaría con esa única canción.
+	select count(*) into v_lib from global_tracks where tenant_id = v_t;
+	insert into tenant_events(tenant_id,name,status,start_time,end_time)
+	values (v_t,'QA selección','scheduled', now()-interval '1 hour', now()+interval '6 hours')
+	returning id into v_sel;
+
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','fiesta vacía · se ve todo el almacén',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+
+	select id into v_g from global_tracks where tenant_id=v_t order by title limit 1;
+	v_et := ensure_event_track(v_t, v_sel, v_g);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','un voto NO convierte la fiesta en lista',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+	insert into qa values ('Selección','la fila del voto queda marcada','vote',
+		(select added_by from event_tracks where id = v_et),
+		case when (select added_by from event_tracks where id = v_et) = 'vote'
+		     then 'ok' else 'FALLO' end);
+
+	insert into event_tracks(tenant_id,event_id,global_track_id,spotify_id,title,artist,genre,total_votes,is_played)
+	select v_t, v_sel, g.id, g.spotify_id, g.title, g.artist, g.genre, 0, false
+	from global_tracks g where g.tenant_id=v_t and g.id <> v_g order by g.title limit 3;
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','el DJ carga 3 · sólo se ven ésas','3',
+		v_n::text, case when v_n = 3 then 'ok' else 'FALLO' end);
+
+	delete from event_tracks where event_id = v_sel and added_by = 'dj'
+	  and id = (select id from event_tracks where event_id = v_sel and added_by='dj'
+	            order by title limit 1);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','el DJ quita una · desaparece de verdad','2',
+		v_n::text, case when v_n = 2 then 'ok' else 'FALLO' end);
+
+	delete from track_votes  where event_id = v_sel;
+	delete from event_tracks where event_id = v_sel;
+	delete from tenant_events where id = v_sel;
+
 	-- ═══ DESHACER ═══════════════════════════════════════════════════════
 	-- Orden importa: los movimientos de cartera apuntan a la fiesta con una
 	-- clave foránea, así que se van ANTES que ella.
+	delete from track_requests where event_id = v_ev;
 	delete from track_votes   where event_id = v_ev;
 	delete from user_rewards  where event_id = v_ev;
 	delete from wallet_ledger where event_id = v_ev;
 	delete from live_battles  where event_id = v_ev;
 	delete from event_tracks where event_id = v_ev;
 	delete from tenant_events where id = v_ev;
+	delete from global_tracks where tenant_id = v_t and spotify_id like 'pedido:%';
 	delete from venue_visits  where user_id = v_b
 	  and business_night(entry_time) = business_night(now());
 	delete from wallet_ledger where user_id in (v_u, v_b)

@@ -78,6 +78,10 @@ export function RuletaRondas() {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const wheelRef = useRef<SVGSVGElement>(null);
 	const totalRotationRef = useRef(0);
+	// Cómo ha ido el cobro de esta tirada.  `null` = todavía no ha contestado
+	// el servidor.  Hace falta guardarlo porque el aviso se da cuando la rueda
+	// para, cinco segundos y medio después de pedirlo.
+	const claimRef = useRef<{ ok: boolean } | null>(null);
 
 	const [spinning, setSpinning] = useState(false);
 	const [panelOpen, setPanelOpen] = useState(true);
@@ -194,7 +198,9 @@ export function RuletaRondas() {
 		// avisamos con un toast.  Cero "tokens fantasma" tras reconciliar.
 		addTokens(SPIN_REWARD, "history.tx_ruleta");
 		markDaily("ruleta_spin"); // misión reactiva: check verde al instante
+		claimRef.current = null;
 		void claim("ruleta_spin", activeEventId).then((result) => {
+			claimRef.current = { ok: result.ok };
 			if (!result.ok) {
 				setTone("warning");
 				setToast(translateClaimError(result.error));
@@ -241,10 +247,19 @@ export function RuletaRondas() {
 				totalRotationRef.current = finalRotation;
 				setLoserIndex(players[targetPos].idx);
 				setSpinning(false);
-				setTone("success");
-				setToast(
-					t("ruleta.tokensWon", "+{{n}} tokens por girar", { n: SPIN_REWARD }),
-				);
+				// Sólo se canta el premio si de verdad se ha cobrado.  Antes se
+				// cantaba siempre: en la segunda tirada de la noche el saldo no
+				// se movía —el límite es una por noche— y la app seguía diciendo
+				// "+15 tokens ✓".  Decirle a alguien que ha ganado fichas que no
+				// tiene es de lo peor que puede hacer esta app.
+				if (claimRef.current?.ok) {
+					setTone("success");
+					setToast(
+						t("ruleta.tokensWon", "+{{n}} tokens por girar", {
+							n: SPIN_REWARD,
+						}),
+					);
+				}
 			},
 		});
 	};

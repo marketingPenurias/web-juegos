@@ -15,7 +15,6 @@ import { VENUE_TZ, toLocalInput, fromLocalInput } from "../lib/madrid-time";
 import { FlashDropPanel } from "../components/admin/FlashDropPanel";
 import { PromoConfigPanel } from "../components/admin/PromoConfigPanel";
 import { NameModerationPanel } from "../components/admin/NameModerationPanel";
-import { TrackRequestsPanel } from "../components/admin/TrackRequestsPanel";
 
 /**
  * /admin — Consola del DJ / Staff (Bloque 4).
@@ -383,12 +382,6 @@ export default function Admin() {
 									busy={busy}
 									onStart={(trackA, trackB, minutes) => run("start_battle", { event_id: event.id, track_a: trackA, track_b: trackB, minutes }, "¡Batalla iniciada!")}
 									onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
-								/>
-
-								<TrackRequestsPanel
-									call={call}
-									eventId={event.id}
-									onToast={flash}
 								/>
 
 								<TvControlPanel

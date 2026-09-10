@@ -94,13 +94,13 @@ export function FlashDropAlert({
 	return (
 		<div
 			ref={rootRef}
-			className="absolute inset-0 z-[48] bg-black/90 backdrop-blur-xl flex items-center justify-center px-16"
+			className="absolute inset-0 z-[48] bg-black/90 backdrop-blur-xl flex items-center justify-center overflow-hidden px-8 py-8 xl:px-16"
 			role="status"
 			aria-live="polite"
 		>
-			<div className="w-full max-w-[1500px] grid grid-cols-[1fr_auto] gap-20 items-center">
-				<div className="min-w-0">
-					<div className="fda-in flex items-center gap-4">
+			<div className="w-full max-w-[1500px] grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-10 xl:gap-20 items-center justify-items-center xl:justify-items-stretch">
+				<div className="min-w-0 text-center xl:text-left">
+					<div className="fda-in flex items-center justify-center xl:justify-start gap-4">
 						<span className="fda-bolt inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-fuchsia-400">
 							<Zap className="w-9 h-9 text-black" aria-hidden="true" />
 						</span>
@@ -109,23 +109,23 @@ export function FlashDropAlert({
 						</span>
 					</div>
 
-					<h2 className="fda-in mt-6 text-8xl font-black italic tracking-tighter leading-[0.9] truncate">
+					<h2 className="fda-in mt-6 text-5xl sm:text-6xl xl:text-8xl font-black italic tracking-tighter leading-[0.9] truncate">
 						{drop.label ?? drop.product_name}
 					</h2>
 
-					<div className="fda-in mt-8 flex items-baseline gap-6">
+					<div className="fda-in mt-8 flex flex-wrap items-baseline justify-center xl:justify-start gap-4 xl:gap-6">
 						{drop.list_price_eur !== null && (
-							<span className="text-6xl font-black tabular-nums text-zinc-600 line-through">
+							<span className="text-4xl xl:text-6xl font-black tabular-nums text-zinc-600 line-through">
 								{eur(drop.list_price_eur)}
 							</span>
 						)}
-						<span className="text-8xl font-black tabular-nums text-amber-300 drop-shadow-[0_0_40px_rgba(252,211,77,0.5)]">
+						<span className="text-6xl xl:text-8xl font-black tabular-nums text-amber-300 drop-shadow-[0_0_40px_rgba(252,211,77,0.5)]">
 							{eur(drop.promo_price_eur)}
 						</span>
 					</div>
 
 					{left !== null && (
-						<p className="fda-in mt-6 text-3xl font-black uppercase tracking-widest text-zinc-400">
+						<p className="fda-in mt-6 text-xl xl:text-3xl font-black uppercase tracking-widest text-zinc-400">
 							Sólo quedan{" "}
 							<span className="text-white tabular-nums">{left}</span>
 						</p>
@@ -140,7 +140,7 @@ export function FlashDropAlert({
 							marginSize={0}
 							fgColor="#000000"
 							bgColor="#ffffff"
-							className="w-72 h-72"
+							className="w-52 h-52 xl:w-72 xl:h-72"
 						/>
 					</div>
 					<p className="text-3xl font-black italic tracking-tight">

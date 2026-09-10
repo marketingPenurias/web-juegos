@@ -1,6 +1,6 @@
 # QA · Qué está probado y qué no
 
-Estado a **9 de septiembre de 2026** · **52 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
+Estado a **9 de septiembre de 2026** · **47 comprobaciones automáticas + 12 en la interfaz**. Se actualiza cada vez que se pasa el QA.
 
 La prueba automática vive en `database/qa/smoke.sql`: se ejecuta entera contra
 la sala `prueba` y **deshace todo lo que toca**. Cualquier fila con `FALLO` hay
@@ -45,19 +45,35 @@ que mirarla antes de desplegar.
 | Aplicar la misma plantilla dos veces | Añade 0 · no duplica |
 | Añadir dos veces la misma canción | Rechazada |
 
-### Pedirle una canción al DJ · v23
+### Pedirle una canción que la sala no tiene · v23 · **EN REPOSO**
+
+La maquinaria está probada y aplicada, pero **desconectada de la interfaz** a la
+espera de decidir cómo hacerla bien (ver `PETICIONES.md`). Las comprobaciones
+siguen pasando y protegen lo que hay en la base de datos.
 
 | Caso | Resultado |
 | :-- | :-- |
-| Pedir una que el DJ tiene pero no cargó hoy | Aceptada |
-| Pedir una que ya está en la fiesta | Rechazada · que la voten |
-| La misma persona, dos veces | Rechazada |
+| Pedir algo que la sala no tiene | Aceptada |
+| La misma canción escrita distinta | No cuela dos veces |
 | **Otra persona pide la misma** | **La señal sube a 2** |
-| Cuarta petición de la noche | Rechazada · 3 por persona |
+| Pedir algo que **sí** tenemos | Rechazada · te dice cómo buscarlo |
+| Un título de una letra | Rechazado |
 | Lo que ve el DJ | Una fila por canción, la más pedida arriba |
 | Un cliente mirando el panel | No ve nada |
-| El DJ la acepta | Entra **con género y enlace al almacén** |
-| Aceptada o descartada | Sale de pendientes |
+| El DJ la acepta | Entra en el almacén y en la fiesta |
+
+### La fiesta es lo que ha elegido el DJ · v23
+
+Se arregló el 9 de septiembre: `event_catalog` devolvía el almacén entero
+siempre, así que las plantillas no acotaban nada y «Quitar» no quitaba.
+
+| Caso | Resultado |
+| :-- | :-- |
+| Fiesta vacía (el DJ no preparó nada) | Se ve el almacén entero · como hasta ahora |
+| **Alguien vota en una fiesta vacía** | **NO se convierte en «lista de una canción»** |
+| Esa fila queda marcada | `added_by = 'vote'` |
+| El DJ carga 3 temas | Solo se ven esos 3 |
+| El DJ quita uno | **Desaparece de verdad** |
 
 ### Reset de votos al pinchar · v23
 
@@ -147,8 +163,6 @@ que no lo sabemos.**
   de punta a punta; la parte del DJ (lanzar y cerrar) sí está probada.
 - **Pedir y boostear una canción** desde el Jukebox. El catálogo carga, pero
   no se ha pulsado PEDIR ni BOOST.
-- **El aviso nuevo del Jukebox** («solo las canciones que ha elegido el DJ»)
-  está escrito y compila, pero no se ha visto con una sesión real delante.
 - **Las pantallas de TV.** Ni el jumbotron ni el dashboard de pantalla.
 - **El circuito de invitación desde dos teléfonos.** La maquinaria está
   probada y paga bien; falta el recorrido humano: A comparte, B abre el enlace,

@@ -8,11 +8,9 @@ type Call = (
 ) => Promise<Record<string, unknown>>;
 
 type Request = {
-	global_track_id: string;
+	req_key: string;
 	title: string;
-	artist: string;
-	genre: string | null;
-	cover_image_url: string | null;
+	artist: string | null;
 	people: number;
 	first_asked: string;
 };
@@ -57,16 +55,11 @@ export function TrackRequestsPanel({
 	}, [load]);
 
 	const resolve = async (op: string, r: Request, msg: string) => {
-		setBusy(r.global_track_id);
-		const res = await call(op, {
-			event_id: eventId,
-			global_id: r.global_track_id,
-		});
+		setBusy(r.req_key);
+		const res = await call(op, { event_id: eventId, req_key: r.req_key });
 		setBusy(null);
 		if (res.ok) {
-			setRequests((cur) =>
-				cur.filter((x) => x.global_track_id !== r.global_track_id),
-			);
+			setRequests((cur) => cur.filter((x) => x.req_key !== r.req_key));
 			onToast(msg);
 		} else {
 			onToast("No se pudo · inténtalo otra vez");
@@ -87,28 +80,25 @@ export function TrackRequestsPanel({
 
 			{requests.length === 0 ? (
 				<p className="text-[11px] text-zinc-500">
-					Nadie ha pedido nada todavía. Cuando alguien busque en la app una
-					canción que tienes guardada pero no cargaste esta noche, aparecerá
-					aquí.
+					Nadie ha pedido nada todavía. Aquí aparecen las canciones que la
+					gente busca en la app y <b>no tienes en el almacén</b>: lo que sí
+					tienes ya lo pueden pedir ellos solos desde el Jukebox.
 				</p>
 			) : (
 				<>
 					<p className="text-[11px] text-zinc-500">
-						Ordenadas por cuánta gente las pide. Todas están ya en tu almacén:
-						aceptar la mete en la fiesta al instante.
+						Ordenadas por cuánta gente las pide. Son canciones que no tienes:
+						«Ponerla» la mete en el almacén y en la fiesta de esta noche, sin
+						género ni carátula — eso lo completas luego desde el almacén.
 					</p>
 					<div className="flex flex-col gap-2">
 						{requests.map((r) => (
 							<div
-								key={r.global_track_id}
+								key={r.req_key}
 								className="flex items-center gap-3 rounded-2xl bg-zinc-950/60 border border-zinc-800 p-3"
 							>
-								<div className="w-12 h-12 rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
-									{r.cover_image_url ? (
-										<img src={r.cover_image_url} alt="" className="w-full h-full object-cover" />
-									) : (
-										<Music2 className="w-5 h-5 text-zinc-600" aria-hidden="true" />
-									)}
+								<div className="w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
+									<Music2 className="w-5 h-5 text-zinc-600" aria-hidden="true" />
 								</div>
 
 								<div className="text-center shrink-0 w-12">
@@ -123,18 +113,17 @@ export function TrackRequestsPanel({
 								<div className="flex-1 min-w-0">
 									<p className="font-black truncate">{r.title}</p>
 									<p className="text-xs text-zinc-500 truncate">
-										{r.artist}
-										{r.genre ? ` · ${r.genre}` : ""}
+										{r.artist || "sin artista"}
 									</p>
 								</div>
 
 								<button
 									type="button"
-									disabled={busy === r.global_track_id}
-									onClick={() => void resolve("add_requested_track", r, `“${r.title}” añadida a la fiesta`)}
+									disabled={busy === r.req_key}
+									onClick={() => void resolve("accept_request", r, `“${r.title}” añadida`)}
 									className={cn(
 										"h-10 px-4 rounded-xl bg-lime-500 text-black font-black text-sm inline-flex items-center gap-2 active:scale-95 shrink-0",
-										busy === r.global_track_id && "opacity-40",
+										busy === r.req_key && "opacity-40",
 									)}
 								>
 									<Check className="w-4 h-4" />
@@ -142,7 +131,7 @@ export function TrackRequestsPanel({
 								</button>
 								<button
 									type="button"
-									disabled={busy === r.global_track_id}
+									disabled={busy === r.req_key}
 									onClick={() => void resolve("dismiss_request", r, "Descartada")}
 									aria-label={`Descartar ${r.title}`}
 									className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-500 inline-flex items-center justify-center active:scale-95 shrink-0 disabled:opacity-40"
