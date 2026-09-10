@@ -496,13 +496,25 @@ export async function handleAdminAction(
 			// Es lo que tumbó la noche del 3 de septiembre: se activó diez
 			// minutos antes de cargar las canciones, y nadie avisó de nada.
 			// Ahora hay que confirmarlo a propósito.
+			// ¿Va a ver algo la sala?
+			//
+			//   Esto contaba filas de `event_tracks`, y desde v23 estar vacío
+			//   es el estado NORMAL: significa "suena todo el almacén".  El DJ
+			//   se habría comido una advertencia falsa cada vez que activa una
+			//   fiesta sin preparar, que es la mejor forma de enseñarle a
+			//   ignorar los avisos.
+			//
+			//   La pregunta buena no es "¿hay filas?" sino "¿va a poder votar
+			//   algo la gente?", y eso lo contesta el mismo catálogo que ve la
+			//   sala.  Además cubre un caso que antes se escapaba: una fiesta
+			//   con lista donde el DJ lo ha vetado o pinchado todo.
 			if (body.confirm_empty !== true) {
-				const { count } = await supabase
-					.from("event_tracks")
-					.select("id", { count: "exact", head: true })
-					.eq("tenant_id", tenant_id)
-					.eq("event_id", eventId);
-				if ((count ?? 0) === 0) {
+				const { data: peek } = await supabase.rpc("event_catalog", {
+					p_event_id: eventId,
+					p_limit: 1,
+					p_exclude_voted_by: null,
+				});
+				if (((peek as unknown[] | null) ?? []).length === 0) {
 					return jsonResponse(
 						{ ok: false, error: "event_has_no_tracks" },
 						{ status: 409, request },

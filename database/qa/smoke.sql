@@ -473,6 +473,9 @@ begin
 		case when (select count(*) from admin_event_pista(v_t, v_u, v_sel)) = 0
 		     then 'ok' else 'FALLO' end);
 
+	-- Abrir la fiesta ya no clona el almacén (v23 · paso 3).  Con la regla de
+	-- la 51, una fiesta sin canciones del DJ significa "suena todo": clonar
+	-- las 759 dejó de arreglar nada y volvió a ser el problema que V20 quitó.
 	delete from live_battles where event_id = v_sel;
 	delete from track_votes  where event_id = v_sel;
 	delete from event_tracks where event_id = v_sel;

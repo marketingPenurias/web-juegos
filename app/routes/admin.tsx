@@ -324,10 +324,11 @@ export default function Admin() {
 		const r = await run("activate_event", { event_id: id }, "Evento activado");
 		if (r.ok === false && r.error === "event_has_no_tracks") {
 			const seguir = window.confirm(
-				"Esta fiesta no tiene ninguna canción todavía.\n\n" +
-					"Si la activas ahora, quien abra la app verá el Jukebox y el Tinder " +
-					"vacíos, y seguirá viéndolos vacíos aunque cargues las canciones " +
-					"después — hasta que cierre y vuelva a abrir la app.\n\n" +
+				"Con esta fiesta, la gente NO va a poder votar ninguna canción.\n\n" +
+					"O el almacén del local está vacío, o has quitado o pinchado todo " +
+					"lo que habías elegido.\n\n" +
+					"Si la activas así, quien abra la app verá el Jukebox y el Tinder " +
+					"vacíos.\n\n" +
 					"¿Activarla igualmente?",
 			);
 			if (seguir) {

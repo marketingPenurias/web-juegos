@@ -603,6 +603,9 @@ como acabamos con `event_catalog` sirviendo el almacén entero a todo el mundo.
 ### 6.5 Panel DJ / Staff (todas validan `is_tenant_staff` y escriben en `audit_logs`)
 
 - `admin_open_party(tenant, actor, name?)` → crea/devuelve la fiesta activa (10h).
+  **v23: ya NO clona el almacén.** La fiesta nace con cero filas, porque una
+  fiesta sin canciones del DJ significa "suena todo". `tracks` en la respuesta
+  es *lo que la sala puede votar*, no filas creadas.
 - `admin_set_now_playing(tenant, actor, event, track)` → marca "sonando"; conserva
   `played_at` de la anterior. **v23: pone `total_votes=0` y `last_vote_at=null`
   de la que empieza a sonar** — el contador del ranking se resetea, el registro
