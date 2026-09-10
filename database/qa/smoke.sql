@@ -418,6 +418,20 @@ begin
 		case when not exists(select 1 from event_tracks where event_id = v_sel)
 		     then 'ok' else 'FALLO' end);
 
+	-- Curar NO es operar.  Poner una canción necesita una fila donde guardar
+	-- el estado, pero no es elegir el repertorio: si contara como lista, el
+	-- DJ marcando la primera canción de la noche dejaría el catálogo en CERO
+	-- (la lista sería esa canción, y está sonando, así que se filtra).
+	delete from event_tracks where event_id = v_sel;
+	r := admin_set_now_playing_global(v_t, v_actor, v_sel, v_g);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','poner la 1ª sin curar · el catálogo NO se vacía',
+		(v_lib - 1)::text, v_n::text, case when v_n = v_lib - 1 then 'ok' else 'FALLO' end);
+	insert into qa values ('Selección','y esa fila no cuenta como lista del DJ','vote',
+		(select added_by from event_tracks where event_id = v_sel and global_track_id = v_g),
+		case when (select added_by from event_tracks where event_id = v_sel and global_track_id = v_g) = 'vote'
+		     then 'ok' else 'FALLO' end);
+
 	delete from track_votes  where event_id = v_sel;
 	delete from event_tracks where event_id = v_sel;
 	delete from tenant_events where id = v_sel;
