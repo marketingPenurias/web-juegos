@@ -86,6 +86,7 @@ siempre, así que las plantillas no acotaban nada y «Quitar» no quitaba.
 | Editar y una noche ya cerrada | Se queda como estaba · es histórico |
 | **Abrir Fiesta de Hoy** | **0 filas clonadas** · y la sala ve las 759 |
 | Volver a pulsar «Abrir Fiesta» | Devuelve la misma · no duplica |
+| Votos en el desplegable de la batalla | En vivo · el DJ no recarga |
 
 ### Reset de votos al pinchar · v23
 

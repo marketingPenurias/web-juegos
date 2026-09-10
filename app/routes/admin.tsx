@@ -52,21 +52,6 @@ type EventTrack = GlobalTrack & {
 	/** ¿Ha elegido el DJ algo esta noche? Igual en todas las filas. */
 	curated: boolean;
 };
-/**
- * Una canción tal y como la ve la sala esta noche (RPC `event_catalog`).
- *
- *   `event_track_id` es null mientras nadie la haya tocado: desde v23 la fila
- *   del evento se crea sólo cuando hace falta.  Por eso lo que identifica a
- *   una canción aquí es la del ALMACÉN, que siempre existe.
- */
-type CatalogTrack = {
-	global_track_id: string;
-	event_track_id: string | null;
-	title: string;
-	artist: string;
-	total_votes: number;
-	is_played: boolean;
-};
 type Battle = { id: string; status: string; ends_at: string } | null;
 type Metrics = { total_votes: number; tokens_spent_today: number; checkins_today: number; active_players: number };
 type Template = { id: string; name: string; created_at: string; track_count: number };
@@ -86,7 +71,6 @@ type Boot =
 			templates: Template[];
 			globalTracks: GlobalTrack[];
 			eventTracks: EventTrack[];
-			catalog: CatalogTrack[];
 			battle: Battle;
 			/** Secciones que fallaron al cargar (V20 · F1).  Vacío = todo OK. */
 			warnings: string[];
@@ -168,7 +152,6 @@ export default function Admin() {
 					curated: t.curated === true,
 				}),
 			),
-			catalog: (data.catalog as CatalogTrack[]) ?? [],
 			battle: (data.battle as Battle) ?? null,
 			warnings: (data.warnings as string[]) ?? [],
 		});
@@ -225,7 +208,21 @@ export default function Admin() {
 				b.total_votes - a.total_votes ||
 				a.title.localeCompare(b.title),
 			);
-			return { ...prev, eventTracks: next };
+
+			// `curated` es una bandera de la FIESTA que viaja repetida en cada
+			// fila.  El evento de Realtime sólo trae una canción, así que si se
+			// actualizara sólo esa, las demás seguirían creyendo que el DJ no
+			// ha elegido nada: la etiqueta diría "Suena todo" con lista puesta,
+			// y el desplegable de la batalla ofrecería temas que la sala ya no
+			// ve.  Se recalcula sobre el conjunto, que además lo corrige solo
+			// cuando el DJ quita su última canción.
+			const curated = next.some((t) => t.in_list);
+			return {
+				...prev,
+				eventTracks: curated === next[0]?.curated
+					? next
+					: next.map((t) => ({ ...t, curated })),
+			};
 		});
 	}, []);
 
@@ -387,7 +384,7 @@ export default function Admin() {
 		return <Center><Lock className="w-12 h-12 text-rose-500" /><h1 className="text-2xl font-black italic text-white mt-3">Acceso restringido</h1><p className="text-zinc-400 mt-1">Tu cuenta no tiene rol de staff en este local.</p></Center>;
 	}
 
-	const { event, eventsHistory, templates, globalTracks, eventTracks, catalog, battle, warnings } = boot;
+	const { event, eventsHistory, templates, globalTracks, eventTracks, battle, warnings } = boot;
 	// "Ya está en la fiesta" = está en la SELECCIÓN del DJ.  Antes bastaba con
 	// que existiera fila, y desde v23 hay filas que sólo guardan estado (un
 	// voto, la que suena) sin que el DJ la haya elegido.
@@ -452,7 +449,7 @@ export default function Admin() {
 							<div className="flex flex-col gap-5">
 								<BattlePanel
 									battle={battle}
-									tracks={catalog}
+									tracks={eventTracks}
 									busy={busy}
 									onStart={(trackA, trackB, minutes) => run("start_battle", { event_id: event.id, track_a: trackA, track_b: trackB, minutes }, "¡Batalla iniciada!")}
 									onForceClose={() => run("force_close_battle", { event_id: event.id }, "Batalla cerrada")}
@@ -710,7 +707,7 @@ function MetricsRow({ metrics }: { metrics: Metrics | null }) {
 }
 
 function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
-	battle: Battle; tracks: CatalogTrack[]; busy: boolean;
+	battle: Battle; tracks: EventTrack[]; busy: boolean;
 	onStart: (trackA: string, trackB: string, minutes: number) => void;
 	onForceClose: () => void;
 }) {
@@ -719,9 +716,21 @@ function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
 	const [trackB, setTrackB] = useState("");
 	const live = battle && battle.status === "live";
 
-	// Sólo pistas elegibles: no sonadas (el RPC también lo valida server-side,
-	// y además comprueba que sigan visibles en el catálogo del evento).
-	const eligible = tracks.filter((t) => !t.is_played);
+	// Elegibles: las que la SALA puede votar ahora mismo.  Es la misma regla
+	// que aplica `event_catalog` en SQL, repetida aquí a sabiendas.
+	//
+	//   Se hacía leyendo el catálogo del servidor, pero ése sólo llegaba al
+	//   cargar la página: el contador de votos del desplegable se quedaba
+	//   congelado toda la noche, y el DJ no recarga.  La pista sí se actualiza
+	//   por Realtime, así que la batalla se sirve de ella.
+	//
+	//   Repetir una regla suele salir caro, pero aquí la deriva es inofensiva:
+	//   `admin_start_battle_global` vuelve a validar contra el catálogo de
+	//   verdad y rechaza con `invalid_tracks`.  Si esto se desalinea, el DJ ve
+	//   un error — no una batalla con una canción que nadie puede votar.
+	const eligible = tracks.filter(
+		(t) => !t.is_played && !t.excluded && (t.in_list || !t.curated),
+	);
 	const canStart = !!trackA && !!trackB && trackA !== trackB;
 
 	return (
@@ -766,7 +775,7 @@ function BattlePanel({ battle, tracks, busy, onStart, onForceClose }: {
 
 function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 	label: string; value: string; onChange: (v: string) => void;
-	tracks: CatalogTrack[]; disabledId: string; accent: "cyan" | "amber";
+	tracks: EventTrack[]; disabledId: string; accent: "cyan" | "amber";
 }) {
 	const ring = accent === "cyan" ? "border-cyan-500/40" : "border-amber-500/40";
 	return (
@@ -779,11 +788,7 @@ function BattleSelect({ label, value, onChange, tracks, disabledId, accent }: {
 			>
 				<option value="">— Elegir canción —</option>
 				{tracks.map((t) => (
-					<option
-						key={t.global_track_id}
-						value={t.global_track_id}
-						disabled={t.global_track_id === disabledId}
-					>
+					<option key={t.id} value={t.id} disabled={t.id === disabledId}>
 						{t.title} · {t.artist} ({t.total_votes})
 					</option>
 				))}
