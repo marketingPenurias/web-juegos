@@ -399,6 +399,25 @@ begin
 	insert into qa values ('Selección','el DJ quita una · desaparece de verdad','2',
 		v_n::text, case when v_n = 2 then 'ok' else 'FALLO' end);
 
+	-- Vetar (v23 · paso perezoso): "Quitar" pasa a ser "excluir de esta
+	-- noche", y deshacerlo tiene que borrar la fila — si sólo se apaga el
+	-- veto, esa fila queda como "lista del DJ de una canción" y la fiesta se
+	-- vacía.  Es la trampa del voto por otro lado; la cazó este banco.
+	delete from event_tracks where event_id = v_sel;
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g, true);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','vetar una · suena todo menos ésa',
+		(v_lib - 1)::text, v_n::text, case when v_n = v_lib - 1 then 'ok' else 'FALLO' end);
+
+	r := admin_exclude_track(v_t, v_actor, v_sel, v_g, false);
+	select count(*) into v_n from event_catalog(v_sel, 5000, null);
+	insert into qa values ('Selección','deshacer el veto · vuelve todo',
+		v_lib::text, v_n::text, case when v_n = v_lib then 'ok' else 'FALLO' end);
+	insert into qa values ('Selección','y no deja fila detrás','0',
+		(select count(*)::text from event_tracks where event_id = v_sel),
+		case when not exists(select 1 from event_tracks where event_id = v_sel)
+		     then 'ok' else 'FALLO' end);
+
 	delete from track_votes  where event_id = v_sel;
 	delete from event_tracks where event_id = v_sel;
 	delete from tenant_events where id = v_sel;
